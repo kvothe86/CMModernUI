@@ -1,0 +1,2 @@
+A Team report item in the squad screen's Assistant menu (needs Assistant Pick): the assistant's best eleven and best backup eleven on their own screen. The selection is not changed.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: team_report=0 switches it off again.

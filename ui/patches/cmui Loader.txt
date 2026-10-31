@@ -1,0 +1,4 @@
+cmui, a modern look for CM 01/02 (after mike_appguy's design). This patch makes cm0102.exe load
+cmui.dll from the game folder before the game starts; without cmui.dll the game runs as usual.
+Every feature has its own "cmui - ..." patch: apply the ones you want (none is on without its patch).
+cmui.ini in the game folder can switch a feature off again (name=0). Unapply the loader to remove cmui.

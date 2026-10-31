@@ -1,0 +1,2 @@
+At 1280 wide or more: the squad's Position(s) view in two wide columns, a table of position, CA stars, average rating, condition, goals and appearances.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: squad_table=0 switches it off again.

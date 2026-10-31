@@ -1,0 +1,3 @@
+# cmui feature switch search_ability (needs the cmui Loader patch)
+EXPANDEXE
+006E502E: 00 01

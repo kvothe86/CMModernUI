@@ -1,0 +1,3 @@
+# cmui feature switch profile (needs the cmui Loader patch)
+EXPANDEXE
+006E5024: 00 01

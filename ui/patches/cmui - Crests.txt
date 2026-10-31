@@ -1,0 +1,2 @@
+Club crests, competition logos and flags (needs Data\cmui_crests.bin, made by install.py --crests).
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: crests=0 switches it off again.

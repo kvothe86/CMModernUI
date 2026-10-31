@@ -1,0 +1,3 @@
+# cmui feature switch menu_fixes (needs the cmui Loader patch)
+EXPANDEXE
+006E502C: 00 01

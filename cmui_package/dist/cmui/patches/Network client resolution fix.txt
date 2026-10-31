@@ -1,0 +1,2 @@
+Network games at a higher resolution: a joined player's screen is no longer scaled twice (everything too big, as if back at 800x600).
+Only the joined player needs it. Not needed with cmui: cmui.dll does the same. Harmless on the host and at 800x600.

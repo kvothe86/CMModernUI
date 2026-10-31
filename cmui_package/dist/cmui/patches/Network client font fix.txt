@@ -1,0 +1,2 @@
+Network games where host and joined player use different fonts (for example Traditional on the host, Futuristic on the joined player): texts such as the club name next to the player's name no longer go missing on the joined player's screen.
+Only the joined player needs it. Works with or without cmui. A text can run a few pixels past its box. Host and single player stay as they were.

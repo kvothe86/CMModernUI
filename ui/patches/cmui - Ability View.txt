@@ -1,0 +1,2 @@
+An "Ability" view in player search and the squad screen: position, age, CA and PA stars, value.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: search_ability=0 switches it off again.

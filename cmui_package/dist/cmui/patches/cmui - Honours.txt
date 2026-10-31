@@ -1,0 +1,2 @@
+A club's Honours list with a cup in gold, silver or bronze and the number of times after each place (needs Stats Table).
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: honours=0 switches it off again.

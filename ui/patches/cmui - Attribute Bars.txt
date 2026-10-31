@@ -1,0 +1,2 @@
+Attributes as bars with the value right of the bar, hidden attributes included.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: attribute_bars=0 switches it off again.

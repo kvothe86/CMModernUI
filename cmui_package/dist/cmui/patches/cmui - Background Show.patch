@@ -1,0 +1,3 @@
+# cmui feature switch background_show (needs the cmui Loader patch)
+EXPANDEXE
+006E503B: 00 01

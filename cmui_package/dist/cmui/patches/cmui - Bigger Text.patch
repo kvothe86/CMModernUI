@@ -1,0 +1,3 @@
+# cmui feature switch bigger_text (needs the cmui Loader patch)
+EXPANDEXE
+006E5038: 00 01

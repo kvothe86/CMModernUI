@@ -1,0 +1,2 @@
+Scouts' Rec stars from Mad Scientist's intrinsic weights, rated against the scout's own club's squad; a scout's judging sets how far off he is.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: scout_stars=0 switches it off again.

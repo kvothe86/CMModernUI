@@ -1,0 +1,2 @@
+Player comparison: P1/P2 boxes, radar, pitches, season.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: compare_screen=0 switches it off again.

@@ -1,0 +1,2 @@
+Club header band with crest on club screens.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: club_header=0 switches it off again.

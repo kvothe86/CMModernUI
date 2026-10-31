@@ -1,0 +1,2 @@
+Dark palette, flat background and flat menu bar (written to Data\gcui.mbr etc. at start).
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: theme=0 switches it off again.

@@ -1,0 +1,2 @@
+A player's last injuries and bans on Injuries & Bans.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: injury_history=0 switches it off again.

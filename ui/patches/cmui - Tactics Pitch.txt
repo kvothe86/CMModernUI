@@ -1,0 +1,2 @@
+Tactics pitch with shirts and pills; in a match live condition and position.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: tactics_pitch=0 switches it off again.

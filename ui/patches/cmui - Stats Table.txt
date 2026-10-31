@@ -1,0 +1,2 @@
+Player stats table with pills and flat -/+ buttons.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: stats_table=0 switches it off again.

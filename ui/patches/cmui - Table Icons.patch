@@ -1,0 +1,3 @@
+# cmui feature switch table_icons (needs the cmui Loader patch)
+EXPANDEXE
+006E503A: 00 01

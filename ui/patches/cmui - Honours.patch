@@ -1,0 +1,3 @@
+# cmui feature switch honours (needs the cmui Loader patch)
+EXPANDEXE
+006E5032: 00 01

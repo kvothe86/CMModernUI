@@ -1,0 +1,76 @@
+# Feature switches, exe patches, dsound stand-in
+
+## The 28 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+
+| # | Name | Const | Covers |
+|---|---|---|---|
+| 0 | `theme` | `THEME_ON` | palette, flat background, menu bar pictures |
+| 1 | `tabs` | `TABS` | flat tab buttons, active tab marked |
+| 2 | `attribute_bars` | `ATTRIBUTE_BARS` | attribute bars |
+| 3 | `crests` | `CRESTS_ON` | crests, competition logos, flags (needs `Data\cmui_crests.bin`) |
+| 4 | `profile` | `PROFILE` | info strip, three panels, CA/PA |
+| 5 | `stats_table` | `STATS_TABLE` | stats table pills; also gates `comp::flip` and competition text |
+| 6 | `news` | `NEWS` | news restyle, links, Mark all read |
+| 7 | `club_header` | `CLUB_HEADER` | club header band |
+| 8 | `squad_list` | `SQUAD_LIST` | squad fit, form, headers |
+| 9 | `tactics_pitch` | `TACTICS_PITCH` | pitch, list columns, live data |
+| 10 | `match_screen` | `MATCH_SCREEN` | match overview |
+| 11 | `compare_screen` | `COMPARE_SCREEN` | compare |
+| 12 | `menu_fixes` | `MENU_FIXES` | menu bar icons, dark dropdowns, arrows, network "Contacting Server" box |
+| 13 | `status_bars` | `STATUS_BARS` | morale / condition bars |
+| 14 | `search_ability` | `SEARCH_ABILITY` | Ability view in search and squad |
+| 15 | `scout_stars` | `SCOUT_STARS` | scout Rec stars |
+| 16 | `assistant_pick` | `ASSISTANT_PICK` | Assistant button |
+| 17 | `team_report` | `TEAM_REPORT` | Team report item in that button's menu (squad screen; needs `assistant_pick`) |
+| 18 | `honours` | `HONOURS` | cups and counts on a club's Honours list (needs `stats_table`) |
+| 19 | `export_button` | `EXPORT_BUTTON` | Print called Export, clear of the crest, always to a file |
+| 20 | `injury_history` | `INJURY_HISTORY` | last injuries and bans on Injuries & Bans |
+| 21 | `transfer_history` | `TRANSFER_HISTORY` | moves on the Transfer tab |
+| 22 | `compare_report` | `COMPARE_REPORT` | staff lines on Compare Players (needs `compare_screen`) |
+| 23 | `scout_screen` | `SCOUT_SCREEN` | Full scout report chip and screen |
+| 24 | `bigger_text` | `BIGGER_TEXT` | larger fonts where a text fits its box, 1280 wide or more (`font_up`, `roomier_font`) |
+| 25 | `squad_table` | `SQUAD_TABLE` | squad's Position(s) view as a table in two wide columns, 1280 wide or more |
+| 26 | `table_icons` | `TABLE_ICONS` | league table's C, P, Pl, R boxes as a cup and arrows (`comp::text`; needs `stats_table`) |
+| 27 | `background_show` | `BACKGROUND_SHOW` | Background Changes on: panel-coloured pixels let the picture through at the flip (`keep_picture`, `let_picture_through`); how much in cmui.ini |
+
+Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where
+the exe's byte is 0 (`exe_switches`), then reads `cmui.ini`: `name=0` off, missing names written
+as `name=1`. So **the ini can only switch off what the exe allows**; read once at start. `theme=0`
+keeps the game's palette and picture. Settings that are not switches in the same file:
+`hide_ca_pa`, `profile_details`, `background_opacity` (0-100, % of the picture behind the panels, default 30; read every half second, in force from the next full frame) (`setting` / `set_setting`).
+
+**`cmui_config.bat`** (with `cmui_config.ps1`, copied next to the DLL by `install_all.ps1`): a window with a box per switch, Hide CA/PA, Profile details and the opacity slider, saved in the `cmui.ini` beside it; lines it does not know stay. A new switch goes in its `$switches` list too. `-Ini <file> -Test` unticks Tabs, saves to that file and writes `<file>.png` of the window.
+
+## The exe's switch bytes
+
+`make_exe.py` writes `cm0102_ui.exe` from `cm0102.exe`: a loader stub (entry point -> push
+"cmui.dll", `LoadLibraryA`, jmp 0x547a13) in the `.nick` section (or a `.cmui` section), the mark
+`CMUI` at stub+0x1c and one byte per feature at stub+0x20 (`FEATURES = 28`, all 1).
+`make_patches.py "<cm0102.exe>"` writes the same as CM0102Patcher misc patches into `patches\`
+(`cmui Loader` + `cmui - <Title>` per switch + `cmui - Everything`); `--test exe out [a,b]` applies
+them like the patcher. `install.py "<game>" [--check|--off a,b|--crests|--badges|--uninstall|--list]`
+checks the hook sites, writes the exe, DLL and ini.
+
+**Add a switch to an existing exe: `python set_switch.py "<folder>" <index> [0|1]`. Never rebuild
+an exe with `make_exe.py` to add one** (it drops patches made to that exe). Adding a feature means
+touching five places: `FEATURES` + const in `lib.rs`, `FEATURES` in `make_exe.py` (count),
+`make_patches.py`, `install.py` and `cmui_config.ps1` lists, then `set_switch.py` on every game folder, then
+`install_all.ps1` (the hard rule: main `E:\CM0102` too). `set_switch.py` keeps its first backup
+per index: an older `cm0102_ui_before_switch<index>.exe` in the folder makes its "no other byte
+changed" check fail after the byte is written (2026-10-30, F Restructured, a backup of
+2026-10-27); run it again to see "already 1".
+
+## dsound stand-in (`E:\CM0102\dsfix`)
+
+A C-Media sound driver DLL (HsSrv.dll) wants dsound ordinal 12, which cmfix's `dsound.dll` (only
+`DirectSoundCreate`) lacks ("ordinal 12 not found in HsSrv.dll"). `dsfix` is a Rust DLL
+(`dsfix\src\lib.rs`) exporting all of dsound: `DirectSoundCreate` goes to `cmfix_dsound.dll`
+(cmfix's, renamed), the rest to Windows' own dsound loaded by full path. `dsfix\install.ps1`
+renames cmfix's file (only if it contains "cmfix"), copies the stand-in as `dsound.dll` into the
+same seven game folders as `install_all.ps1`, hash-checks each. FIXES "Network client".
+
+## Inconsistencies noticed
+
+- `..\README.md` still says "15 switch bytes" / "15 hook sites" / "all 16 not detected" in places;
+  the code has 28 (`FEATURES` in `lib.rs`, `make_exe.py`, `make_patches.py`, `install.py` all 28).
+  The hook-site count in `install.py` was not re-verified.

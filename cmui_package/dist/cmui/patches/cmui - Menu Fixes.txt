@@ -1,0 +1,2 @@
+Menu bar without boxes: an icon over each item, the open one marked gold; dark dropdown menus, arrow icons.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: menu_fixes=0 switches it off again.

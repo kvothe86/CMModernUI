@@ -1,0 +1,2 @@
+A line from the assistant and two coaches on who is better under the pitches of Compare Players (needs Compare Screen).
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: compare_report=0 switches it off again.

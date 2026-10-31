@@ -1,0 +1,15 @@
+[package]
+name = "cmui"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+save_check = [] # a local scout.rs test against a save
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

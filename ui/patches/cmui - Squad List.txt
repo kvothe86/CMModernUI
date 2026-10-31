@@ -1,0 +1,2 @@
+Squad list with fitness, form boxes and uniform headers.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: squad_list=0 switches it off again.

@@ -1,0 +1,2 @@
+A player's moves since the game began on the Transfer tab.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: transfer_history=0 switches it off again.

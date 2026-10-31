@@ -1,0 +1,2 @@
+Player profile in mike_appguy's layout: info strip, reputation / status / positions panels, CA/PA stars, an injury cross by the condition.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: profile=0 switches it off again.

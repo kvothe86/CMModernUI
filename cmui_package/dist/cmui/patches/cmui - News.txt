@@ -1,0 +1,2 @@
+News restyled: gold selection, flat dates, story header with crests, clickable club row.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: news=0 switches it off again.

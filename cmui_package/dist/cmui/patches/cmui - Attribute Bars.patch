@@ -1,0 +1,3 @@
+# cmui feature switch attribute_bars (needs the cmui Loader patch)
+EXPANDEXE
+006E5022: 00 01

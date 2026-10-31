@@ -1,0 +1,2 @@
+Flat tab buttons with the active tab marked.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: tabs=0 switches it off again.

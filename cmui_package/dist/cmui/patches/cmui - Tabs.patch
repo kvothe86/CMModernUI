@@ -1,0 +1,3 @@
+# cmui feature switch tabs (needs the cmui Loader patch)
+EXPANDEXE
+006E5021: 00 01

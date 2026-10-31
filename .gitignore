@@ -1,0 +1,42 @@
+# This folder is the game itself: everything is left out except what is named here.
+/*
+!/.gitignore
+!/LICENSE
+!/README.md
+!/ui/
+!/net/
+!/cmui_package/
+
+target/
+__pycache__/
+*.log
+*.dll
+*.zip
+*.png
+*.bmp
+*.pdf
+*.sav
+
+# the two ready-made DLLs
+!/cmui_package/dist/cmui/cmui.dll
+!/net/package/wsock32.dll
+
+# ui: test runs, shots and the scripts tied to one machine or its saves
+/ui/night*/
+/ui/check/
+/ui/proof/
+/ui/shelved/
+/ui/save_check/
+/ui/check.ps1
+/ui/suite.ps1
+/ui/retest.ps1
+/ui/net_*.ps1
+/ui/install_all.ps1
+/ui/showcase.py
+/ui/sheet.py
+/ui/NETWORK*_PLAN.md
+
+# cmui_package: only the ready-made folder and the licence notes
+/cmui_package/*
+!/cmui_package/dist/
+!/cmui_package/LICENCES.md

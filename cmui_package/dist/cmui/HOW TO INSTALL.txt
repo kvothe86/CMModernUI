@@ -1,0 +1,114 @@
+cmui - a modern dark look for Championship Manager 01/02
+How to install (about 5 minutes)
+========================================================
+
+WHAT YOU NEED
+- Championship Manager 01/02, version 3.9.68 (the usual patched version).
+- Nick's CM0102Patcher (CM0102Patcher.exe). Most players already have it.
+- This folder.
+
+BEFORE YOU START
+- Close the game.
+- Make a backup copy of cm0102.exe (copy it and name the copy cm0102_backup.exe).
+  Your saves are never touched by cmui.
+
+
+STEP 1 - Copy one file into your game folder
+---------------------------------------------
+Copy  cmui.dll  from this folder into your game folder (the folder with cm0102.exe in it).
+
+
+STEP 2 - Pick your screen resolution (optional)
+-----------------------------------------------
+If you want another resolution, do it now in the patcher, as usual:
+  Browse (pick your cm0102.exe), tick "Change screen resolution to:", pick a size, Apply.
+cmui works at every size the patcher offers (tested at 800x600, 1280x800 and 1680x1050).
+You can also change the resolution later; cmui adjusts itself the next time the game starts.
+
+
+STEP 3 - Add cmui to the game with the patcher
+----------------------------------------------
+1. Start CM0102Patcher.exe.
+2. Click "Browse" and pick your cm0102.exe (skip this if it is already picked).
+3. Click "Tools...".
+4. Click "Apply Patchfile...".
+5. Open the "patches" folder in this cmui folder and pick:
+       cmui - Everything.patch
+6. The patcher says "Patch applied successfully!". Close the patcher.
+
+That's it. Start the game with cm0102.exe as always.
+
+Want only some of the features? Instead of "cmui - Everything.patch", apply
+"cmui Loader.patch" first and then the feature patches you want, one at a time
+("cmui - Theme.patch", "cmui - Player Profile.patch", ...). Each .txt next to a patch says
+what it does.
+
+
+PLAYING ONLINE (Hamachi / network games)
+----------------------------------------
+Everyone in the game (the host and every player who joins) should install cmui, the
+same version. The host's computer looks up the club, player and match details that cmui
+shows on the other players' screens, so the host needs it too.
+Different resolutions per player are fine.
+
+Not cmui, but in the patches folder for network players: "Discipline Player network
+fix.patch". With Nick's "Enable idle sensitivity" option on the host, a joined player gets
+stuck on the Discipline Player screen. Only the HOST applies it (Tools... > Apply Patchfile...,
+like above). The fix is by EertThgil with davdav, from champman0102.co.uk
+(viewtopic.php?p=164857).
+
+Also there for network players, applied the same way:
+- "Network client font fix.patch": the host and a joined player use different fonts and texts
+  such as the club name go missing on the joined player's screen. Only the joined player
+  applies it. Works with or without cmui.
+- "Network client resolution fix.patch": for a game WITHOUT cmui (cmui already does this): a
+  joined player's screen is scaled twice at a higher resolution. Only the joined player
+  applies it.
+
+
+CLUB CRESTS, LEAGUE LOGOS AND FLAGS (optional)
+----------------------------------------------
+For copyright reasons the pictures are not in this download; you fetch them yourself
+once. This needs Python 3 (https://www.python.org/downloads/ - tick "Add python.exe to
+PATH" during setup). Then open a command window in this cmui folder and type:
+    pip install -r requirements.txt
+    python install.py "C:\path\to\your game folder" --crests
+It takes a few minutes and writes Data\cmui_crests.bin into your game folder.
+Without it, everything else works; you just don't see crests.
+
+
+TURNING A FEATURE OFF
+---------------------
+After the first start there is a file cmui.ini in your game folder. Open it with
+Notepad, change a 1 to 0 (for example  news=0 ), save, and restart the game.
+The names are explained in README.txt.
+
+
+GETTING RID OF CMUI
+-------------------
+Put your backup back: delete cm0102.exe and rename cm0102_backup.exe to cm0102.exe.
+Then delete cmui.dll, cmui.ini and cmui.log from the game folder.
+(Without cmui.dll the game also simply starts without cmui.)
+
+
+SOMETHING WRONG?
+----------------
+- The game looks the same as before: cmui.dll is not in the game folder, or the patch
+  was applied to another cm0102.exe than the one you start.
+- Look at cmui.log in the game folder; it lists what cmui did or could not do.
+- On small screens (800x600) the player profile has a "More" button next to ABILITY: it
+  swaps the season stats for the reputation, player status and positions panels ("Less"
+  swaps back).
+
+
+NO PATCHER? THE OTHER WAY
+-------------------------
+With Python installed (see the crests part above) you can let the installer do it
+instead of the patcher. It leaves cm0102.exe alone and makes a copy, cm0102_ui.exe,
+that you start instead:
+    python install.py "C:\path\to\your game folder"
+Or drag your game folder onto install.bat.
+
+
+Thanks to mike_appguy for the design this follows, and to Nick for CM0102Patcher.
+cmui is an unofficial fan mod.

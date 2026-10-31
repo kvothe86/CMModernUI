@@ -1,0 +1,2 @@
+cmui with every feature: the "cmui Loader" patch and all "cmui - ..." feature patches in one
+file. Needs cmui.dll in the game folder. cmui.ini can switch features off again (name=0).

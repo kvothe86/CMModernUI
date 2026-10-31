@@ -1,0 +1,2 @@
+Match overview: crests by the scores, events, key stats, last-5 bar, HALF/FULL TIME.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: match_screen=0 switches it off again.

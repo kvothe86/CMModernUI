@@ -1,0 +1,13 @@
+# Discipline Player in network games: a client stays locked on the Discipline Player screen when
+# the host's exe has Nick's "Enable idle sensitivity" (its v2.26 extras clobber EBX). Only the host
+# needs it. By EertThgil with davdav, champman0102.co.uk/viewtopic.php?p=164857 (2026-08-11):
+# the idle code at 0x6dd180 now keeps EBX (push / pop) and the game's jump into it starts a byte
+# earlier.
+001A8A11: 6B 6A
+006DD17F: 00 53
+006DD18A: E9 5B
+006DD18B: 86 E9
+006DD18C: 08 85
+006DD18D: 7C 08
+006DD18E: FF 7C
+006DD18F: 00 FF

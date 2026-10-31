@@ -1,0 +1,2 @@
+With Background Changes on: the dark panels let the picture through.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: background_show=0 switches it off again.

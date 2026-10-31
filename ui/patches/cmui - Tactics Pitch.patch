@@ -1,0 +1,3 @@
+# cmui feature switch tactics_pitch (needs the cmui Loader patch)
+EXPANDEXE
+006E5029: 00 01

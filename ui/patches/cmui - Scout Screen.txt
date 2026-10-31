@@ -1,0 +1,2 @@
+A Full scout report chip on "<club> scouting completed" stories: the eleven the scout expects, in the shape the manager prefers, without those injured or banned, and his report.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: scout_screen=0 switches it off again.

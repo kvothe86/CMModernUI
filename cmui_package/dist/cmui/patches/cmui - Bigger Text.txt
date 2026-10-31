@@ -1,0 +1,2 @@
+At 1280 wide or more: buttons, tabs, the rows of a profile's tabs and the Position(s) view in a larger font where the text fits its box.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: bigger_text=0 switches it off again.

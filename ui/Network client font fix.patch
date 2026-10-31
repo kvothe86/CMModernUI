@@ -1,0 +1,52 @@
+# Network games where the host and the client use different fonts (Traditional on the host,
+# Futuristic on the client): the host lays a screen out with its own font, so every text item's
+# box is exactly as wide as the text in the host's font (Text::draw_wrapped adds one item per line
+# and per linked phrase, such as the club name next to the player's name). In the client's wider
+# font the text no longer fits, and the text box draw (0x5e6d80) cuts a line that does not fit
+# back to its last space: a one-word club name is cut to nothing, longer texts lose words.
+# On a network client only, a box that does not wrap now keeps its whole text (it can run a few
+# pixels past the box). Host, single player and wrapping boxes do as before. Code in .nick at 0xdf2040.
+EXPANDEXE
+001E6F6D: 0F E9
+001E6F6E: 8E CE
+001E6F6F: 90 B0
+001E6F70: 00 80
+001E6F72: 00 90
+006E7040: 00 0F
+006E7041: 00 8E
+006E7042: 00 BD
+006E7043: 00 4F
+006E7044: 00 7F
+006E7045: 00 FF
+006E7046: 00 F6
+006E7047: 00 84
+006E7048: 00 24
+006E7049: 00 E1
+006E704A: 00 02
+006E704D: 00 01
+006E704E: 00 75
+006E704F: 00 17
+006E7050: 00 83
+006E7051: 00 3D
+006E7052: 00 90
+006E7053: 00 7C
+006E7054: 00 B7
+006E7057: 00 74
+006E7058: 00 0E
+006E7059: 00 83
+006E705A: 00 3D
+006E705B: 00 80
+006E705C: 00 7C
+006E705D: 00 B7
+006E7060: 00 75
+006E7061: 00 05
+006E7062: 00 E9
+006E7063: 00 9C
+006E7064: 00 4F
+006E7065: 00 7F
+006E7066: 00 FF
+006E7067: 00 E9
+006E7068: 00 07
+006E7069: 00 4F
+006E706A: 00 7F
+006E706B: 00 FF

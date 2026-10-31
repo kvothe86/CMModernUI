@@ -1,0 +1,2 @@
+An Assistant button on the squad screen: best team, most fit team, squad rotation or clear team, with captain and set piece takers, as the assistant manager judges the players.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: assistant_pick=0 switches it off again.

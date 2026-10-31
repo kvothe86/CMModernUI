@@ -1,0 +1,2 @@
+The Print dropdown of club and competition screens is called Export; on club screens it stands clear of the crest and always writes a file.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: export_button=0 switches it off again.

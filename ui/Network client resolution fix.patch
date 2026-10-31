@@ -1,0 +1,65 @@
+# Network games at a higher resolution: a client is sent the host's screen with every area and
+# widget rect already scaled, and adds them with Display::add_area / add_item, which the patcher's
+# resolution change hooks to scale from 800x600: the client scaled them twice (1.75 times too big
+# at 1680x1050). The client's packet handler (0x564080) now calls add_area / add_item past that
+# hook (stubs in .nick at 0xdf2000 / 0xdf2010 run the hook's moved instruction only). Where the
+# exe has the bigger-fonts step (jmp at 0x55fa14) the client's font is taken one down first, as
+# the host stepped it already. Only the client's packet handler changes: host and single player
+# untouched; on an exe without the resolution change the stubs do what the game did.
+EXPANDEXE
+00164C32: 6A CA
+00164C33: AF D3
+00164C34: FF 88
+00164C35: FF 00
+00165C12: 7A FA
+00165C13: 9D C3
+00165C14: FF 88
+00165C15: FF 00
+006E7000: 00 A1
+006E7001: 00 0C
+006E7002: 00 29
+006E7003: 00 AE
+006E7005: 00 E9
+006E7006: 00 9B
+006E7007: 00 DB
+006E7008: 00 76
+006E7009: 00 FF
+006E7010: 00 80
+006E7011: 00 3D
+006E7012: 00 14
+006E7013: 00 FA
+006E7014: 00 55
+006E7016: 00 E9
+006E7017: 00 75
+006E7018: 00 04
+006E7019: 00 FF
+006E701A: 00 4C
+006E701B: 00 24
+006E701C: 00 30
+006E701D: 00 81
+006E701E: 00 3D
+006E701F: 00 95
+006E7020: 00 F9
+006E7021: 00 55
+006E7023: 00 90
+006E7024: 00 90
+006E7025: 00 81
+006E7026: 00 EC
+006E7027: 00 75
+006E7028: 00 0C
+006E7029: 00 66
+006E702A: 00 8B
+006E702B: 00 91
+006E702C: 00 A0
+006E702D: 00 E9
+006E702E: 00 12
+006E7030: 00 E9
+006E7031: 00 62
+006E7032: 00 D9
+006E7033: 00 76
+006E7034: 00 FF
+006E7035: 00 E9
+006E7036: 00 56
+006E7037: 00 D9
+006E7038: 00 76
+006E7039: 00 FF

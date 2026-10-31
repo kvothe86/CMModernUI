@@ -1,0 +1,3 @@
+# cmui feature switch status_bars (needs the cmui Loader patch)
+EXPANDEXE
+006E502D: 00 01
