@@ -274,7 +274,7 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // the menu bar's button boxes: none (`sidebar_item` draws the buttons, the click areas stay
         // the game's boxes); an open or pressed one (0x1061) gets a lighter band with a gold edge
         let (sw, sh) = screen();
-        if theme && on(MENU_FIXES) && x2 <= sw * 8 / 100 && (flags == 0x1021 || flags == 0x1061) {
+        if theme && on(MENU_FIXES) && x2 <= bar_end(sw) && (flags == 0x1021 || flags == 0x1061) {
             // (a closed one the bar's own colour: what the open state or a dropdown left is cleared)
             if flags == 0x1061 && y1 > sh * 15 / 100 {
                 fill(x1, y1, x2 + 1, y2 + 1, [0x2c, 0x31, 0x38]);
@@ -342,6 +342,27 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         }
         if theme && flags & (PANEL_HGRAD | PANEL_VGRAD) != 0 && flags & PANEL_DARKEN == 0 {
             flags = flags & !(PANEL_HGRAD | PANEL_VGRAD) | PANEL_FILL;
+        }
+        // the game's grey widgets in steel blue: buttons and dropdowns keep their bevel (0x40:
+        // pressed, lighter), the clickable cells of a list (dates, positions, numbers) a quieter
+        // blue, column heads go flat, a stats cell without a value goes altogether
+        // (not the scrollbars' narrow parts: `news::scrollbars` draws those)
+        if theme && on(MODERN_BUTTONS) && flags & !0x40 == 0x30 {
+            if is_colour(colour & 0xffff, 0x39e8) {
+                colour = colour & !0xffff | rgb([0x2a, 0x3a, 0x4c]) as u32;
+            }
+            if is_colour(low, 0x31a7) {
+                fill(x1, y1, x2 + 1, y2 + 1, AREA);
+                return;
+            }
+            if is_colour(low, 0x5acb) && x2 - x1 > sx(30) {
+                if y2 - y1 < sy(30) {
+                    fill(x1, y1, x2 + 1, y2 + 1, [0x26, 0x29, 0x2f]);
+                    fill(x1, y2, x2 + 1, y2 + 1, [0x3a, 0x3f, 0x47]);
+                    return;
+                }
+                colour = colour & !0xffff | rgb(if flags & 0x40 != 0 { [0x3a, 0x5c, 0x82] } else { [0x2b, 0x47, 0x66] }) as u32;
+            }
         }
         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1, x2, y2, flags, colour, extra);
         note_title(x1, y1, x2, y2);
@@ -699,6 +720,9 @@ unsafe fn story_header(rect: (i32, i32, i32, i32), head: &[u8], date: &[u8], fon
         }
     }
     let big = font & !0xffff | 7; // the title bar's font; a smaller one when it does not fit
+    // (a low header: the size that stays clear of the date under it)
+    let tall = |n: u32| game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)(n as i32);
+    let big = if small_screen() { font & !0xffff | (2..=7).rev().find(|&n| tall(n) * 5 / 4 <= h * 47 / 100).unwrap_or(2) } else { big };
     put(tx, y1 + 8, x2 - 16, y1 + h * 55 / 100, 0x9, big, GOLD, &latin1(head));
     put(tx, y1 + h * 52 / 100, x2 - 16, y1 + h * 80 / 100, 0x9, smaller(font, 2), GREY, &latin1(date));
     let dx = tx + text_width(smaller(font, 2), date) + 20;
@@ -1244,6 +1268,8 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             let size = (x2 - x1, y2 - y1);
             // the season stats table: flat headers, values coloured by column, Av R as a pill
             let t = s.trim_ascii();
+            // (a dropdown's rows start with five spaces: "Passing" or "Form" there is no profile's)
+            let dropdown = s.starts_with(b"     ");
             #[allow(static_mut_refs)]
             // (real game fonts only: 0xffff0001 and up; empty texts come with font 0, which draws
             // nothing and must never be picked to fit a text)
@@ -1348,7 +1374,8 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                         let small = if font & 0xffff > 1 { font - 1 } else { font };
                         let c = std::ffi::CString::new(label.clone()).unwrap();
                         let fw = game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(small, c.as_ptr());
-                        let (top, bottom) = (y2 + 2, y2 + 2 + h * 85 / 100);
+                        let top = y2 + if small_screen() { 5 } else { 2 };
+                        let bottom = top + h * 85 / 100;
                         pill(cx - fw / 2 - 7, top, cx + fw / 2 + 7, bottom, if fit >= 90 { [0x2e, 0x7d, 0x52] } else { [0x9a, 0x7a, 0x30] });
                         put(cx - fw / 2 - 7, top, cx + fw / 2 + 7, bottom, 0xc, small, WHITE, &label);
                     }
@@ -1410,10 +1437,16 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                     ROW_NAME = (y1, staff);
                     SQUAD_ROWS = true;
                     assistant::note_member(y1, x1, staff);
+                    // (a name too long wraps and shows its first word: the column one smaller font)
+                    if small_screen() && !packed {
+                        font = column_font(x1, x2, font, fit_font(font, text, x2 - x1));
+                    }
                     if packed {
                         // (the room a star player's star needs too)
                         let name = std::ffi::CString::new(s.iter().copied().filter(|&c| c != b'*').collect::<Vec<u8>>()).unwrap_or_default();
+                        // (one size in both columns of players)
                         let f = fit_font(font, name.as_ptr(), x2 - x1 - 6 - (y2 - y1));
+                        let f = if small_screen() { column_font(-1, 0, font, f) } else { f };
                         // (each name its own: the other column's row is at the same height)
                         TABLE_STAR = if star_player(SQUAD_CLUB, staff) { (y1, x1 + game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(f, name.as_ptr())) } else { (i32::MIN, 0) };
                         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(x1, y1, x2, y2, flags, f, colour, name.as_ptr(), -1);
@@ -1518,15 +1551,20 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                         _ => [0x4a, 0x50, 0x5a],
                     };
                     fill(x1, y1, x2, y2, AREA);
-                    pill(x1 + 2, y1 + 2, x2 - 2, y2 - 2, c);
-                    colour = rgb(WHITE) as u32;
+                    if rating > 0.0 || !on(MODERN_BUTTONS) {
+                        pill(x1 + 2, y1 + 2, x2 - 2, y2 - 2, c);
+                        colour = rgb(WHITE) as u32;
+                    }
                 } else {
                     colour = rgb(stats_colour(k)) as u32;
                 }
             }
+            if on(MODERN_BUTTONS) && (t == b"----" || t == b"---") {
+                colour = rgb(GREY) as u32;
+            }
             // mike_appguy keeps form, morale and condition out of the grid, in a panel of their own:
             // their rows are not drawn, the values are kept for the panel
-            let grid_sized = GRID.0 > 0 && (size.0 - GRID.0).abs() <= 2 && size.1 == GRID.1;
+            let grid_sized = !dropdown && GRID.0 > 0 && (size.0 - GRID.0).abs() <= 2 && size.1 == GRID.1;
             if let Some(k) = STATUS_LABELS.iter().position(|l| l.as_bytes() == s.trim_ascii()).filter(|_| on(PROFILE)) {
                 if grid_sized {
                     STATUS_LABEL = Some((k, y1));
@@ -1574,14 +1612,14 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             // a font from Game Settings): the largest font that fits
             let (sw, sh) = screen();
             // the menu bar's buttons: an icon over the label, no box
-            if on(MENU_FIXES) && on(THEME_ON) && x1 <= sx(12) && x2 <= sw * 8 / 100 && y1 > sh * 15 / 100 && y2 - y1 > sh * 5 / 100 && !t.is_empty() && !t.iter().any(|c| c.is_ascii_digit()) {
+            if on(MENU_FIXES) && on(THEME_ON) && x1 <= sx(12).max(16) && x2 <= bar_end(sw) && y1 > sh * 15 / 100 && y2 - y1 > sh * 5 / 100 && !t.is_empty() && !t.iter().any(|c| c.is_ascii_digit()) {
                 // (flags bit 0x20: a button the game has disabled here, "Add Manager" on the start
                 // screen: dim)
                 let colour = if flags & 0x20 != 0 { rgb([0x5a, 0x60, 0x68]) as u32 } else { colour };
                 sidebar_item(x1, y1, x2, y2, font, colour, t);
                 return;
             }
-            if on(MENU_FIXES) && x2 <= sw * 8 / 100 && y1 > sh * 15 / 100 && !t.is_empty() && !t.iter().any(|c| c.is_ascii_digit()) {
+            if on(MENU_FIXES) && x2 <= bar_end(sw) && y1 > sh * 15 / 100 && !t.is_empty() && !t.iter().any(|c| c.is_ascii_digit()) {
                 // the menu bar: one size for all its items, the largest every word fits in
                 // ("Competitions" no longer smaller than the rest)
                 let measure = |f: u32| game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(f, c"Mg".as_ptr());
@@ -1596,38 +1634,23 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 font = SIDEBAR_FONT.unwrap_or(font);
             } else if on(MENU_FIXES)
                 && value.is_none()
+                && !dropdown
                 && !s.trim_ascii().is_empty()
                 // (the hidden attributes, "Big Matches"..., only by their grid-sized box)
                 && (is_attribute_name(s.trim_ascii()) || (GRID.0 > 0 && (size.0 - GRID.0).abs() <= 2 && size.1 == GRID.1))
             {
                 font = attribute_font(font, x2 - x1);
-            } else if on(MENU_FIXES) && !t.is_empty() && !t.iter().any(|c| c.is_ascii_whitespace()) {
+            // ("Non Competitive" wraps to "Non" on a small screen: the labels one smaller font)
+            } else if on(MENU_FIXES) && !t.is_empty() && (!t.iter().any(|c| c.is_ascii_whitespace()) || (small_screen() && stats_label(t))) {
                 // one font a column (cells with one left and right edge): "98%" as small as the
                 // "100%" that needed it; a smaller one found later redraws the screen once
-                let f = fit_font(font, text, x2 - x1);
-                let measure = |f: u32| game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(f, c"Mg".as_ptr());
-                #[allow(static_mut_refs)]
-                match COLUMN_FONTS.iter_mut().find(|c| c.0 == (x1, x2, font)) {
-                    Some(c) => {
-                        if measure(f) < measure(c.1) {
-                            c.1 = f;
-                            REDRAW = true;
-                        }
-                        font = c.1;
-                    }
-                    None if f != font => {
-                        COLUMN_FONTS.push(((x1, x2, font), f));
-                        REDRAW = true;
-                        font = f;
-                    }
-                    None => {}
-                }
+                font = column_font(x1, x2, font, fit_font(font, text, x2 - x1));
             }
-            let named = value.is_none() && is_attribute_name(s.trim_ascii()); // labels are "  Name"
+            let named = value.is_none() && !dropdown && is_attribute_name(s.trim_ascii()); // labels are "  Name"
             if named {
                 GRID = size;
             }
-            let like_grid = (size.0 - GRID.0).abs() <= 2 && size.1 == GRID.1; // columns differ by a pixel
+            let like_grid = !dropdown && (size.0 - GRID.0).abs() <= 2 && size.1 == GRID.1; // columns differ by a pixel
             LAST_TEXT = (y1, value.is_none() && (named || like_grid));
             if LAST_TEXT.1 && GRID.0 > 0 && !s.trim_ascii().is_empty() {
                 // the empty rows under the attributes have grid-sized labels too
@@ -1667,13 +1690,16 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 }
                 // (fonts do not shrink with the bar: a small bar (800x600) lifts the name more;
                 // a national team has no league line under it)
-                if national_team(club) { 0 } else { (t.3 - t.1) * if t.3 - t.1 < 80 { 20 } else { 14 } / 106 }
+                if national_team(club) { 0 } else { (t.3 - t.1) * if t.3 - t.1 < 90 { 20 } else { 14 } / 106 }
             }
             None => 0,
         };
         let own_title = alone && HEADER_CLUB.is_some_and(|h| h.1 == (x1, y1, x2, y2));
         let font = if in_title { font } else { roomier_font(x1, y1, x2, y2, flags, font, text, caret) };
         let colour = if on(THEME_ON) && colour & 0xffff == rgb(AZURE_SLOT) as u32 & 0xffff { rgb(AZURE_TEXT) as u32 } else { colour };
+        // (flags bit 0x20: a disabled button's text, dim instead of the game's embossed look)
+        let disabled = on(MODERN_BUTTONS) && flags & 0x20 != 0;
+        let (flags, colour) = if disabled { (flags & !0x20, rgb([0x7c, 0x88, 0x96]) as u32) } else { (flags, colour) };
         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(x1, y1 - lift, x2, y2 - lift, flags, font, colour, text, caret);
         if !in_title && x1 > (t.0 + t.2) / 2 && x2 <= t.2 && y1 >= t.1 && y2 <= (t.1 + t.3) / 2 && (text.is_null() || std::ffi::CStr::from_ptr(text).to_bytes().trim_ascii() != EXPORT_LABEL) {
             // a dropdown in the bar's right half (Print, Action): the right crest stays left of it
@@ -1734,6 +1760,40 @@ unsafe fn put(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, colour:
 const TEXT_WIDTH: usize = 0x5e5ad0; // font_text_width(font, text) -> pixels
 /// The fonts the game has drawn with so far.
 static mut FONTS_SEEN: Vec<u32> = Vec::new();
+
+/// The font of a column of this screen (its left and right edge, the game's font): `f`, what this
+/// cell needs, or the smaller one another cell needed; a smaller one found later redraws once.
+#[allow(static_mut_refs)]
+unsafe fn column_font(x1: i32, x2: i32, font: u32, f: u32) -> u32 {
+    let measure = |f: u32| game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(f, c"Mg".as_ptr());
+    match COLUMN_FONTS.iter_mut().find(|c| c.0 == (x1, x2, font)) {
+        Some(c) => {
+            if measure(f) < measure(c.1) {
+                c.1 = f;
+                REDRAW = true;
+            }
+            c.1
+        }
+        None if f != font => {
+            COLUMN_FONTS.push(((x1, x2, font), f));
+            REDRAW = true;
+            f
+        }
+        None => font,
+    }
+}
+
+/// Below the flagship size: what is done only to make things fit on 800x600 and 1280x800 asks this,
+/// so 1680x1050 and up stay as they are.
+fn small_screen() -> bool {
+    screen().0 < 1680
+}
+
+/// The right end of the menu bar's buttons: 8% of a wide screen, the bar's own width on a small one
+/// (its picture is 126 wide, 90 at 800x600).
+fn bar_end(sw: i32) -> i32 {
+    (sw * 8 / 100).max(if sw > 800 { 130 } else { 95 })
+}
 
 /// `font` when the text fits in `width`, else the font seen so far that makes it widest while
 /// still fitting (the smallest one when none fits).
@@ -1809,12 +1869,14 @@ unsafe fn squad_table_row(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, text: *
         Some(v) if v >= 7.0 => GOLD,
         Some(_) => LIGHT,
     };
-    text_at(mid(2), y1, y2, f, shade, &rating, 1);
+    // (the numbers one font, the one "100%" fits its column in)
+    let n = if small_screen() { fit_font(f, c"100%".as_ptr(), lines[4] - lines[3] - 6) } else { f };
+    text_at(mid(2), y1, y2, n, shade, &rating, 1);
     if let Some(fit) = condition(staff).filter(|_| own) {
-        text_at(mid(3), y1, y2, f, fit_colour(fit), format!("{fit}%").as_bytes(), 1);
+        text_at(mid(3), y1, y2, n, fit_colour(fit), format!("{fit}%").as_bytes(), 1);
     }
-    text_at(mid(4), y1, y2, f, LIGHT, &season_stat(staff, 2), 1);
-    text_at(mid(5), y1, y2, f, LIGHT, &all_apps(&season_stat(staff, 1)), 1);
+    text_at(mid(4), y1, y2, n, LIGHT, &season_stat(staff, 2), 1);
+    text_at(mid(5), y1, y2, n, LIGHT, &all_apps(&season_stat(staff, 1)), 1);
     if TABLE_ROWS.len() < 120 {
         TABLE_ROWS.push((x1, w, y1, y2, font, if TABLE_STAR.0 == y1 { TABLE_STAR.1 } else { 0 }));
     }
@@ -2192,12 +2254,12 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 28] = [
+const FEATURES: [&str; 29] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
-    "squad_table", "table_icons", "background_show",
+    "squad_table", "table_icons", "background_show", "modern_buttons",
 ];
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
@@ -2213,6 +2275,7 @@ const BIGGER_TEXT: usize = 24;
 const SQUAD_TABLE: usize = 25;
 const TABLE_ICONS: usize = 26;
 const BACKGROUND_SHOW: usize = 27;
+const MODERN_BUTTONS: usize = 28;
 const THEME_ON: usize = 0;
 const TABS: usize = 1;
 const ATTRIBUTE_BARS: usize = 2;
@@ -3368,6 +3431,7 @@ unsafe fn tactics_row(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32
     let colour = if rgb_of.iter().sum::<u32>() < 120 || LIVE_TACTICS { rgb(LIGHT) as u32 } else { colour };
     let (name_end, cols) = tactics_columns(x1, x2, font, LIVE_TACTICS);
     let f = fit_font(font, text, name_end - x1 - 6);
+    let f = if small_screen() { column_font(x1, x2, font, f) } else { f };
     let measure = |t: *const i8| game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(f, t);
     let surname = std::ffi::CString::new(game_text(rd::<usize>(staff + 8), 51)).unwrap_or_default();
     // (the game draws nothing that does not fit: the surname then)
@@ -3937,6 +4001,15 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
             let mid = (y1 + y2) / 2;
             REF_TOP = y1;
             let caps = latin1(&label[..label.len() - 3]).to_uppercase();
+            // (a low band has no room for two lines: label and value side by side)
+            let tall = |f: u32| game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)((f & 0xffff) as i32);
+            if small_screen() && (y2 - y1) * 4 < (tall(font) + tall(smaller(font, 2))) * 5 {
+                let (lw, vw) = (text_width(smaller(font, 2), caps.as_bytes()) + 8, text_width(font, &value));
+                let left = [x, x - (lw + vw) / 2, x - lw - vw][align as usize];
+                text_at(left, y1, y2, smaller(font, 2), GREY, caps.as_bytes(), 0);
+                text_at(left + lw, y1, y2, font, GOLD, &value, 0);
+                return true;
+            }
             text_at(x, y1 + 4, mid, smaller(font, 2), GREY, caps.as_bytes(), align);
             text_at(x, mid - 2, y2 - 4, font, GOLD, &value, align);
             return true;
@@ -4167,7 +4240,9 @@ extern "C" fn glyph(x: i32, y: i32, colour: u32, g: *const u8) {
         } else if count(&mut (0..w).map(|c| (c, 0))) > count(&mut (0..w).map(|c| (c, h - 1))) { 1 } else { 3 }; // down, up
         let (cx, cy) = (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0);
         let s = w.max(h) as f32 * 0.75;
-        let c565 = colour as u16;
+        // (a dark button's arrow light; the arrows on a white or club-coloured title band stay)
+        let dark = |p: [u8; 3]| (p[0] as i32 + p[1] as i32 + p[2] as i32) < 330;
+        let c565 = if on(MODERN_BUTTONS) && pixel_at(x, y).is_some_and(dark) { rgb565(LIGHT) } else { colour as u16 };
         // a chevron: two strokes meeting at the tip
         let (tip, a, b) = match dir {
             0 => ((cx + s * 0.45, cy), (cx - s * 0.45, cy - s), (cx - s * 0.45, cy + s)),
@@ -4583,7 +4658,10 @@ unsafe fn compare_overlay() {
         if line >= 12 {
             for (k, view) in views.split(|&c| c == b'\n').take(3).enumerate() {
                 let y = y + k as i32 * line;
-                assistant::report_text(l + 14, y, l + pw - 14, y + line, f(2), line, view);
+                // (too long for its line: the sentence ends at its first half, not mid-way)
+                let cut = view.windows(2).rposition(|w| w == b", ").filter(|_| small_screen() && text_width(f(2), view) > pw - 28);
+                let short = [&view[..cut.unwrap_or(view.len())], if cut.is_some() { b"." } else { b"" }].concat();
+                assistant::report_text(l + 14, y, l + pw - 14, y + line, f(2), line, &short);
             }
         }
     }
@@ -5852,6 +5930,26 @@ unsafe fn no_club_tab_box() {
     }
 }
 
+/// A club's Landmarks: its rows a page come from the list's height, which a tall screen takes past
+/// the 30 an area may have ("Area.cpp 507", 0x403425). At most 30, where the pages are counted and
+/// where the list is made; the new code fits in the place of the old.
+unsafe fn landmarks_rows() {
+    const SITES: [(usize, &[u8], &[u8]); 2] = [
+        // mov ecx, eax; and ecx, 0xff -> push 30; pop ecx; cmp eax, ecx; cmovl ecx, eax
+        (0x46a604, &[0x8b, 0xc8, 0x81, 0xe1, 0xff, 0, 0, 0], &[0x6a, 0x1e, 0x59, 0x3b, 0xc1, 0x0f, 0x4c, 0xc8]),
+        // mov ebx, eax; movsx eax, [..]; and ebx, 0xff -> push 30; pop ebx; cmp eax, ebx; cmovl ebx, eax; movsx eax, [..]
+        (0x46a683, &[0x8b, 0xd8, 0x0f, 0xbf, 0x05, 0x7a, 0x7c, 0xb7, 0, 0x81, 0xe3, 0xff, 0, 0, 0], &[0x6a, 0x1e, 0x5b, 0x3b, 0xc3, 0x0f, 0x4c, 0xd8, 0x0f, 0xbf, 0x05, 0x7a, 0x7c, 0xb7, 0]),
+    ];
+    for (at, old, new) in SITES {
+        if std::slice::from_raw_parts(at as *const u8, old.len()) == old {
+            let mut protect = 0;
+            VirtualProtect(at as *mut u8, new.len(), 0x40, &mut protect);
+            std::ptr::copy_nonoverlapping(new.as_ptr(), at as *mut u8, new.len());
+            VirtualProtect(at as *mut u8, new.len(), protect, &mut protect);
+        }
+    }
+}
+
 /// A file `cmui.stack` in the game folder asks where the game thread is: its EIP and the code
 /// addresses on its stack go to cmui.log (a game started elevated opens to nothing outside).
 /// ponytail: a scan, so old return addresses show too; a walk needs frames the exe doesn't keep.
@@ -5927,6 +6025,7 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             client_rects_as_sent();
             if on(MENU_FIXES) {
                 no_club_tab_box();
+                landmarks_rows();
             }
             if on(EXPORT_BUTTON) {
                 export_button();

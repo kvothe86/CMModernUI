@@ -1,6 +1,6 @@
 # Feature switches, exe patches, dsound stand-in
 
-## The 28 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+## The 29 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
 
 | # | Name | Const | Covers |
 |---|---|---|---|
@@ -32,6 +32,7 @@
 | 25 | `squad_table` | `SQUAD_TABLE` | squad's Position(s) view as a table in two wide columns, 1280 wide or more |
 | 26 | `table_icons` | `TABLE_ICONS` | league table's C, P, Pl, R boxes as a cup and arrows (`comp::text`; needs `stats_table`) |
 | 27 | `background_show` | `BACKGROUND_SHOW` | Background Changes on: panel-coloured pixels let the picture through at the flip (`keep_picture`, `let_picture_through`); how much in cmui.ini |
+| 28 | `modern_buttons` | `MODERN_BUTTONS` | grey buttons, dropdowns and list cells in steel blue, column heads flat, no box around an empty stats cell |
 
 Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where
 the exe's byte is 0 (`exe_switches`), then reads `cmui.ini`: `name=0` off, missing names written
@@ -45,7 +46,7 @@ keeps the game's palette and picture. Settings that are not switches in the same
 
 `make_exe.py` writes `cm0102_ui.exe` from `cm0102.exe`: a loader stub (entry point -> push
 "cmui.dll", `LoadLibraryA`, jmp 0x547a13) in the `.nick` section (or a `.cmui` section), the mark
-`CMUI` at stub+0x1c and one byte per feature at stub+0x20 (`FEATURES = 28`, all 1).
+`CMUI` at stub+0x1c and one byte per feature at stub+0x20 (`FEATURES = 29`, all 1).
 `make_patches.py "<cm0102.exe>"` writes the same as CM0102Patcher misc patches into `patches\`
 (`cmui Loader` + `cmui - <Title>` per switch + `cmui - Everything`); `--test exe out [a,b]` applies
 them like the patcher. `install.py "<game>" [--check|--off a,b|--crests|--badges|--uninstall|--list]`
@@ -72,5 +73,5 @@ same seven game folders as `install_all.ps1`, hash-checks each. FIXES "Network c
 ## Inconsistencies noticed
 
 - `..\README.md` still says "15 switch bytes" / "15 hook sites" / "all 16 not detected" in places;
-  the code has 28 (`FEATURES` in `lib.rs`, `make_exe.py`, `make_patches.py`, `install.py` all 28).
+  the code has 29 (`FEATURES` in `lib.rs`, `make_exe.py`, `make_patches.py`, `install.py` all 29).
   The hook-site count in `install.py` was not re-verified.

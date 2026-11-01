@@ -36,7 +36,7 @@ FEATURES = ['theme', 'tabs', 'attribute_bars', 'crests', 'profile', 'stats_table
             'squad_list', 'tactics_pitch', 'match_screen', 'compare_screen', 'menu_fixes', 'status_bars',
             'search_ability', 'scout_stars', 'assistant_pick', 'team_report', 'honours', 'export_button',
             'injury_history', 'transfer_history', 'compare_report', 'scout_screen', 'bigger_text', 'squad_table',
-            'table_icons', 'background_show']
+            'table_icons', 'background_show', 'modern_buttons']
 
 # Where cmui hooks (from DllMain in src\lib.rs): calls it redirects (function, its length, the
 # called function, how many calls) and function entries it detours (their first bytes; another

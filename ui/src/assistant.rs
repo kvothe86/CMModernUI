@@ -242,7 +242,7 @@ pub unsafe fn note_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, flags: u3
         CLEAR_BUTTON = Some(((x1, y1, x2, y2), font));
         CLEAR_SEEN = true;
         SQUAD_HERE = squad;
-    } else if flags == 0xc && (40..=90).contains(&h) && y1 < sh / 3 && x1 < sw / 4 && (500..1000).contains(&w) {
+    } else if flags == 0xc && (sy(40)..=90).contains(&h) && y1 > sh / 10 && y1 < sh / 3 && x1 < sw / 4 && (500..1000).contains(&w) {
         // the tactics list's band (the formation's name in the middle): the note at its left
         TITLE_BAND = Some((x1, y1, x2, y2));
         TITLE_FREE = (w - text_width(font, t)) / 2 - 24;
@@ -260,7 +260,7 @@ pub unsafe fn note_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, flags: u3
         if let Some(staff) = squad_member(t) {
             note_member(y1, x1, staff);
         }
-    } else if flags == 0xc && w > 1000 && (40..=90).contains(&h) && y1 < sh / 2 {
+    } else if flags == 0xc && w > 1000 && (40..=90).contains(&h) && y1 > sh / 10 && y1 < sh / 2 {
         TITLE_BAND = Some((x1, y1, x2, y2));
         TITLE_FREE = (w - text_width(font, t)) / 2 - 40;
     }
@@ -370,7 +370,7 @@ pub unsafe fn flip(full_frame: bool) {
     put(b.0, b.1, b.2 - 18, b.3, 0xc, size, if has { WHITE } else { [0x5a, 0x60, 0x68] }, label);
     // a small chevron at the right, dark as on the game's dropdown buttons
     let (cx, cy) = (b.2 - 16, (b.1 + b.3) / 2);
-    let ink = [0x14, 0x16, 0x1a];
+    let ink = if on(MODERN_BUTTONS) { LIGHT } else { [0x14, 0x16, 0x1a] };
     for i in 0..4 {
         fill(cx - 4 + i, cy - 2 + i, cx - 2 + i, cy + i, ink);
         fill(cx + 3 - i, cy - 2 + i, cx + 5 - i, cy + i, ink);
@@ -394,7 +394,9 @@ pub unsafe fn flip(full_frame: bool) {
         let lines: Vec<&[u8]> = [head, &second[..]].into_iter().filter(|l| !l.is_empty()).collect();
         let h = (t.3 - t.1) / lines.len().max(1) as i32;
         for (k, line) in lines.iter().enumerate() {
-            let y = t.1 + k as i32 * h + if lines.len() > 1 { if k == 0 { 4 } else { -4 } } else { 0 };
+            // (closer together in a tall band; a low one has no room to spare)
+            let tall = game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)((small & 0xffff) as i32);
+            let y = t.1 + k as i32 * h + if lines.len() > 1 && h > tall + 8 { if k == 0 { 4 } else { -4 } } else { 0 };
             // (cut after a whole phrase: at its last ", " or ". ", else a whole word)
             let mut text = clip_text(small, line, TITLE_FREE.max(60));
             if text.len() < line.len() {
@@ -995,13 +997,16 @@ pub unsafe fn report() {
     // the players, with the numbers the shirts wear, and what the assistant says under them
     let (x1, y1, x2, y2) = (m, bar + m, sw * 22 / 100, b.1 - m);
     let top = (y2 - y1) / 24;
-    let rh = (y2 - y1 - top - 6) / (rows.len() as i32).max(44);
+    // (800x600: taller rows, the assistant's view has room to spare under them)
+    let rh = (y2 - y1 - top - 6) / (rows.len() as i32).max(if sw < 1000 { 36 } else { 44 });
     let list_end = y1 + top + 6 + rows.len() as i32 * rh;
     fill(x1, y1, x2, list_end, AREA);
     text_at(x1 + 14, y1, y1 + top, f(2), GOLD, b"PLAYERS", 0);
     let list_font = if rh >= 30 { f(3) } else if rh >= 18 { f(2) } else { f(1) };
     let size = rh * 60 / 100; // a star
-    let stars_x = x2 - 10 - 5 * size - 4 * 4;
+    // (800x600: the names need the stars' room)
+    let no_stars = sw < 1000;
+    let stars_x = if no_stars { x2 - 2 } else { x2 - 10 - 5 * size - 4 * 4 };
     for (k, row) in rows.iter().enumerate() {
         let y = y1 + top + 2 + k as i32 * rh;
         let role = row[3].first().copied().unwrap_or(b'x');
@@ -1016,10 +1021,14 @@ pub unsafe fn report() {
         // (the scout's next in line: what they play, not the slot left over for them)
         let place = if role == b'x' || (scouting && role == b'2') { row[2] } else { row[5] };
         let room = stars_x - 10 - text_width(list_font, place) - 10 - (x1 + 48);
-        text_at(x1 + 48, y, y + rh, list_font, ink, &clip_text(list_font, row[0], room), 0);
+        // (a name too long for the room: the surname)
+        let surname = row[0].iter().position(|&c| c == b' ').filter(|_| small_screen() && text_width(list_font, row[0]) > room).map_or(row[0], |at| &row[0][at + 1..]);
+        text_at(x1 + 48, y, y + rh, list_font, ink, &clip_text(list_font, surname, room), 0);
         text_at(stars_x - 10, y, y + rh, list_font, if role == b'x' { GREY } else { GOLD }, place, 2);
         let halves = std::str::from_utf8(row[6]).ok().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-        stars(stars_x, y + (rh - size) / 2, size, halves * 20, GOLD);
+        if !no_stars {
+            stars(stars_x, y + (rh - size) / 2, size, halves * 20, GOLD);
+        }
     }
     let says = list_end + m;
     if !scouting && y2 - says > top * 3 {

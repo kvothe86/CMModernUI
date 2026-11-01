@@ -1,0 +1,2 @@
+The game's grey buttons, dropdowns and list cells in steel blue, column headers flat, and no box around an empty stats cell.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: modern_buttons=0 switches it off again.

@@ -62,6 +62,16 @@ after a load shows nothing (suite reopens it); client takes no input until the h
 day ("poll_input is not running"); `net_tes.ps1` positions are 1680x1050; in `E:\CM0102` the file
 `~net.out` is read-only (breaks hosting there).
 
+
+## The user clicks, Claude watches (2026-11-01)
+
+The fastest test: the user clicks through a list of screens while screenshots run. `shot` takes the
+back buffer, which has **no text at 800x600 with cmfix `text4k=1`**: cmfix draws its text over the
+window. A capture of the game window itself shows what the user sees; it must take only that window,
+and only while it is the active window, **never the whole desktop**. The restore dialog always opens
+on `E:\CM0102\` (the registry's Location), so `retest.ps1` types the save's name instead of clicking
+it. Test folders from `net_res.ps1` need `text4k=1` and `shader=Lanczos` to look like the main game.
+Fits made for small screens ask `small_screen()` (< 1680 wide): 1680x1050 and up stay as they are.
 ## Saves
 
 | Save | Where used | What |

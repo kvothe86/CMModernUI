@@ -24,6 +24,7 @@ __pycache__/
 # ui: test runs, shots and the scripts tied to one machine or its saves
 /ui/night*/
 /ui/check/
+/ui/round/
 /ui/proof/
 /ui/shelved/
 /ui/save_check/

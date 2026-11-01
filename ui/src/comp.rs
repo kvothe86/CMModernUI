@@ -120,6 +120,7 @@ unsafe fn forget() {
     START = [0; 4];
     BEST = 0.0;
     LABEL_RIGHT = i32::MIN;
+    FORMS.0 = 0; // (the results go on: asked again when a list opens)
 }
 
 /// A full frame begins (the background hook).
@@ -338,7 +339,8 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
         // (the buttons count until a list without them: its title then comes without them)
         return false;
     }
-    if h > 40 || t.is_empty() {
+    // (a dropdown over the list: its rows start with five spaces and go to `menu_row`)
+    if h > 40 || t.is_empty() || raw.starts_with(b"     ") {
         return false;
     }
     // (only `flip` empties the cells, and it runs with the stats table)
