@@ -20,6 +20,7 @@ function: Grep `fn <name>` in `ui\src`.
 | News | [screens.md](screens.md#news) | `news.rs`: `story`, `row`, `word_links`, `mark_button`; `lib.rs`: `story_header`, `story_crest`, `news_input` |
 | Competition table / stats / history | [screens.md](screens.md#competition-screens) | `comp.rs`: `text`, `panel`, `flip`, `titles`, `add_history`, `history_winners` |
 | Match screen (overview, stats, live) | [screens.md](screens.md#match-screen) | `match_text`, `match_overlays`, `key_stats`, `event_icon`, `match_record` |
+| CM Challenge (managers' league, network games; how to drop it) | [challenge.md](challenge.md) | `src\challenge\`: `prizes`, `moves`, `seasons`, `page`, `update`, `overlay` |
 | Save / Restore dialogs, typing | [screens.md](screens.md#save--restore-dialogs) | `comp.rs` `TITLES_SEEN`, `poll_input` |
 | Network (host builds client screens, packets, block) | [network.md](network.md) | `remote.rs`, `host_answer`, `screen_sent`, `news::screen_block`, `comp::history_block`, `client_loop` |
 | Test scripts, saves, driving the game, logs | [testing.md](testing.md) | `poll_input`, `script`, `find_label` |

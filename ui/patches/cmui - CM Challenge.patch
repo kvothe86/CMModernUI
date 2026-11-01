@@ -1,0 +1,3 @@
+# cmui feature switch challenge (needs the cmui Loader patch)
+EXPANDEXE
+006E503D: 00 01

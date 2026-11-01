@@ -43,6 +43,7 @@ silences the client's questions (test switch).
 | `D` staff, staff | what the channel's club's staff say on a compare pair | `assistant::staff_views`; text, a line each |
 | `B` n, club | the scout's report on a club for the channel's manager (n: a new one each time) | `assistant::remote_scout`, as `T` but reads no screen parameter |
 | `U` club | a club's three best by the intrinsic score | `scout::best_three`, staff pointers |
+| `E` n | the CM Challenge page for the channel's manager, read only (n: a new one each time) | `challenge::remote`, text; reads no screen parameter |
 | `b` (not a key) | packet `[0x7c,'b', block]`, host to client, unasked | `remote::BLOCK` |
 
 Host-side checks: staff pointers must lie in the staff table (`valid_staff`), mapped memory only.

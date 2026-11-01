@@ -614,8 +614,8 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
 /// The seasons of a history list's rows (top, first year), for the winners' title counts.
 static mut SEASONS: Vec<(i32, i32)> = Vec::new();
 
-const HISTORY: usize = 0xae23d4; // the competitions' season results, 26 bytes a row (0x4afd80):
-const HISTORY_COUNT: usize = 0xae237c; // +4 ClubComp*, +8 i16 season, +0xa winner, +0xe runner-up
+pub const HISTORY: usize = 0xae23d4; // the competitions' season results, 26 bytes a row (0x4afd80):
+pub const HISTORY_COUNT: usize = 0xae237c; // +4 ClubComp*, +8 i16 season, +0xa winner, +0xe runner-up
 
 pub const ADD_HISTORY: usize = 0x4afce0; // comp_util_add_history_record(comp, winner, runner-up, third, extra), cdecl
 pub const HISTORY_WINNERS: usize = 0x4991f0; // comp_screens_draw_history_winners_tab(comp, top, bottom), cdecl

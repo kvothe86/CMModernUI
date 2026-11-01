@@ -1,0 +1,2 @@
+In a network game: a button under the menu bar opens the managers' league, prizes and points from the game's own history, RAD challenges and the seasons so far.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: challenge=0 switches it off again.

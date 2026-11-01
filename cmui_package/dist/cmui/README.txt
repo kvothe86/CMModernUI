@@ -85,7 +85,7 @@ Uninstall removes cm0102_ui.exe, cmui.dll, cmui.ini, cmui.log, Data\gcui.mbr, mc
 mcui_.mbr, cmui_crests.bin and cmui_logos. cm0102.exe and your saves are never touched.
 To update cmui: unzip the new version and run the installer again.
 
-THE 17 FEATURE SWITCHES (cmui.ini in the game folder; 1 = on, 0 = off; restart the game;
+THE MAIN FEATURE SWITCHES (30 in all, the rest in cmui.ini; 1 = on, 0 = off; restart the game;
                          with the patcher, a feature is on only if its patch is applied too)
 -----------------------------------------------------------------------------------------
 theme            dark palette and flat background (0 keeps the game's own colours)
@@ -119,6 +119,9 @@ assistant_pick   an Assistant button on the squad screen and the pre-match tacti
                  penalty takers and says what he did and why; he names only as many subs as
                  the next match allows and leaves banned players out (on a network client
                  too, squad and tactics screen; the host makes the pick)
+challenge        CM Challenge: in a network game, a button that opens a league of the human
+                 managers, results from the game's own history; the host keeps the league
+                 file; a client only reads it (needs the same cmui)
 
 KNOWN LIMITS
 ------------

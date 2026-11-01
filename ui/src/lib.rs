@@ -29,6 +29,7 @@ extern "system" {
 
 mod remote;
 mod assistant;
+mod challenge;
 mod comp;
 mod history;
 mod news;
@@ -355,7 +356,8 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
                 fill(x1, y1, x2 + 1, y2 + 1, AREA);
                 return;
             }
-            if is_colour(low, 0x5acb) && x2 - x1 > sx(30) {
+            // (the exe's own button grey: 0x5acb patched darker, 0x8410 as shipped; a client draws the host's)
+            if (is_colour(low, 0x5acb) || is_colour(low, 0x8410)) && x2 - x1 > sx(30) {
                 if y2 - y1 < sy(30) {
                     fill(x1, y1, x2 + 1, y2 + 1, [0x26, 0x29, 0x2f]);
                     fill(x1, y2, x2 + 1, y2 + 1, [0x3a, 0x3f, 0x47]);
@@ -2074,6 +2076,9 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     let rgb = [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8];
     let h = y2 - y1;
     let label = latin1(t).replace('\n', " ").to_lowercase();
+    if on(CHALLENGE) {
+        challenge::bar_item(x1, y1, x2, y2, font, colour, &label);
+    }
     if let Some(code) = sidebar_icon(&label, t) {
         draw_icon(code, cx, y1 + h * 8 / 100, h * 32 / 100, rgb);
     }
@@ -2093,6 +2098,7 @@ unsafe fn sidebar_icon(label: &str, t: &[u8]) -> Option<u32> {
         _ if has("pause") => 0xE769,
         _ if has("continue") || has("kick off") || has("re-start") || has("resume") => 0xE768,
         _ if has("competitions") => 0x1F3C6,
+        _ if has("challenge") => 0xE734,
         _ if has("nations") => 0xE774,
         _ if label == "find" => 0xE721,
         _ if has("options") => 0xE713,
@@ -2254,12 +2260,12 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 29] = [
+const FEATURES: [&str; 30] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
-    "squad_table", "table_icons", "background_show", "modern_buttons",
+    "squad_table", "table_icons", "background_show", "modern_buttons", "challenge",
 ];
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
@@ -2276,6 +2282,7 @@ const SQUAD_TABLE: usize = 25;
 const TABLE_ICONS: usize = 26;
 const BACKGROUND_SHOW: usize = 27;
 const MODERN_BUTTONS: usize = 28;
+const CHALLENGE: usize = 29;
 const THEME_ON: usize = 0;
 const TABS: usize = 1;
 const ATTRIBUTE_BARS: usize = 2;
@@ -2409,6 +2416,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         let released = std::mem::replace(&mut WAS_HELD, held) && !held;
         let (mx, my) = (*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
         let over = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
+        // the CM Challenge button and page
+        if on(CHALLENGE) {
+            if let Some(redraw) = challenge::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
         // the squad screen's Assistant button and its menu, the scout report's chip (the game does
         // not see what they take)
         if on(ASSISTANT_PICK) || on(SCOUT_SCREEN) {
@@ -3254,6 +3271,10 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             button_arrows();
         }
         assistant::report();
+        if on(CHALLENGE) {
+            challenge::flip(full_frame);
+            challenge::overlay();
+        }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
             static mut SAID: bool = false;
@@ -5765,6 +5786,7 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         }
         b'B' => prefetch::valid_club(arg(1)).then(|| assistant::remote_scout(channel, arg(1))),
         // a club's star players
+        b'E' => Some(challenge::remote(channel)),
         b'U' => prefetch::valid_club(staff).then(|| scout::best_three(staff).iter().flat_map(|&s| (s as u32).to_le_bytes()).collect()),
         _ => None,
     }

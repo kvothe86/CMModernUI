@@ -1,0 +1,101 @@
+P	Europa	CL Phase 2	3	0
+P	Europa	CL Winnaar	20	1
+P	Europa	CL Finalist	12	0
+P	Europa	CL Kwartfinale	5	0
+P	Europa	CL Halve finale	8	0
+P	Europa	UEFA Cup Winnaar	12	1
+P	Europa	UEFA Cup Finalist	7	0
+P	Europa	UEFA Cup Kwartfinale	3	0
+P	Europa	UEFA Cup Halve finale	5	0
+P	Supercup	Nat. Supercup	3	1
+P	Supercup	Europese Supercup Winnaar	3	1
+P	Nationaal	Kampioen	10	1
+P	Nationaal	2e plaats	6	0
+P	Nationaal	3e plaats	4	0
+P	Nationaal	Kampioen LL	5	1
+P	Nationaal	Promotie LL	3	0
+P	Nationaal	Bekerwinnaar	6	1
+P	Nationaal	Finalist beker	2	0
+P	Nationaal	Europees voetbal	2	0
+P	Teamwissel	3+ seizoenen	0	0
+P	Teamwissel	Vertrek na 1 seizoen	-10	0
+P	Teamwissel	Vertrek na 2 seizoenen	-5	0
+P	Teamwissel	5+ seizoenen (loyaliteit)	3	0
+P	Landenteams	WK Landenteams Winnaar	20	1
+P	Landenteams	WK Landenteams Finalist	12	0
+P	Landenteams	WK Landenteams Kwartfinale	5	0
+P	Landenteams	WK Landenteams Halve finale	8	0
+P	Landenteams	Continentaal landentoernooi Winnaar	10	1
+P	Landenteams	Continentaal landentoernooi Finalist	6	0
+P	Landenteams	Continentaal landentoernooi Halve finale	4	0
+P	Trophy Drought	Eerste prijs 10+ jaar	3	0
+P	Trophy Drought	Eerste prijs 20+ jaar	6	0
+P	Trophy Drought	Eerste prijs 30+ jaar	10	0
+P	Wereld (Clubs)	WK Clubteams Winnaar	15	1
+P	Wereld (Clubs)	WK Clubteams Finalist	8	0
+P	Wereld (Clubs)	WK Clubteams Halve finalist	4	0
+G	Gold	150
+G	Bronze	25
+G	Legend	1000
+G	Silver	75
+G	Diamond	350
+G	Champion	700
+G	Platinum	500
+C	Staff	Geen staf	6
+C	Staff	Assistent manager <10	3
+C	Staff	Max 2 stafleden totaal	3
+C	Staff	Alleen Nederlandse staf	3
+C	Staff	Geen fysio én geen scout	3
+C	Staff	Alle coaches met coaching attributes onder de 5	6
+C	Spelers	Keeper 10+ clean sheets	6
+C	Spelers	Speler scoort 20+ goals	9
+C	Spelers	Minstens 3 spelers met 10+ goals	6
+C	Spelers	Minstens 3 spelers met 5+ assists	6
+C	Spelers	Haal als team niet meer dan 3 rode kaarten	6
+C	Spelers	Haal als team niet meer dan 5 rode kaarten	3
+C	Spelers	Speler haalt twee van de drie (topscorer/assists/HG)	6
+C	Spelers	Speler wordt topscorer OF top assists OF hoogste gemiddelde	3
+C	Tactiek	Speel met sweeper in basiself	6
+C	Tactiek	Speel zonder vleugelverdedigers	6
+C	Tactiek	Speel met minstens drie aanvallers	3
+C	Tactiek	Altijd 4-4-2 (geen andere formatie)	3
+C	Tactiek	Speel met minstens vijf verdedigers	3
+C	Tactiek	Speel met minstens vijf middenvelders	3
+C	Tactiek	Speel zonder aanvallende vleugelspelers	6
+C	Tactiek	Speel zonder spits (min. 15 comp-wedstrijden)	6
+C	Tactiek	Speel park the bus, defensive, long ball, counter	6
+C	Leeftijd	3 spelers 35+ in basiself	6
+C	Leeftijd	5 spelers 30+ in basiself	6
+C	Leeftijd	5 spelers 32+ in basiself	9
+C	Leeftijd	5 spelers onder 21 in basiself	3
+C	Leeftijd	5 spelers onder 23 in basiself	3
+C	Leeftijd	Gemiddelde leeftijd basiself <=23	6
+C	Leeftijd	Gemiddelde leeftijd basiself >=30	6
+C	Leeftijd	Geen speler jonger dan 18 in basiself	3
+C	Selectie	5 spelers linksbenig in basiself	3
+C	Selectie	5 spelers rechtsbenig in basiself	3
+C	Selectie	Keeper + 4 verdedigers allemaal 28+	6
+C	Selectie	Minstens 3 homegrown spelers in basiself	6
+C	Selectie	Geen speler met waarde > €10M in basiself	6
+C	Selectie	Minstens 2 jeugdspelers gepromoveerd naar basiself	6
+C	Selectie	Minstens 3 spelers met internationale caps dit seizoen	6
+C	Transfers	Max 1 aankoop	9
+C	Transfers	Max 3 aankopen	6
+C	Transfers	Geen wintertransfers	3
+C	Transfers	Geen aankopen > €2M	6
+C	Transfers	Geen verkopen in winter	3
+C	Transfers	Alleen spelers <23 kopen	6
+C	Transfers	Grootste aankoop < €5M	6
+C	Transfers	Alleen Bosman/vrije transfers	6
+C	Transfers	Verkoop je beste speler (avg rating 1 januari)	6
+C	Transfers	Ontsla vijf spelers uit je team (zonder vergoeding)	6
+C	Nationaliteit	5 spelers uit Afrika	6
+C	Nationaliteit	5 spelers uit Z-Amerika	6
+C	Nationaliteit	5 spelers uit Oost-Europa	6
+C	Nationaliteit	5 spelers uit Scandinavië	6
+C	Nationaliteit	5 buitenlanders in basiself	3
+C	Nationaliteit	5 spelers uit NED/BEL/POR/TUR	3
+C	Nationaliteit	5 spelers uit ENG/SPA/GER/ITA/FRA	3
+C	Nationaliteit	3 spelers uit hetzelfde land (niet eigen land)	3
+C	Nationaliteit	Geen speler uit eigen land in basiself (min. 15x)	9
+C	Nationaliteit	Minstens 5 verschillende nationaliteiten in basiself	6

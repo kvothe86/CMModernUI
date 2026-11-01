@@ -1,6 +1,6 @@
 # Feature switches, exe patches, dsound stand-in
 
-## The 29 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+## The 30 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
 
 | # | Name | Const | Covers |
 |---|---|---|---|
@@ -32,6 +32,7 @@
 | 25 | `squad_table` | `SQUAD_TABLE` | squad's Position(s) view as a table in two wide columns, 1280 wide or more |
 | 26 | `table_icons` | `TABLE_ICONS` | league table's C, P, Pl, R boxes as a cup and arrows (`comp::text`; needs `stats_table`) |
 | 27 | `background_show` | `BACKGROUND_SHOW` | Background Changes on: panel-coloured pixels let the picture through at the flip (`keep_picture`, `let_picture_through`); how much in cmui.ini |
+| 29 | `challenge` | `CHALLENGE` | CM Challenge button and page in a network game ([challenge.md](challenge.md)) |
 | 28 | `modern_buttons` | `MODERN_BUTTONS` | grey buttons, dropdowns and list cells in steel blue, column heads flat, no box around an empty stats cell |
 
 Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where

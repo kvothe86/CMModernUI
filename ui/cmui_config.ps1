@@ -34,7 +34,8 @@ $switches = @(
     @('squad_table', 'Squad Table', 'At 1280 wide or more: the Position(s) view as a table in two wide columns.'),
     @('table_icons', 'Table Icons', 'League table: a cup and arrows for C, P, Pl and R. Needs Stats Table.'),
     @('background_show', 'Background Show', 'With Background Changes on: the dark panels let the picture through.'),
-    @('modern_buttons', 'Modern Buttons', 'Grey buttons, dropdowns and list cells in steel blue, column headers flat.')
+    @('modern_buttons', 'Modern Buttons', 'Grey buttons, dropdowns and list cells in steel blue, column headers flat.'),
+    @('challenge', 'CM Challenge', 'Network game: a button under the menu bar opens the managers'' league.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),

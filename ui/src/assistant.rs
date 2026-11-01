@@ -14,7 +14,7 @@ const SET_SLOT: usize = 0x896a90; // thiscall(club, slot 0..19, Staff*, team)
 const GET_SLOT: usize = 0x8968f0; // thiscall(club, slot, team) -> Staff*
 const SET_CAPTAIN_FROM_SLOT: usize = 0x897760; // thiscall(club, slot, team)
 const SET_TAKER: usize = 0x897bb0; // thiscall(club, role 0..4, choice 0..1, Staff* or 0, team)
-const CLUB_ASSISTANT: usize = 0x53cb80; // cdecl(club) -> Staff*
+pub const CLUB_ASSISTANT: usize = 0x53cb80; // cdecl(club) -> Staff*
 const JUDGE: usize = 0x6e86d0; // cdecl(judge, player, club, kind 2 current, reputation -1) -> short
 const INJURY_STATUS: usize = 0x62c400; // thiscall(Injury*, Staff*) -> 0 fit, 1 short of fitness, 2 injured
 pub(crate) const INJURIES: usize = 0xb63d28;
@@ -83,7 +83,7 @@ static mut REMOTE_NOTES: Vec<(i16, u32, Vec<u8>)> = Vec::new();
 // is made once, here or for a network client by the host (key 'T'), as text: a line with club,
 // assistant, shape and what he says, then one per player (`report_for`); `report` draws it.
 const REPORT_ITEM: &str = "Team report";
-const RIGHT_CLICK: usize = 0xb67a1c; // LEFT_CLICK's twin
+pub const RIGHT_CLICK: usize = 0xb67a1c; // LEFT_CLICK's twin
 /// The formations the assistant chooses from, the ten outfield slots as the original game's
 /// presets have them. Not read from the game: Restructured 25-26 keeps the names on other layouts
 /// (its "4-4-2" stands DC DC DMC MC MC MC AMC AMC AMC FC). The first nine are what the byte at
@@ -637,7 +637,7 @@ unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
 
 /// What a coach looks at most, by the coaching attribute he is best at (non-player offset, as the
 /// game keeps it or converted, what he would say) and the players' attributes that go with it.
-const SPECIALITIES: [(usize, bool, &str, [&str; 3]); 4] = [
+pub const SPECIALITIES: [(usize, bool, &str, [&str; 3]); 4] = [
     (0x12, false, "on the ball", ["Technique", "Dribbling", "Passing"]),
     (0xe, false, "in front of goal", ["Finishing", "Off The Ball", "Long Shots"]),
     (0x21, true, "in reading the game", ["Anticipation", "Decisions", "Positioning"]),
@@ -1160,7 +1160,7 @@ unsafe fn assistant_of(club: usize) -> Option<usize> {
 }
 
 /// A coaching attribute of a staff member as shown (1..20): non-player record +0x69, CA at +4.
-unsafe fn coaching(staff: usize, at: usize) -> f64 {
+pub unsafe fn coaching(staff: usize, at: usize) -> f64 {
     let np = rd::<usize>(staff + 0x69);
     scout::shown(rd::<i8>(np + at), rd::<i16>(np + 4), true)
 }

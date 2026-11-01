@@ -7,8 +7,8 @@ use crate::*;
 
 const INJURY_LIST: usize = 0x62ec20; // thiscall(Injury*, Staff*) -> LLIST* or 0
 const BAN_LIST: usize = 0x55cbc0; // thiscall(Discipline*, staff id) -> LLIST* or 0
-const STAFF_RECORDS: usize = 0xdd7f00; // Staff_Records*
-const STAFF_LIST: usize = 0x86de70; // thiscall(records, Staff*, mask) -> LLIST* or 0
+pub const STAFF_RECORDS: usize = 0xdd7f00; // Staff_Records*
+pub const STAFF_LIST: usize = 0x86de70; // thiscall(records, Staff*, mask) -> LLIST* or 0
 const MOVES: u32 = 4; // the mask of kinds 100..149
 const FORMAT_ENTRY: usize = 0x86e0b0; // thiscall(records, node, Text*)
 const TEXT_NEW: usize = 0x4ae590; // thiscall(Text*, initial): +0 the string
@@ -26,7 +26,7 @@ const BAN_REASON: usize = 0x55d0a0; // thiscall(Discipline*, ban, out, size)
 const LIMIT: usize = 12;
 
 /// The items of a list the game made for this call, newest first.
-unsafe fn newest(list: usize) -> Vec<usize> {
+pub unsafe fn newest(list: usize) -> Vec<usize> {
     let mut items = Vec::new();
     if list == 0 {
         return items;
@@ -40,7 +40,7 @@ unsafe fn newest(list: usize) -> Vec<usize> {
 }
 
 /// Frees a list `newest` read (its items go with it).
-unsafe fn free(list: usize) {
+pub unsafe fn free(list: usize) {
     if list != 0 {
         game::<extern "thiscall" fn(usize)>(LIST_FREE)(list);
         game::<extern "C" fn(usize)>(DELETE)(list);
@@ -59,6 +59,18 @@ unsafe fn date_of(date: usize) -> Vec<u8> {
     let mut buf = [0u8; 40];
     game::<extern "thiscall" fn(usize, *mut u8, i16, i32) -> i32>(DATE_TEXT)(date, buf.as_mut_ptr(), 40, 0xff);
     line(&buf)
+}
+
+/// The game's own sentence for a history record.
+pub unsafe fn sentence(records: usize, item: usize) -> Vec<u8> {
+    let mut object = [0usize; 2];
+    let text = object.as_mut_ptr() as usize;
+    game::<extern "thiscall" fn(usize, usize) -> usize>(TEXT_NEW)(text, 0);
+    game::<extern "thiscall" fn(usize, usize, usize)>(FORMAT_ENTRY)(records, item, text);
+    // (not game_text: a short string on the heap's last bytes before a free page reads as none)
+    let said = if object[0] != 0 { std::ffi::CStr::from_ptr(object[0] as *const i8).to_bytes().to_vec() } else { Vec::new() };
+    game::<extern "thiscall" fn(usize)>(TEXT_FREE)(text);
+    said
 }
 
 /// The rows as text: "kind \t date \t what \t more", newest first; kind I an injury (type, how long
@@ -91,12 +103,7 @@ pub unsafe fn rows(staff: usize) -> Vec<u8> {
     if mapped(records, 4) {
         let list = game::<extern "thiscall" fn(usize, usize, u32) -> usize>(STAFF_LIST)(records, staff, MOVES);
         for item in newest(list).into_iter().take(LIMIT) {
-            let mut object = [0usize; 2];
-            let text = object.as_mut_ptr() as usize;
-            game::<extern "thiscall" fn(usize, usize) -> usize>(TEXT_NEW)(text, 0);
-            game::<extern "thiscall" fn(usize, usize, usize)>(FORMAT_ENTRY)(records, item, text);
-            let said = if object[0] != 0 { game_text(object[0], 200) } else { Vec::new() };
-            game::<extern "thiscall" fn(usize)>(TEXT_FREE)(text);
+            let said = sentence(records, item);
             let index = rd::<i32>(item + 0xd);
             let named = [b'f', b'j'].contains(&rd::<u8>(item + 0xc)) && index >= 0 && index < rd::<i32>(CLUB_COUNT);
             let club = if named { game_text(rd::<usize>(CLUB_TABLE) + index as usize * CLUB_SIZE + 4, 51) } else { Vec::new() };
