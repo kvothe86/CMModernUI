@@ -2999,8 +2999,12 @@ unsafe fn info_strip(staff: usize, line: &str, x1: i32, y1: i32, x2: i32, y2: i3
     }
 }
 
-/// CA and PA: player +5 and +7.
+/// CA and PA: player +5 and +7 (None for a person with no player record: non-player staff in a
+/// search, e.g. with Interested on Yes).
 unsafe fn ca_pa(player: usize) -> Option<(i32, i32)> {
+    if !remote::CLIENT && !readable(player, 9) {
+        return None;
+    }
     let (ca, pa) = (rd::<i16>(player + 5), rd::<i16>(player + 7));
     // (built only for a real CA: a network client's not yet known record reads as anything)
     (1..=200).contains(&ca).then(|| (ca as i32, (pa as i32).clamp(ca as i32, 200)))
