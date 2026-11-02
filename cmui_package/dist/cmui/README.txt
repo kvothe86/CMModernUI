@@ -119,9 +119,10 @@ assistant_pick   an Assistant button on the squad screen and the pre-match tacti
                  penalty takers and says what he did and why; he names only as many subs as
                  the next match allows and leaves banned players out (on a network client
                  too, squad and tactics screen; the host makes the pick)
-challenge        CM Challenge: in a network game, a button that opens a league of the human
-                 managers, results from the game's own history; the host keeps the league
-                 file; a client only reads it (needs the same cmui)
+challenge        CM Challenge: a button that opens a league of the human managers, results
+                 from the game's own history; in a network game the host keeps the league
+                 file and a client only reads it (needs the same cmui); in single player a
+                 tracker of your own career, with optional RAD challenges
 
 KNOWN LIMITS
 ------------

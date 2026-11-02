@@ -878,6 +878,8 @@ extern "C" fn background(x: i32, y: i32, picture: usize) {
         }
         FULL_FRAME = true;
         ROOMY_ROWS = false; // (the line "Born ..." comes before a profile tab's rows)
+        #[allow(static_mut_refs)]
+        NATION_HIT.clear(); // (the strip, if this screen has one, sets it again)
         TABLE_BEST.0 = 0;
         static mut LAID_OUT: bool = false;
         // (spent only when the layout is really decided: not on a first frame of an unknown size)
@@ -1311,8 +1313,11 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 comp::leave_career();
             }
             history::note(x1, y1, y2, font, t);
-            if on(STATS_TABLE) && comp::text(x1, y1, x2, y2, flags, font, colour, s) {
-                return;
+            if on(STATS_TABLE) {
+                font = comp::cell_font(y1, y2, font);
+                if comp::text(x1, y1, x2, y2, flags, font, colour, s) {
+                    return;
+                }
             }
             #[allow(static_mut_refs)]
             if let Some(story) = STORY.as_mut().filter(|s| y1 > s.0 .3) {
@@ -1354,7 +1359,8 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             // on the tactics pitch: black shirt numbers, names in a dark pill with the fit under it
             let p = PITCH;
             // (by the box's middle: a wide player's name box at the touchline reaches past the grass)
-            if p.2 > p.0 && (p.0..=p.2).contains(&((x1 + x2) / 2)) && y1 >= p.1 && y2 <= p.3 && !t.is_empty() && y2 - y1 < 80 {
+            // (not a dropdown's rows, five spaces in, over the pitch)
+            if p.2 > p.0 && (p.0..=p.2).contains(&((x1 + x2) / 2)) && y1 >= p.1 && y2 <= p.3 && !t.is_empty() && y2 - y1 < 80 && !s.starts_with(b"     ") {
                 if t.iter().all(|c| c.is_ascii_digit()) {
                     // (in the club's text colour on its shirt; the keeper's white)
                     colour = if keeper_at(y1, y2) { rgb(WHITE) as u32 } else { KIT_TEXT.unwrap_or(rgb([0x10, 0x12, 0x14]) as u32) };
@@ -1503,6 +1509,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 if let Some(staff) = profiled_staff() {
                     // drawn in the flip pass, across the whole panel (this box only spans the line)
                     STRIP = Some((staff, latin1(t).into_owned(), x1, y1, x2, y2, font));
+                    BORN_BOX = (x1, y1, x2, y2);
                     return;
                 }
             }
@@ -1914,6 +1921,10 @@ fn appearances_add_up() {
 unsafe fn squad_table_heads() {
     const LINE: [u8; 3] = [0x34, 0x38, 0x40];
     let mut rows = std::mem::take(&mut TABLE_ROWS);
+    // (a full frame draws an open dropdown too, before this pass: not over it)
+    if news::MENU_SEEN {
+        return;
+    }
     rows.sort_by_key(|r| (r.0, r.2));
     for column in rows.chunk_by(|a, b| a.0 == b.0) {
         let (first, last) = (column[0], column[column.len() - 1]);
@@ -2501,7 +2512,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             }
         }
         // (a network client: the host's answers came, drawn with them)
-        REDRAW |= remote::CLIENT && (std::mem::take(&mut remote::ARRIVED) | remote::hold_over());
+        REDRAW |= remote::CLIENT && (std::mem::take(&mut remote::ARRIVED) | remote::hold_over() | remote::silence_changed());
         // (a click while a dropdown counts as open: one full frame, which draws an open menu
         // again and none that closed, so news::MENU_OPEN is right again; without it the flag
         // stayed on after a menu and the story's links went without their remaps)
@@ -2526,7 +2537,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // the story is laid out by cmui (news::story): over one of its links or chips the game
         // sees the pointer on its own box for it, elsewhere over the story on none (and back
         // after, unless the window procedure moved it meanwhile)
-        let target = news::pointer(mx, my);
+        let target = news::pointer(mx, my).or_else(|| nation_link(display, mx, my));
         if let Some((tx, ty)) = target {
             (*(MOUSE_X as *mut i32), *(MOUSE_Y as *mut i32)) = (tx, ty);
         }
@@ -2536,6 +2547,31 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         }
         result
     }
+}
+
+/// The profile's info strip hides the line "Born ... Greek (..)" and the game's link on the nation
+/// in it (a club link, 0x7d5, its item in the game's box for the line). Over the strip's flag or
+/// Nationality cell the game sees the pointer on that item, so its own click opens the national
+/// team (a network client sends it to the host like any widget). The first such item of the line
+/// is the first nationality; none (no nation, no item sent) leaves the click to nothing.
+#[allow(static_mut_refs)]
+unsafe fn nation_link(display: usize, mx: i32, my: i32) -> Option<(i32, i32)> {
+    if news::MENU_OPEN || !NATION_HIT.iter().any(|r| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my)) {
+        return None;
+    }
+    // (the display is this process's own, on a client too: not `rd`, which asks the host)
+    let count = if mapped(display + 0x12e9a0, 2) { ((display + 0x12e9a0) as *const i16).read_unaligned().clamp(0, 1200) as usize } else { 0 };
+    if !mapped(display + 0xba95e, count * 0x18c) {
+        return None;
+    }
+    let b = BORN_BOX;
+    (0..count)
+        .map(|k| display + 0xba95e + k * 0x18c)
+        .filter(|&w| ((w + 8) as *const i16).read_unaligned() == 0x7d5)
+        .map(|w| -> [i32; 4] { std::array::from_fn(|i| ((w + 0x10 + 4 * i) as *const i32).read_unaligned()) })
+        .filter(|r| r[2] > r[0] && r[3] > r[1] && r[0] >= b.0 - 4 && r[2] <= b.2 + 4 && r[1] >= b.1 - 4 && r[3] <= b.3 + 4)
+        .min_by_key(|r| (r[1], r[0]))
+        .map(|r| ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2))
 }
 
 /// Test script from `cmui.click` (the shell cannot send the game input): one command a line,
@@ -2787,6 +2823,10 @@ unsafe fn profiled_player() -> Option<usize> {
 static mut SMALL_FONT: Option<u32> = None;
 /// The "Born ..." line of this frame: staff, text, its box and font; the strip goes in its place.
 static mut STRIP: Option<(usize, String, i32, i32, i32, i32, u32)> = None;
+/// The game's own box of that line (its link to the nation is an item in it), and where the strip
+/// shows the nation: the flag and the Nationality cell, a click on which goes to the game's link.
+static mut BORN_BOX: (i32, i32, i32, i32) = (0, 0, 0, 0);
+static mut NATION_HIT: Vec<(i32, i32, i32, i32)> = Vec::new();
 /// Injuries & Bans: the Injury row (y, its label's right edge, injured) and the Condition row.
 static mut INJURY_ROW: (i32, i32, bool) = (i32::MIN, 0, false);
 static mut CONDITION_ROW: (i32, i32) = (i32::MIN, 0);
@@ -2894,6 +2934,8 @@ unsafe fn info_strip(staff: usize, line: &str, x1: i32, y1: i32, x2: i32, y2: i3
         ("International", format!("{caps} caps / {goals} goals"), 20),
     ];
     let small = SMALL_FONT.unwrap_or(font);
+    #[allow(static_mut_refs)]
+    NATION_HIT.clear();
     // the flag of his nation (staff +0x1a, name at +4) first, from cmui_crests.bin ("flag:Greece")
     let nation = rd::<usize>(staff + 0x1a);
     let flag = (y2 - y1) * 8 / 10;
@@ -2901,6 +2943,8 @@ unsafe fn info_strip(staff: usize, line: &str, x1: i32, y1: i32, x2: i32, y2: i3
     if readable(nation, 55) {
         let key = [b"flag:".as_slice(), &game_text(nation + 4, 51)].concat();
         if draw_crest(&key, x1 + 8, y1 + (y2 - y1 - flag) / 2, flag) {
+            #[allow(static_mut_refs)]
+            NATION_HIT.push((x1 + 8, y1 + (y2 - y1 - flag) / 2, x1 + 8 + flag, y1 + (y2 - y1 - flag) / 2 + flag));
             x1 += flag + 12;
         }
     }
@@ -2922,6 +2966,10 @@ unsafe fn info_strip(staff: usize, line: &str, x1: i32, y1: i32, x2: i32, y2: i3
         let mut x = x1;
         for (i, t) in texts.iter().enumerate() {
             let cw = text_width(f, t) + gap + extra;
+            if i == 2 {
+                #[allow(static_mut_refs)]
+                NATION_HIT.push((x, y1, x + cw, y2));
+            }
             if i > 0 {
                 fill(x, y1 + h / 6, x, y2 - h / 6, [0x34, 0x38, 0x40]);
             }
@@ -2933,6 +2981,10 @@ unsafe fn info_strip(staff: usize, line: &str, x1: i32, y1: i32, x2: i32, y2: i3
     let mut x = x1;
     for (i, (head, text, part)) in fields.into_iter().enumerate() {
         let cw = w * part / 100;
+        if i == 2 {
+            #[allow(static_mut_refs)]
+            NATION_HIT.push((x, y1, x + cw, y2));
+        }
         if i > 0 {
             fill(x, y1 + h / 6, x, y2 - h / 6, [0x34, 0x38, 0x40]);
         }
@@ -3286,6 +3338,12 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         BUTTONS.clear();
         if remote::CLIENT {
             remote::ask(); // what this frame missed, from the host
+            if remote::host_silent() {
+                let (sw, sh) = screen();
+                let (y1, y2) = (sh * 3 / 4, sh * 3 / 4 + 40);
+                fill(sw / 2 - 170, y1, sw / 2 + 170, y2, [0x26, 0x2a, 0x31]);
+                text_at(sw / 2, y1, y2, SMALL_FONT.unwrap_or(0xffff0001), GOLD, b"Waiting for the host ...", 1);
+            }
         }
         let_picture_through(left, top, right, bottom);
         game::<extern "C" fn(i32, i32, i32, i32)>(FLIP_RECT)(left, top, right, bottom);
@@ -3801,6 +3859,46 @@ static mut MATCH_SCORES: Vec<((i32, i32, i32, i32), Vec<u8>)> = Vec::new();
 static mut MATCH_AGG: Vec<u8> = Vec::new();
 /// Stadium band, date and "First Division / HT 3-1": box, text, font.
 static mut MATCH_HEAD: [Option<((i32, i32, i32, i32), Vec<u8>, u32)>; 3] = [None, None, None];
+const MOM_SLOT: usize = 0xaebde8; // the palette slot the man of the match's name is written in
+const MOM_TINT: [u8; 3] = [0x4d, 0x45, 0x2e]; // the list's colour with a quarter of gold over it
+/// The Player Ratings cells this frame (left, top, right), the man of the match's name cell.
+static mut RATING_CELLS: Vec<(i32, i32, i32)> = Vec::new();
+static mut MOM_CELL: Option<(i32, i32, i32, i32)> = None;
+
+/// The man of the match's half of his row (two sides in one list) lit gold, a gold bar at its
+/// edge, over the cells of this full frame.
+#[allow(static_mut_refs)]
+unsafe fn light_man_of_match() {
+    let cells = std::mem::take(&mut RATING_CELLS);
+    let Some((x1, y1, x2, y2)) = MOM_CELL.take() else { return };
+    let mut row: Vec<_> = cells.iter().filter(|c| c.1 == y1).map(|c| (c.0, c.2)).collect();
+    row.sort();
+    row.dedup();
+    let (from, to) = half_of_row(&row, x1, sx(200)).unwrap_or((x1, x2));
+    let tint = rgb565(GOLD);
+    blend(from, y1, x1 - from, y2 - y1 + 1, |_, _| (tint, 64));
+    blend(x2 + 1, y1, to - x2, y2 - y1 + 1, |_, _| (tint, 64));
+    fill(from, y1, from + 3, y2 + 1, GOLD);
+}
+
+/// The half of a Player Ratings row (cells left to right: left, right) that holds the name at
+/// `x1`: the second half starts at the number left of its name, names are wider than `name`.
+fn half_of_row(row: &[(i32, i32)], x1: i32, name: i32) -> Option<(i32, i32)> {
+    let wide = |c: &(i32, i32)| c.1 - c.0 > name;
+    let (first, last) = (row.iter().position(wide)?, row.iter().rposition(wide)?);
+    let half = if first == last { row } else if x1 < row[last].0 { &row[..last - 1] } else { &row[last - 1..] };
+    Some((half.first()?.0, half.iter().map(|c| c.1).max()?))
+}
+
+#[test]
+fn man_of_match_half() {
+    let row = [(10, 40), (50, 300), (310, 340), (350, 380), (390, 640), (650, 680)];
+    assert_eq!(half_of_row(&row, 50, 200), Some((10, 340)));
+    assert_eq!(half_of_row(&row, 390, 200), Some((350, 680)));
+    assert_eq!(half_of_row(&row[3..], 390, 200), Some((350, 680)));
+    assert_eq!(half_of_row(&row[..3], 50, 200), Some((10, 340)));
+}
+
 const CLUB_TABLE: usize = 0xae23b4;
 const CLUB_COUNT: usize = 0xae235c;
 const CLUB_SIZE: usize = 581;
@@ -3880,7 +3978,7 @@ unsafe fn event_icon(cx: i32, cy: i32, r: i32, name: &[u8]) -> [u8; 3] {
     // a missed penalty: "m/pen" in the match, "missed" in a shoot-out
     let missed = has(b" m/pen") || has(b" missed");
     let goal = !sent_off && !missed && !has(b" injured");
-    let c = if goal { [0x4c, 0xc0, 0x7a] } else if missed { [0xa0, 0xa6, 0xae] } else { [0xe0, 0x70, 0x60] };
+    let c = event_colour(name);
     if goal {
         ball(cx, cy, r + 1);
     } else if sent_off {
@@ -3903,9 +4001,53 @@ unsafe fn event_icon(cx: i32, cy: i32, r: i32, name: &[u8]) -> [u8; 3] {
     c
 }
 
+/// The colour an event's text goes in, by the game's words: a goal green, a missed penalty grey, a
+/// red card the card's red, an injury salmon.
+fn event_colour(name: &[u8]) -> [u8; 3] {
+    let has = |w: &[u8]| name.windows(w.len()).any(|x| x == w);
+    if has(b" sent off") {
+        [0xd8, 0x30, 0x30]
+    } else if has(b" m/pen") || has(b" missed") {
+        [0xa0, 0xa6, 0xae]
+    } else if has(b" injured") {
+        [0xe0, 0x70, 0x60]
+    } else {
+        [0x4c, 0xc0, 0x7a]
+    }
+}
+
+/// A minutes cell of a match event: "14", "19, 58", "pen 82", "og 30", "45+2", and the pairs the
+/// game wraps with a comma after the first, "7, pen 25," (a "pen" or "og" before any of the minutes).
+fn is_minutes(t: &[u8]) -> bool {
+    let mut digits = false;
+    for part in t.split(|&c| c == b',') {
+        let part = part.trim_ascii();
+        let part = part.strip_prefix(b"pen ").or(part.strip_prefix(b"og ")).unwrap_or(part);
+        if !part.iter().all(|c| c.is_ascii_digit() || b" +".contains(c)) {
+            return false;
+        }
+        digits |= part.iter().any(u8::is_ascii_digit);
+    }
+    digits
+}
+
+/// A scorer's next minutes joined to the ones on his row: "7, pen 25," + "pen 45" is
+/// "7, pen 25, pen 45".
+fn join_minutes(minutes: &[u8], next: &[u8]) -> Vec<u8> {
+    let m = minutes.trim_ascii_end();
+    [m.strip_suffix(b",").unwrap_or(m), b", ", next.trim_ascii()].concat()
+}
+
+/// The font a minutes text goes in: the row's a step smaller, and one more step down when it does
+/// not fit in `room` pixels (the cell less its margins).
+unsafe fn minutes_font(font: u32, room: i32, t: &[u8]) -> u32 {
+    let f = smaller(font, 1);
+    if text_width(f, t) <= room { f } else { smaller(font, 2) }
+}
+
 /// The match screen's draws taken over by cmui (true: not drawn by the game).
 #[allow(static_mut_refs)]
-unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32, t: &[u8], indented: bool) -> bool {
+unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32, t: &[u8], indented: bool) -> bool {
     let (w, h) = screen();
     // the aggregate: shown in the header band as a slot of its own
     if y1 < h * 15 / 100 && t.starts_with(b"Agg ") {
@@ -3940,6 +4082,25 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
     if MATCH_TAB == b"Latest Scores" {
         return false;
     }
+    // Player Ratings: the man of the match. The game only writes his name in the pale cyan slot
+    // (0x723350), next to no difference from the others in the theme: gold, with a star, and his
+    // half of the row lit (`match_overlays`). (The ratings in that slot are centred numbers, in a
+    // narrower cell.)
+    #[allow(static_mut_refs)]
+    if MATCH_TAB == b"Player Ratings" {
+        if !t.is_empty() {
+            RATING_CELLS.push((x1, y1, x2));
+        }
+    }
+    #[allow(static_mut_refs)]
+    if MATCH_TAB == b"Player Ratings" && colour & 0xffff == *(MOM_SLOT as *const u16) as u32 && x2 - x1 > sx(200) && !t.is_empty() && !t[0].is_ascii_digit() {
+        MOM_CELL = Some((x1, y1, x2, y2));
+        fill(x1, y1, x2 + 1, y2 + 1, MOM_TINT);
+        text_at(x1 + 4, y1, y2, font, GOLD, t, 0);
+        let size = (y2 - y1) * 7 / 10;
+        stars_one(x1 + 4 + text_width(font, t) + 8, y1 + (y2 - y1 - size) / 2, size, GOLD);
+        return true;
+    }
     let content = x2 - x1 > w * 8 / 10;
     // (below the title bar: on the first frame of the next screen MATCH still holds, and its
     // full-width title must not be taken for the band)
@@ -3961,13 +4122,14 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
     }
     // the events: scorer with a ball, green; minute gold at the right
     // minutes: "14", "19, 58", "pen 82", "og 30", "45+2"
-    let digits = t.iter().any(|c| c.is_ascii_digit())
-        && t.strip_prefix(b"pen ").or(t.strip_prefix(b"og ")).unwrap_or(t).iter().all(|c| c.is_ascii_digit() || b" ,+".contains(c));
+    let digits = is_minutes(t);
     // the ground in the bottom bar of a live match ("De Koel, Venlo"); left as the game draws it
     if content && y1 > h * 88 / 100 && !t.is_empty() {
         MATCH_GROUND = t.to_vec();
     }
-    if !OVERVIEW {
+    // (the League Table tab has the band too, and an old event's row must not take its cells)
+    #[allow(static_mut_refs)]
+    if !OVERVIEW || MATCH_TAB == b"League Table" {
         return false;
     }
     // (an event's name comes with two leading spaces; its minute on the same row after it)
@@ -3983,7 +4145,7 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
     }
     if y1 == EVENT_ROW && y2 - y1 < 40 && digits {
         fill(x1 - 2, y1, x2, y2, [0x26, 0x2b, 0x31]);
-        text_at(x2 - 14, y1, y2, smaller(font, 1), GOLD, t.trim_ascii(), 2);
+        text_at(x2 - 14, y1, y2, minutes_font(font, x2 - x1 - 12, t.trim_ascii()), GOLD, t.trim_ascii(), 2);
         // (one cell a side: the other side's event on the same row comes between this and its
         // third minute, Real Madrid v Ajax 2026-10-29)
         #[allow(static_mut_refs)]
@@ -3998,11 +4160,11 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
     #[allow(static_mut_refs)]
     if let Some(((mx1, my1, mx2, my2), minutes, bottom)) = LAST_MINUTES.iter_mut().find(|m| (m.0 .0, m.0 .2) == (x1, x2)) {
         if digits && x1 == *mx1 && x2 == *mx2 && y1 > *bottom && y1 - *bottom <= 8 && y2 - y1 < 40 {
-            let joined = [minutes.trim_ascii_end().strip_suffix(b",").unwrap_or(minutes), b", ", t.trim_ascii()].concat();
+            let joined = join_minutes(minutes, t);
             *minutes = joined;
             *bottom = y2;
             fill(*mx1 - 2, *my1, *mx2, *my2, [0x26, 0x2b, 0x31]);
-            text_at(*mx2 - 14, *my1, *my2, smaller(font, 1), GOLD, minutes, 2);
+            text_at(*mx2 - 14, *my1, *my2, minutes_font(font, *mx2 - *mx1 - 12, minutes), GOLD, minutes, 2);
             // (emptied in what is beside it on its row: the plain background when that side has no
             // event on the row, not an event row's colour)
             let beside = pixel_at(x1 - 12, (y1 + y2) / 2).unwrap_or([0x26, 0x2b, 0x31]);
@@ -4044,6 +4206,7 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, _colour: u32
 #[allow(static_mut_refs)]
 unsafe fn match_overlays() {
     if std::mem::take(&mut FULL_FRAME) {
+        light_man_of_match();
         if !std::mem::take(&mut SIDES_SEEN) {
             MATCH = false; // another screen
             MATCH_SIDES.clear();
@@ -4094,8 +4257,10 @@ unsafe fn match_overlays() {
     }
     let tx = x1 + if has_logo { tile } else { 0 } + 20;
     let third = tile / 3;
-    text_at(tx, y1 + 4, y1 + third + 4, font, WHITE, full.as_deref().unwrap_or(&short), 0);
-    text_at(tx, y1 + third, y1 + 2 * third, smaller(font, 1), LIGHT, &ground, 0);
+    // (the League Table tab's band has no date: two lines in it)
+    let (line, down) = if date.is_some() { (third, 4) } else { (tile / 2, 1) };
+    text_at(tx, y1 + down, y1 + line + down, font, WHITE, full.as_deref().unwrap_or(&short), 0);
+    text_at(tx, y1 + line, y1 + 2 * line, smaller(font, 1), LIGHT, &ground, 0);
     if let Some((_, d, df)) = &date {
         text_at(tx, y1 + 2 * third - 4, y2 - 4, *df, GREY, d, 0);
     }
@@ -4721,6 +4886,47 @@ unsafe fn compare_overlay() {
 // become Club / Pos / Current / Potential (stars) and I.Gls / Cond. stay empty. Addresses from
 // `ui\helper_search.md`.
 const ADD_ITEM: usize = 0x55f990; // Display::add_item, thiscall, 18 stack args
+const WIDGET_INIT: usize = 0x5ee150; // Widget::init, thiscall, 21 stack args, its one caller add_item
+/// Dropdown rows in this font at 1680 wide and more: a popup's rows, width and height all come
+/// from the font (0x5ee1d2), in real pixels, so they were sized for 800x600 (fonts 0 and 1).
+const DROPDOWN_FONT: i32 = 3;
+const DROPDOWN_ROOM: usize = 0x5ee341; // lea eax, [eax + edi + 6]: a row's height over its font
+const DROPDOWN_PADDING: i32 = 12;
+
+/// A row of a popup area (its owner widget at +0x20e): a larger font, while the popup stays on the
+/// screen (the game asserts when one doesn't, so the rows past that stay small).
+#[allow(clippy::too_many_arguments)]
+extern "thiscall" fn widget_init(
+    this: usize, areas: usize, a3: u32, a4: u32, a5: u32, a6: u32, a7: u32, a8: u32, a9: u32, a10: u32,
+    a11: u32, a12: u32, a13: u32, a14: u32, a15: u32, font: i32, a17: u32, a18: u32, a19: u32, a20: u32,
+    a21: u32, area: i32,
+) -> u32 {
+    unsafe {
+        let mut font = font;
+        let a = areas + (area as i16 as usize) * 0xbf1;
+        if area as i16 != -1 && ((a + 0x20e) as *const i16).read_unaligned() != -1 {
+            // (by the screen the rows are for: a host builds its clients' screens)
+            let viewer = comp::viewer_height();
+            let big = viewer >= 1050;
+            // (the font comes from the host on a client, the rows are measured there)
+            let larger = if !remote::CLIENT && big && font & 0xffff < DROPDOWN_FONT { font & !0xffff | DROPDOWN_FONT } else { font };
+            let height = ((a + 0xc) as *const i32).read_unaligned();
+            let tall = game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)(larger & 0xffff) + DROPDOWN_PADDING;
+            let room = big && height + tall < viewer - 40;
+            if room {
+                font = larger;
+            }
+            static mut WRITABLE: bool = false;
+            if !std::mem::replace(&mut *(&raw mut WRITABLE), true) {
+                let mut old = 0;
+                VirtualProtect(DROPDOWN_ROOM as *mut u8, 1, 0x40, &mut old);
+            }
+            *(DROPDOWN_ROOM as *mut u8) = if room { DROPDOWN_PADDING as u8 } else { 6 };
+        }
+        type Init = extern "thiscall" fn(usize, usize, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, i32, u32, u32, u32, u32, u32, i32) -> u32;
+        game::<Init>(WIDGET_INIT)(this, areas, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, font, a17, a18, a19, a20, a21, area)
+    }
+}
 const OTHER_ITEM_CALL: usize = 0x80a774; // the add_item call of the View popup's "Other"
 const SEARCH_INPUT: usize = 0x80eb00; // search_screens_handle_player_search_input(widget), cdecl
 const SEARCH_VIEW: usize = 0xdd6cc8; // u32* to the current tab's view bits
@@ -5615,6 +5821,7 @@ extern "thiscall" fn send_click(display: usize, net: usize, widget: i32) -> i32 
         if trace() {
             log(&format!("click sent: widget {} {:?}", widget as i16, latin1(&widget_text(display, widget as i16))));
         }
+        remote::clicked();
         let r = game::<extern "thiscall" fn(usize, usize, i32) -> i32>(SEND_CLICK)(display, net, widget);
         *(BUTTON_HELD as *mut u32) = 0;
         *(RIGHT_HELD as *mut u32) = 0;
@@ -5640,6 +5847,7 @@ extern "thiscall" fn screen_sent(display: usize, net: usize, dest: i32) -> i32 {
             prefetch::send(channel as i16, display, dest as i16 as i32);
             let mut block = news::screen_block(display);
             block.extend(comp::history_block(channel));
+            block.extend(comp::form_block());
             if trace() {
                 log(&format!("cmui block to channel {channel} (seat {}): {} bytes", dest as i16, block.len()));
             }
@@ -5760,6 +5968,11 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
             news::PENDING_MARK = Some(channel);
             Some(Vec::new())
         }
+        // a click came: the answer says the host is there; the client's height for its rows
+        b'p' => {
+            comp::client_height(channel, arg(0) as i32);
+            None
+        }
         // the Assistant's pick for a client (mode, number, players not available) and its note
         b'H' => {
             let words: Vec<u32> = key[1..].chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
@@ -5879,6 +6092,35 @@ fn other_install_ignores_case_and_closing_slash() {
     assert!(!other_install("f:\\CM0102\\", "F:\\cm0102"));
     assert!(other_install("f:\\CM0102Orign", "F:\\CM0102 - Restructured 2025-2026"));
     assert!(!other_install("", "F:\\CM0102"));
+}
+
+#[cfg(test)]
+#[test]
+fn match_minutes_join_with_penalties() {
+    // what the game puts in the minutes cell of a scorer: two minutes a row
+    for t in [&b"7"[..], b"19, 58", b"pen 82", b"og 30", b"45+2", b"7, pen 25,", b"pen 7, og 25,", b"pen 45", b" 12, "] {
+        assert!(is_minutes(t), "{}", String::from_utf8_lossy(t));
+    }
+    for t in [&b""[..], b",", b"pen", b"Smith", b"Smith 7", b"7 injured", b"pen x"] {
+        assert!(!is_minutes(t), "{}", String::from_utf8_lossy(t));
+    }
+    // hat-trick with two penalties: a row of two and a row of one
+    assert_eq!(join_minutes(b"7, pen 25,", b"pen 45"), b"7, pen 25, pen 45");
+    // four goals: two rows of two, the second joined to the first
+    assert_eq!(join_minutes(b"10, 33,", b"pen 51, 80"), b"10, 33, pen 51, 80");
+    // no comma at the end of the first row
+    assert_eq!(join_minutes(b"7 ", b" 80 "), b"7, 80");
+}
+
+#[cfg(test)]
+#[test]
+fn event_text_colours() {
+    assert_eq!(event_colour(b"Smith sent off"), [0xd8, 0x30, 0x30]);
+    assert_eq!(event_colour(b"Jones injured"), [0xe0, 0x70, 0x60]);
+    assert_ne!(event_colour(b"Smith sent off"), event_colour(b"Jones injured"));
+    assert_eq!(event_colour(b"Smith m/pen"), [0xa0, 0xa6, 0xae]);
+    assert_eq!(event_colour(b"Smith missed"), [0xa0, 0xa6, 0xae]);
+    assert_eq!(event_colour(b"Smith"), [0x4c, 0xc0, 0x7a]);
 }
 
 /// The Print dropdown of the club screens as Export (switch `export_button`).
@@ -6060,6 +6302,13 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             // mov eax, [0xae237c] / sub esp, 0x1c; push ebx; push ebp
             comp::ADD_HISTORY_ORIG = hook_entry(comp::ADD_HISTORY, &[0xa1, 0x7c, 0x23, 0xae, 0x00], comp::add_history as usize);
             comp::HISTORY_WINNERS_ORIG = hook_entry(comp::HISTORY_WINNERS, &[0x83, 0xec, 0x1c, 0x53, 0x55], comp::history_winners as usize);
+            if on(STATS_TABLE) {
+                comp::one_view();
+            }
+            comp::live_table_paced();
+            if on(BIGGER_TEXT) {
+                patch_call(ADD_ITEM, 528, WIDGET_INIT, widget_init as usize);
+            }
             // mov eax, 0x2af8
             PACKET_ORIG = hook_entry(PACKET, &[0xb8, 0xf8, 0x2a, 0x00, 0x00], packet as usize);
             if on(THEME_ON) {

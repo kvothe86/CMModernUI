@@ -191,6 +191,10 @@ pub(crate) unsafe fn best_three(club: usize) -> Vec<usize> {
         .filter_map(|s| records(s).map(|(st, p)| (intrinsic(p, st, word(p, 5)), s)))
         .collect();
     squad.sort_by(|a, b| b.0.total_cmp(&a.0));
+    if crate::trace() {
+        let top: Vec<String> = squad.iter().take(6).map(|p| format!("{} {:.1} ca {}", crate::latin1(&crate::staff_name(p.1)), p.0, records(p.1).map_or(0, |(_, r)| word(&r, 5)))).collect();
+        crate::log(&format!("best three of {club:#x}: {top:?}"));
+    }
     squad.into_iter().take(3).map(|p| p.1).collect()
 }
 

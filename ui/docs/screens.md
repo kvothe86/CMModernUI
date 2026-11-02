@@ -125,6 +125,12 @@ bytes/row), `add_history` / `history_winners` (duplicate-row guards, hooks 0x4af
 `flip`, `honours` (club Honours list: cup and count over the game's rows, switch `honours`). Check: open a competition (Competitions menu, club > league > History, Stats > History);
 no suite part yet (manual; checklist item 8 in testing.md).
 
+League table, under `stats_table`: `one_view` puts the title on the View row and gives the rows the
+freed height, the whole competition on one view while a row stays readable (`table_area`: font 3's
+height, at 800x600 `NARROW_ROW`, so 24 clubs scroll there). At 800x600 `narrow`: rows font 2
+(`cell_font`, only cells as high as the head), pills 13 wide (`NARROW_FORM`), GD against Pld
+(`gd_right`). A nation column (`nation_column`, a group) or a live table has no Form.
+
 ## Match screen
 
 | Item | Functions |
@@ -132,6 +138,8 @@ no suite part yet (manual; checklist item 8 in testing.md).
 | Crests by scores, header band, labels, events, minutes | `match_text`, `LAST_MINUTES`, `event_icon`, `ball`, `club_named` |
 | Key stats strip, last-5-minutes bar | `match_overlays`, `key_stats`, `match_record` (live `*(param0+0x5f)`, afterwards param 0x20) |
 | HALF / FULL TIME | `match_text` (period M+0x4f) |
+| Man of the match on Player Ratings | `match_text` (his name by the slot `MOM_SLOT`), `light_man_of_match`, `half_of_row`: his half of the row, both sides stand in one list |
+| Band of the League Table tab | `match_overlays`: no date there, so two lines |
 
 Check: `suite.ps1 ... squad` (`_last_match`, `_last_match_stats`) and part `match` (live; moves the
 game on, run last). Spec: `..\helper_match.md`.

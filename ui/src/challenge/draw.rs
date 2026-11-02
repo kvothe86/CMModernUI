@@ -28,7 +28,7 @@ const ICON_CHECK: u32 = 0xE73E;
 const ICON_CROSS: u32 = 0xE711;
 const ICON_CLOCK: u32 = 0xE823;
 
-const TABS: [&[u8]; 6] = [b"Dashboard", b"Seizoen", b"RAD", b"Stats", b"Historie", b"Regels"];
+const TABS: [&[u8]; 6] = [b"Dashboard", b"Season", b"RAD", b"Stats", b"History", b"Rules"];
 const TAB_RAD: usize = 2;
 const SPIN_MS: u128 = 4000;
 
@@ -36,7 +36,8 @@ const SPIN_MS: u128 = 4000;
 /// is the bar of the plain game days (Game Options; a match has another); ours under it.
 static mut BAR_SEEN: Option<(i32, i32, i32, i32, u32, u32)> = None;
 static mut BAR_OPTIONS: bool = false;
-static mut BUTTON: Option<(i32, i32, i32, i32)> = None;
+static mut BAR_STATUS: Option<i32> = None; // the top of the status items at the bar's foot (news, player waiting)
+static mut BUTTON:Option<(i32, i32, i32, i32)> = None;
 static mut BUTTON_HOVER: bool = false;
 static mut FONT: u32 = 0;
 static mut COLOUR: u32 = 0;
@@ -48,8 +49,8 @@ static mut WAITING: bool = false; // a client's page on its way
 static mut LOOKED: Option<std::time::Instant> = None;
 static mut TAB: usize = 0;
 static mut PICK: usize = 0; // the manager on Stats and RAD
-static mut FILTER: usize = 0; // Historie: 0 all, else that manager
-static mut SCROLL: usize = 0; // Historie, Regels: the first row
+static mut FILTER: usize = 0; // History: 0 all, else that manager
+static mut SCROLL: usize = 0; // History, Rules: the first row
 static mut BACK_YEARS: i32 = 0; // RAD: how many seasons back
 static mut HOVER: Option<usize> = None;
 static mut HOVERED: Option<Spot> = None; // the spot of `HOVER`, while `SPOTS` is drawn anew
@@ -81,10 +82,21 @@ enum Spot {
 /// A menu bar button drawn (`sidebar_item`).
 pub unsafe fn bar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32, label: &str) {
     BAR_OPTIONS |= label.contains("options");
+    // (the status items stand at the bar's very foot: the button goes above them, not under)
+    // ("Waiting For Players" can also stand at the top, in Latest Scores' place)
+    if is_status(label) && y1 > screen().1 / 2 {
+        BAR_STATUS = Some(BAR_STATUS.map_or(y1, |t| t.min(y1)));
+        return;
+    }
     // (not ours, drawn the same way: it would walk down the bar)
     if !label.contains("challenge") && BAR_SEEN.is_none_or(|b| y2 > b.3) {
         BAR_SEEN = Some((x1, y1, x2, y2, font, colour));
     }
+}
+
+/// "You Have News" and "Player Waiting": they come and go at the foot of the bar.
+fn is_status(label: &str) -> bool {
+    label.contains("have news") || label.contains("waiting")
 }
 
 /// The button under the bar (the flip pass).
@@ -92,17 +104,19 @@ pub unsafe fn bar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
 pub unsafe fn flip(full_frame: bool) {
     let seen = std::mem::take(&mut BAR_SEEN);
     let options = std::mem::take(&mut BAR_OPTIONS);
+    let status = std::mem::take(&mut BAR_STATUS);
     if full_frame {
-        BUTTON = seen.filter(|_| options && network_game()).and_then(|(x1, y1, x2, y2, font, colour)| {
+        BUTTON = seen.filter(|_| options && game_on()).and_then(|(x1, y1, x2, y2, font, colour)| {
             let (h, (_, sh)) = (y2 - y1, screen());
-            (y2 + h + 4 < sh).then(|| {
+            (y2 + h + 4 < status.unwrap_or(sh)).then(|| {
                 FONT = font;
                 COLOUR = colour;
                 (x1, y2 + 4, x2, y2 + 4 + h)
             })
         });
     }
-    if let Some(b) = BUTTON {
+    // (the team and scout reports fill the whole screen, the menu bar too)
+    if let Some(b) = BUTTON.filter(|_| !assistant::REPORT_OPEN) {
         sidebar_item(b.0, b.1, b.2, b.3, FONT, if BUTTON_HOVER || OPEN { rgb(GOLD) as u32 } else { COLOUR }, b"CM\nChallenge");
     }
 }
@@ -136,7 +150,7 @@ unsafe fn request(action: u32, arg: u32, name: &[u8]) {
     if trace() {
         log(&format!("challenge page:\n{text}"));
     }
-    PAGE = to_latin1(&text);
+    PAGE = page_bytes(&text);
 }
 
 /// The mouse (poll_input): None when the page and the button have nothing to do with it.
@@ -147,7 +161,7 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     }
     let inside = |r: Rect| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
     if !OPEN {
-        let over = BUTTON.is_some_and(inside);
+        let over = !assistant::REPORT_OPEN && BUTTON.is_some_and(inside);
         let changed = std::mem::replace(&mut BUTTON_HOVER, over) != over;
         if over && released {
             open();
@@ -342,8 +356,10 @@ pub unsafe fn overlay() {
         draw_icon(ICON_TROPHY, x2 - h * 2 / 3, band.1 + h / 8, h * 6 / 10, GOLD);
         text_at((x1 + x2) / 2, band.1 + 4, band.1 + h * 58 / 100, f(6), INK, b"CM Challenge", 1);
         let line = match place {
-            Some(k) => [format!("{}e met {} punten", k + 1, latin1(managers[k][3])).as_bytes(), b"  -  Seizoen ", field(head, 1)].concat(),
-            None => [b"Seizoen ", field(head, 1)].concat(),
+            // (alone in the league: his rank, not a place)
+            Some(k) if managers.len() == 1 => [managers[k][4], format!(" with {} points", latin1(managers[k][3])).as_bytes(), b"  -  Season ", field(head, 1)].concat(),
+            Some(k) => [format!("{} with {} points", ordinal(k + 1), latin1(managers[k][3])).as_bytes(), b"  -  Season ", field(head, 1)].concat(),
+            None => [b"Season ", field(head, 1)].concat(),
         };
         text_at((x1 + x2) / 2, band.1 + h * 54 / 100, band.3 - 6, f(4), INK, &line, 1);
         // the tabs
@@ -366,7 +382,7 @@ pub unsafe fn overlay() {
         spot(b, Spot::Back);
         let area = (x1, tabs + tab_h + sh * 15 / 1000, x2, b.1 - sh * 15 / 1000);
         if page.is_empty() {
-            text_at((x1 + x2) / 2, sh / 2 - 30, sh / 2 + 30, f(4), MUTED, b"De stand wordt opgehaald...", 1);
+            text_at((x1 + x2) / 2, sh / 2 - 30, sh / 2 + 30, f(4), MUTED, b"Fetching the standings...", 1);
         } else {
             let names: Vec<&[u8]> = managers.iter().map(|k| k[1]).collect();
             match TAB {
@@ -403,18 +419,21 @@ unsafe fn bar(x1: i32, x2: i32, cy: i32, h: i32, percent: i32, c: [u8; 3]) {
     }
 }
 
-/// Dashboard: the standings with rank and the way to the next, the facts, the ranks.
+/// Dashboard: the standings with rank and the way to the next, the facts, the ranks; with one
+/// manager his career.
 unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: &Lines) {
     let (w, h) = (x2 - x1, y2 - y1);
-    let (tiles, legend) = (h * 15 / 100, h * 12 / 100);
-    let list_end = y2 - tiles - legend - 28;
+    // one manager (a single player game): his career, the standing a short card and the facts in two rows
+    let alone = rows.len() == 1;
+    let (tiles, legend) = (h * if alone { 17 } else { 15 } / 100, h * 12 / 100);
+    let list_end = if alone { y1 + h * 28 / 100 } else { y2 - tiles - legend - 28 };
     card((x1, y1, x2, list_end));
     let (x1i, x2i) = (x1 + 16, x2 - 16);
     let head = h * 5 / 100;
-    heading(x1i, y1 + 8, x2i, head, ICON_TROPHY, b"KLASSEMENT");
+    heading(x1i, y1 + 8, x2i, head, ICON_TROPHY, if alone { b"CAREER" } else { b"STANDINGS" });
     let col = |p: i32| x1i + (x2i - x1i) * p / 100;
     let top = y1 + head + 14;
-    for (label, p, align) in [(&b"#"[..], 3, 2), (b"MANAGER", 12, 0), (b"RANK", 45, 1), (b"PROGRESSIE", 52, 0), (b"PUNTEN", 100, 2)] {
+    for (label, p, align) in [(&b"#"[..], 3, 2), (b"MANAGER", 12, 0), (b"RANK", 45, 1), (b"PROGRESS", 52, 0), (b"POINTS", 100, 2)] {
         text_at(col(p), top, top + 24, f(2), MUTED, label, align);
     }
     let rh = ((list_end - top - 30) / (rows.len() as i32).max(3)).min(h / 7);
@@ -441,10 +460,10 @@ unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: 
     }
     // the facts: an icon, a big value, what it is
     let y = list_end + 12;
-    let n = (facts.len() as i32).max(1);
+    let n = (facts.len() as i32).max(1).min(if alone { 3 } else { 99 });
     let tw = (w - (n - 1) * 12) / n;
     for (k, t) in facts.iter().enumerate() {
-        let x = x1 + k as i32 * (tw + 12);
+        let (x, y) = (x1 + (k as i32 % n) * (tw + 12), y + (k as i32 / n) * (tiles + 12));
         card((x, y, x + tw, y + tiles));
         let icon = [0xE787, ICON_TROPHY, 0xE821, 0xE7C1][k.min(3)];
         draw_icon(icon, x + tw / 7, y + tiles / 3, tiles / 3, MEDAL);
@@ -454,7 +473,7 @@ unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: 
         text_at(x + tw / 4, y + tiles * 6 / 10, y + tiles * 9 / 10, f(2), MUTED, t[1], 0);
     }
     // the ranks to reach
-    let y = y + tiles + 12;
+    let y = y + (if alone { facts.len().div_ceil(3).max(1) as i32 } else { 1 }) * (tiles + 12);
     card((x1, y, x2, y2));
     let n = (ranks.len() as i32).max(1);
     let cw = (w - 24) / n;
@@ -467,7 +486,7 @@ unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: 
     }
 }
 
-/// Seizoen: this season so far, a card a manager with the game's results as chips.
+/// Season: this season so far, a card a manager with the game's results as chips.
 unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines) {
     let n = (rows.len() as i32).max(1);
     let bh = (y2 - y1 - (n - 1) * 12) / n;
@@ -484,10 +503,10 @@ unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines) {
         let badge = (x2 - 14 - wide, y + 10, x2 - 14, y + head - 2);
         round(badge, 4, PRIMARY);
         text_at((badge.0 + badge.2) / 2, badge.1, badge.3, f(5), DARK, r[3], 1);
-        text_at(badge.0 - 10, badge.1, badge.3, f(2), MUTED, b"punten dit seizoen", 2);
+        text_at(badge.0 - 10, badge.1, badge.3, f(2), MUTED, b"points this season", 2);
         let items: Vec<&[u8]> = r[4].split(|&c| c == b'|').filter(|i| !i.is_empty()).collect();
         if items.is_empty() {
-            text_at(x1 + 18, y + head + 6, y + head + 6 + chip_h, f(3), MUTED, b"Nog geen resultaten dit seizoen", 0);
+            text_at(x1 + 18, y + head + 6, y + head + 6 + chip_h, f(3), MUTED, b"No results yet this season", 0);
         }
         // the chips, wrapped: a trophy gold, a loss of points red
         let (mut x, mut row) = (x1 + 16, y + head + 8);
@@ -519,11 +538,11 @@ unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines) {
 fn standing(row: &[&[u8]], now: i32) -> (&'static [u8], [u8; 3], usize) {
     let (done, state, year) = (row[4] == b"1", number(field(row, 7)) as u8, number(field(row, 6)));
     match () {
-        _ if done => (b"Gehaald", SUCCESS, 1),
-        _ if state == track::BAD => (b"Mislukt", DANGER, 2),
-        _ if year < now => (b"Niet gehaald", DANGER, 2),
-        _ if state == track::GOOD => (b"Behaald", SUCCESS, 1),
-        _ => (b"Actief", CYAN, 0),
+        _ if done => (b"Done", SUCCESS, 1),
+        _ if state == track::BAD => (b"Failed", DANGER, 2),
+        _ if year < now => (b"Not done", DANGER, 2),
+        _ if state == track::GOOD => (b"Reached", SUCCESS, 1),
+        _ => (b"Active", CYAN, 0),
     }
 }
 
@@ -554,7 +573,7 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     let (lx, lr) = (x1 + 12, left_end - 12);
     text_at(lx, y1 + 2, y1 + line, f(4), GOLD, &[b"Managers  ", season.as_bytes()].concat(), 0);
     let col = |k: i32| lr - (2 - k) * (lr - lx) / 7;
-    let heads: [&[u8]; 3] = [b"Actief", b"Gehaald", b"Mislukt"];
+    let heads: [&[u8]; 3] = [b"Active", b"Done", b"Failed"];
     for (k, label) in heads.iter().enumerate() {
         text_at(col(k as i32), y1 + line, y1 + line * 3 / 2, f(2), MUTED, label, 2);
     }
@@ -580,9 +599,9 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
         let r = (lx, y, lr, y + line * 13 / 10);
         let busy = SPIN.is_some();
         fill(r.0, r.1, r.2, r.3, if busy { CARD } else if lit(&Spot::Spin) { SELECTED } else { BORDER });
-        let who = [b"Draai voor ", &word(chosen)[..]].concat();
+        let who = [b"Spin for ", &word(chosen)[..]].concat();
         text_at((lx + lr) / 2, r.1 + 2, r.1 + line * 8 / 10, f(4), GOLD, &who, 1);
-        text_at((lx + lr) / 2, r.1 + line * 7 / 10, r.3 - 2, f(2), MUTED, &[b"seizoen ", field(head, 1)].concat(), 1);
+        text_at((lx + lr) / 2, r.1 + line * 7 / 10, r.3 - 2, f(2), MUTED, &[b"season ", field(head, 1)].concat(), 1);
         if !busy {
             spot(r, Spot::Spin);
         }
@@ -596,18 +615,19 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     if let Some((since, name)) = &SPIN {
         let ms = since.elapsed().as_millis() as usize;
         let t = tasks[(ms / 90 * 7) % tasks.len().max(1)];
-        text_at(cx, shown.1 + 6, shown.1 + line, f(3), GOLD, &[b"RAD draait voor ", &word(name)[..], b"..."].concat(), 1);
+        text_at(cx, shown.1 + 6, shown.1 + line, f(3), GOLD, &[b"RAD spinning for ", &word(name)[..], b"..."].concat(), 1);
         assistant::report_text(tl, cy - line / 2, tr, shown.3 - 6, f(3), line * 7 / 10, t[2]);
     } else if let Some(r) = new {
-        text_at(cx, shown.1 + 6, shown.1 + line, f(2), GOLD, b"NIEUWE CHALLENGE", 1);
-        text_at(cx, shown.1 + line, shown.1 + line * 2, f(3), INK, &[&word(r[2])[..], b"  -  seizoen ", field(head, 1)].concat(), 1);
+        text_at(cx, shown.1 + 6, shown.1 + line, f(2), GOLD, b"NEW CHALLENGE", 1);
+        text_at(cx, shown.1 + line, shown.1 + line * 2, f(3), INK, &[&word(r[2])[..], b"  -  season ", field(head, 1)].concat(), 1);
         assistant::report_text(tl, shown.1 + line * 2, tr, shown.3 - line, f(3), line * 7 / 10, r[5]);
-        text_at(cx, shown.3 - line, shown.3 - 4, f(4), GOLD, &[b"+", r[3], b" punten"].concat(), 1);
+        text_at(cx, shown.3 - line, shown.3 - 4, f(4), GOLD, &[b"+", r[3], b" points"].concat(), 1);
     } else {
-        let says: &[u8] = match (NOTHING_LEFT, host) {
-            (true, _) => b"Geen challenge meer over",
-            (_, true) => b"Kies een manager en draai",
-            _ => b"De host draait en vinkt af",
+        let says: &[u8] = match (NOTHING_LEFT, host, names.len()) {
+            (true, _, _) => b"No challenge left",
+            (_, true, 1) => b"Spin to set yourself a challenge",
+            (_, true, _) => b"Pick a manager and spin",
+            _ => b"The host spins and ticks off",
         };
         text_at(cx, cy - line, cy + line, f(3), MUTED, says, 1);
     }
@@ -631,9 +651,9 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     let rh = (y2 - y1 - line * 3) / 8;
     let mut y = y1 + line + 8;
     if mine.is_empty() {
-        text_at(rx, y, y + line, f(3), MUTED, b"Geen challenges in dit seizoen", 0);
+        text_at(rx, y, y + line, f(3), MUTED, b"No challenges this season", 0);
     }
-    for (group, title) in [(0, &b"ACTIEF"[..]), (1, b"GEHAALD"), (2, b"MISLUKT")] {
+    for (group, title) in [(0, &b"ACTIVE"[..]), (1, b"DONE"), (2, b"FAILED")] {
         let rows: Vec<_> = mine.iter().filter(|r| standing(r, now).2 == group).collect();
         if rows.is_empty() {
             continue;
@@ -648,7 +668,7 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
             y += rh;
         }
     }
-    let foot = if host { format!("{points} punten binnen. Klik op een rij om hem af te vinken, op het kruis om hem te verwijderen.") } else { format!("{points} punten binnen. De host draait en vinkt af.") };
+    let foot = if host { format!("{points} points in. Click a row to tick it off, the cross to remove it.") } else { format!("{points} points in. The host spins and ticks off.") };
     text_at(rx, y2 - line * 7 / 10, y2 - 2, f(2), MUTED, foot.as_bytes(), 0);
 }
 
@@ -670,23 +690,23 @@ unsafe fn challenge_row(r: Rect, row: &[&[u8]], now: i32, host: bool) {
         draw_icon(ICON_CHECK, (mark.0 + mark.2) / 2, mark.1 + size / 5, size * 6 / 10, INK);
     }
     let tx = mark.2 + 10;
-    let badge = text_width(f(2), b"Niet gehaald") + 20;
+    let badge = text_width(f(2), b"Not done") + 20;
     let room = r.2 - tx - badge - 96;
     text_at(tx, r.1 + 1, r.1 + h * 58 / 100, f(3), INK, &clip_text(f(3), row[5], room), 0);
     let says: Vec<u8> = if manual {
-        b"Door de host gezet".to_vec()
+        b"Set by the host".to_vec()
     } else if !note.is_empty() {
         note.to_vec()
     } else if tracked {
-        b"De game volgt dit".to_vec()
+        b"The game follows this".to_vec()
     } else {
-        b"De host vinkt af".to_vec()
+        b"The host ticks it off".to_vec()
     };
     text_at(tx, r.1 + h * 54 / 100, r.3 - 1, f(2), MUTED, &says, 0);
     let end = r.2 - if host { 30 } else { 8 };
     let pill_at = (end - badge, r.1 + h / 4, end, r.3 - h / 4);
     round(pill_at, 4, CARD);
-    text_at((pill_at.0 + pill_at.2) / 2, pill_at.1, pill_at.3, f(2), colour, if new { b"Nieuw" } else { word }, 1);
+    text_at((pill_at.0 + pill_at.2) / 2, pill_at.1, pill_at.3, f(2), colour, if new { b"New" } else { word }, 1);
     text_at(pill_at.0 - 8, r.1, r.3, f(3), GOLD, &[b"+", row[3]].concat(), 2);
     if host {
         spot((r.0, r.1, r.2 - 30, r.3), tick);
@@ -724,7 +744,7 @@ unsafe fn stats((x1, y1, x2, y2): Rect, tiles: &Lines, cards: &Lines, names: &[&
     let inner = top + ch + 12;
     let graph = (x1i, inner, x1i + (x2i - x1i) * 58 / 100, inner + (y2 - inner) * 46 / 100);
     round(graph, 4, BG);
-    text_at(graph.0 + 10, graph.1 + 2, graph.1 + 22, f(2), MUTED, b"PROGRESSIE", 0);
+    text_at(graph.0 + 10, graph.1 + 2, graph.1 + 22, f(2), MUTED, b"PROGRESS", 0);
     let bars: Vec<(i32, i32)> = c[13].split(|&b| b == b',').filter_map(|b| {
         let p: Vec<&[u8]> = b.split(|&x| x == b'=').collect();
         (p.len() == 2).then(|| (number(p[0]), number(p[1])))
@@ -742,7 +762,7 @@ unsafe fn stats((x1, y1, x2, y2): Rect, tiles: &Lines, cards: &Lines, names: &[&
     // his numbers
     let (mx, mw) = (graph.2 + 10, (x2i - graph.2 - 22) / 2);
     let mh = (graph.3 - graph.1 - 16) / 3;
-    let numbers: [(&[u8], &[u8]); 6] = [(seasons, b"Seizoenen"), (avg, b"Punten/seizoen"), (best, b"Beste seizoen"), (worst, b"Slechtste seizoen"), (clubs, b"Unieke clubs"), (scorer, b"Topscorer")];
+    let numbers: [(&[u8], &[u8]); 6] = [(seasons, b"Seasons"), (avg, b"Points/season"), (best, b"Best season"), (worst, b"Worst season"), (clubs, b"Unique clubs"), (scorer, b"Top scorer")];
     for (k, (value, label)) in numbers.iter().enumerate() {
         let (x, y) = (mx + (k as i32 % 2) * (mw + 8), graph.1 + (k as i32 / 2) * (mh + 8));
         let r = (x, y, x + mw, y + mh);
@@ -754,12 +774,12 @@ unsafe fn stats((x1, y1, x2, y2): Rect, tiles: &Lines, cards: &Lines, names: &[&
     // palmares, RAD and how his points came
     let low = graph.3 + 10;
     let split = x1i + (x2i - x1i) * 52 / 100;
-    text_at(x1i, low, low + 26, f(3), INK, b"Palmares", 0);
+    text_at(x1i, low, low + 26, f(3), INK, b"Honours", 0);
     let row = text_width(f(2), b"Mg") * 2 / 3 + 8;
     let (mut y, mut club) = (low + 28, &b""[..]);
     let palmares: Vec<Vec<&[u8]>> = c[14].split(|&b| b == b'|').filter(|p| !p.is_empty()).map(|p| p.split(|&x| x == b';').collect()).collect();
     if palmares.is_empty() {
-        text_at(x1i, y, y + row, f(2), MUTED, b"Nog geen prijzen", 0);
+        text_at(x1i, y, y + row, f(2), MUTED, b"No trophies yet", 0);
     }
     for p in &palmares {
         if y + row * 2 > y2 - 6 {
@@ -778,15 +798,27 @@ unsafe fn stats((x1, y1, x2, y2): Rect, tiles: &Lines, cards: &Lines, names: &[&
     let percent = if all > 0 { done * 100 / all } else { 0 };
     text_at((split + x2i) / 2, low + 26, low + 74, f(6), INK, format!("{percent}%").as_bytes(), 1);
     bar(split, x2i, low + 84, 10, percent, CYAN);
-    text_at(split, low + 92, low + 116, f(2), MUTED, format!("Voltooid: {done}").as_bytes(), 0);
-    text_at(x2i, low + 92, low + 116, f(2), MUTED, format!("Totaal: {all}").as_bytes(), 2);
+    text_at(split, low + 92, low + 116, f(2), MUTED, format!("Done: {done}").as_bytes(), 0);
+    text_at(x2i, low + 92, low + 116, f(2), MUTED, format!("Total: {all}").as_bytes(), 2);
     let total = (items + points).max(1);
-    text_at(split, low + 118, low + 142, f(2), MUTED, b"Puntverdeling", 0);
+    text_at(split, low + 118, low + 142, f(2), MUTED, b"Points split", 0);
     let (dy, cut) = (low + 148, split + (x2i - split) * items.max(0) / total);
     fill(split, dy, cut, dy + 10, ROSE);
     fill(cut, dy, x2i, dy + 10, CYAN);
-    text_at(split, dy + 12, dy + 36, f(2), ROSE, format!("Resultaten ({}%)", items * 100 / total).as_bytes(), 0);
+    text_at(split, dy + 12, dy + 36, f(2), ROSE, format!("Results ({}%)", items * 100 / total).as_bytes(), 0);
     text_at(x2i, dy + 12, dy + 36, f(2), CYAN, format!("RAD ({}%)", points * 100 / total).as_bytes(), 2);
+}
+
+/// 1st, 2nd, 3rd, 4th...
+fn ordinal(n: usize) -> String {
+    let end = match (n % 100, n % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!("{n}{end}")
 }
 
 /// Up and down buttons for a long list.
@@ -799,11 +831,11 @@ unsafe fn pager(x: i32, y: i32, size: i32, more_above: bool, more_below: bool) {
     }
 }
 
-/// Historie: every season, newest first, of everyone or one manager.
+/// History: every season, newest first, of everyone or one manager.
 #[allow(static_mut_refs)]
 unsafe fn past((x1, y1, x2, y2): Rect, rows: &Lines, names: &[&[u8]]) {
     let ch = (y2 - y1) * 5 / 100;
-    let mut list: Vec<&[u8]> = vec![b"Alle managers"];
+    let mut list: Vec<&[u8]> = vec![b"All managers"];
     list.extend(names.iter().copied());
     chips(x1, y1, ch, &list, FILTER, Spot::Filter);
     let top = y1 + ch + 10;
@@ -815,7 +847,7 @@ unsafe fn past((x1, y1, x2, y2): Rect, rows: &Lines, names: &[&[u8]]) {
     let rh = text_width(f(3), b"Mg") * 2 / 3 + 12;
     let shown = ((y2 - top - rh - 8) / rh).max(1) as usize;
     SCROLL = SCROLL.min(rows.len().saturating_sub(shown));
-    let cols: [(&[u8], i32, i32); 8] = [(b"SEIZOEN", 0, 0), (b"MANAGER", 85, 0), (b"CLUB", 170, 0), (b"TOPSCORER", 320, 0), (b"G", 480, 2), (b"C", 520, 2), (b"PNT", 575, 2), (b"RESULTATEN", 595, 0)];
+    let cols: [(&[u8], i32, i32); 8] = [(b"SEASON", 0, 0), (b"MANAGER", 85, 0), (b"CLUB", 170, 0), (b"TOP SCORER", 320, 0), (b"G", 480, 2), (b"C", 520, 2), (b"PTS", 575, 2), (b"RESULTS", 595, 0)];
     for c in cols {
         text_at(col(c.1), top + 4, top + rh, f(2), MUTED, c.0, c.2);
     }
@@ -834,13 +866,13 @@ unsafe fn past((x1, y1, x2, y2): Rect, rows: &Lines, names: &[&[u8]]) {
     pager(x2 - 8, y1, ch, SCROLL > 0, SCROLL + shown < rows.len());
 }
 
-/// Regels: what everything is worth: prizes, ranks and the RAD list, with what the game follows.
+/// Rules: what everything is worth: prizes, ranks and the RAD list, with what the game follows.
 #[allow(static_mut_refs)]
 unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &Lines) {
     let ch = (y2 - y1) * 5 / 100;
     card((x1, y1, x2, y2));
     let (x1i, x2i) = (x1 + 16, x2 - 16);
-    heading(x1i, y1 + 8, x2i, ch, 0xE8A5, b"REGELS");
+    heading(x1i, y1 + 8, x2i, ch, 0xE8A5, b"RULES");
     // every line: a head or a row (text, value, trophy or followed by the game)
     let mut all: Vec<(Vec<u8>, Vec<u8>, bool, bool)> = Vec::new();
     let mut last: &[u8] = b"";
@@ -866,8 +898,21 @@ unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &L
     let rh = text_width(f(2), b"Mg") * 2 / 3 + 6;
     let top = y1 + ch + 14;
     let per = ((y2 - top - 8) / rh).max(1) as usize;
-    let columns = 3usize;
-    let (gap, cw) = (16, (x2i - x1i - 2 * 16) / 3);
+    // (two on 800x600: three cut most rules short)
+    let columns = if x2 - x1 < 720 { 2usize } else { 3 };
+    let (gap, cw) = (16, (x2i - x1i - (columns as i32 - 1) * 16) / columns as i32);
+    // a rule too long for its column goes on on the next row
+    let room = cw - 62;
+    let mut k = 0;
+    while k < all.len() {
+        let fits = clip_text(f(1), &all[k].0, room).len();
+        if fits < all[k].0.len() {
+            let cut = all[k].0[..fits].iter().rposition(|&b| b == b' ').map_or(fits.max(1), |s| s + 1);
+            let rest = all[k].0.split_off(cut);
+            all.insert(k + 1, (rest, Vec::new(), false, false));
+        }
+        k += 1;
+    }
     SCROLL = SCROLL.min(all.len().saturating_sub(per * columns));
     for (k, (text, value, mark, is_head)) in all.iter().skip(SCROLL).take(per * columns).enumerate() {
         let (c, row) = ((k / per) as i32, (k % per) as i32);
@@ -880,9 +925,11 @@ unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &L
             let (icon, colour) = if value.first() == Some(&b'+') && text.len() > 0 && prizes.iter().any(|p| p[2] == &text[..]) { (ICON_TROPHY, MEDAL) } else { (ICON_CHECK, SUCCESS) };
             draw_icon(icon, x + 9, y + 3, rh - 8, colour);
         }
-        text_at(x + 22, y, y + rh, f(2), INK, &clip_text(f(2), text, cw - 62), 0);
+        // (a long rule a size down: a client's fonts run wider)
+        let font = if value.is_empty() || clip_text(f(2), text, room).len() < text.len() { f(1) } else { f(2) };
+        text_at(x + 22, y, y + rh, font, INK, text, 0);
         text_at(x + cw, y, y + rh, f(2), PRIMARY, value, 2);
     }
-    text_at(x2i - 2 * ch - 20, y1 + 8, y1 + 8 + ch, f(2), MUTED, b"Vinkje: volgt de game zelf", 2);
+    text_at(x2i - 2 * ch - 20, y1 + 8, y1 + 8 + ch, f(2), MUTED, b"Tick: the game follows it itself", 2);
     pager(x2i, y1 + 10, ch - 4, SCROLL > 0, SCROLL + per * columns < all.len());
 }

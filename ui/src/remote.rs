@@ -93,6 +93,7 @@ pub unsafe fn new_screen() {
         log_screen();
     }
     SCREEN = (SCREEN.0 + 1, Some(Instant::now()), 0, 0, 0);
+    CLICKED = None;
     // (a host that sends blocks sends its prefetch before the block: questions wait for it)
     HOLD = HOST_BLOCKS.then(Instant::now);
     let old = Instant::now() - FRESH - Duration::from_millis(1);
@@ -157,6 +158,7 @@ pub unsafe fn reset() {
     SCREEN = (0, None, 0, 0, 0);
     HOST_BLOCKS = false;
     HOLD = None;
+    CLICKED = None;
 }
 
 /// A network client: the cmui block of its current screen (`NETWORK_PLAN.md`), as the host sent
@@ -244,6 +246,35 @@ pub unsafe fn send_now(key: &[u8]) {
     }
 }
 
+/// A click went to the host and nothing has come from it since. Its game thread is elsewhere (a
+/// dialog on the host's own screen held links dead for two minutes, night 5 b0): the click waits
+/// in the connection and is taken when the host is back.
+static mut CLICKED: Option<Instant> = None;
+static mut SILENT_SHOWN: bool = false;
+const SILENT: Duration = Duration::from_millis(1500);
+
+/// A click was sent: a question with it, whose answer says the host is there.
+pub unsafe fn clicked() {
+    send_now(&crate::key(b'p', &[crate::screen().1 as u32]));
+    CLICKED = Some(Instant::now());
+}
+
+pub unsafe fn host_silent() -> bool {
+    // ponytail: test switch, a file cmui.silent in a client's folder at its start: the wait box
+    // stays on (the real stall could not be made on demand; waiting for a screen is the game's
+    // own "Contacting Server...")
+    static mut SHOW_ALWAYS: Option<bool> = None;
+    #[allow(static_mut_refs)]
+    let always = *SHOW_ALWAYS.get_or_insert_with(|| std::path::Path::new("cmui.silent").exists());
+    always || CLICKED.is_some_and(|t| t.elapsed() > SILENT)
+}
+
+/// The host fell silent or came back since the last look: the screen is drawn again.
+pub unsafe fn silence_changed() -> bool {
+    let now = host_silent();
+    now != std::mem::replace(&mut *(&raw mut SILENT_SHOWN), now)
+}
+
 /// One answer as an 'a' packet carries it: key length u16, key, found u8, value length u32, value.
 pub fn answer_entry(key: &[u8], value: Option<Vec<u8>>) -> Vec<u8> {
     let mut e = (key.len() as u16).to_le_bytes().to_vec();
@@ -273,6 +304,7 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
 /// A cmui packet (opcode OPCODE) the game passed to Display::process_command_packet: a question
 /// on the host (answered with `answer`, for the channel that sent it), answers on the client.
 pub unsafe fn received(data: &[u8], slot: i32, answer: &dyn Fn(i16, &[u8]) -> Option<Vec<u8>>) {
+    CLICKED = None;
     match data.get(1) {
         Some(b'q') => {
             // the channel whose seat is this slot: record +0x7d4 (0x300 a channel)

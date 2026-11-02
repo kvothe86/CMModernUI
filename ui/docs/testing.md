@@ -16,6 +16,7 @@ control goes through files in the game folder that cmui polls.
 | `cmui.quit` | cmui ends the game (checked every 500 ms by a thread) |
 | `cmui.peek` | logs the first bytes of the hooked functions |
 | `cmui.noremote` | a network client stops asking the host (test switch) |
+| `cmui.silent` | in a client's folder at its start: the "Waiting for the host ..." box stays on |
 | `cmui.ini` | switches, see [switches.md](switches.md) |
 
 ## Script commands (`script()` in `lib.rs`; one a line, `pause` ms after each)

@@ -21,6 +21,11 @@ pub(crate) const INJURIES: usize = 0xb63d28;
 pub(crate) const DISCIPLINE: usize = 0xae28f0; // Discipline*
 const COMP_TABLE: usize = 0xadadfc; // competitions by id, as the ban check reads them
 const BANNED: usize = 0x55d270; // Discipline::is_player_banned(staff, comp, 1, 0) -> nonzero when banned
+const TRANSFER_MANAGER: usize = 0xde1f54; // TRANSFER_MANAGER*
+const INELIGIBLE: usize = 0x8cf5e0; // thiscall(TRANSFER_MANAGER*, Staff*, Fixture*) -> reason, 0 when he may play (the pre-match check 0x7260f0 asks it)
+/// The key ids (int each) of the Champions League, Cup Winners Cup, UEFA Cup and Inter-toto Cup:
+/// the competitions EUROPE_RULES 0x5832e0 judges by registration (staff +0x6d == 2; under 20 free).
+const EURO_KEYS: [usize; 4] = [0x9cf6e8, 0x9cf6ec, 0x9cf6f0, 0x9cf6f8];
 /// Player record attributes (as `scout.rs` has them): stored 1..20, or intrinsic (converted with
 /// his CA the way the profile shows them).
 const INFLUENCE: (usize, bool) = (0x2f, false);
@@ -103,7 +108,7 @@ const FORMATIONS: [(&str, [&str; 10]); 11] = [
     ("4-1-3-2", ["DL", "DC", "DC", "DR", "DMC", "MC", "MC", "MC", "FC", "FC"]),
 ];
 static mut SQUAD_HERE: bool = false; // this is the squad screen (the tactics screen has no report)
-static mut REPORT_OPEN: bool = false;
+pub static mut REPORT_OPEN: bool = false;
 static mut REPORT: Vec<u8> = Vec::new(); // empty: a client's answer has not come yet
 static mut REPORT_FONT: u32 = 0;
 static mut REPORT_HOVER: bool = false;
@@ -381,7 +386,7 @@ pub unsafe fn flip(full_frame: bool) {
             let r = item_rect(b, k);
             fill(r.0, r.1, r.2, r.3, if HOVER == Some(k) { SELECTED } else { [0x22, 0x25, 0x2a] });
             fill(r.0, r.3 - 1, r.2, r.3, [0x34, 0x38, 0x40]);
-            put(r.0 + 14, r.1, r.2, r.3, 0x9, font, if HOVER == Some(k) { GOLD } else { LIGHT }, name);
+            put(r.0 + 14, r.1, r.2, r.3, 0x9, size, if HOVER == Some(k) { GOLD } else { LIGHT }, name);
         }
     }
     if let (false, Some(t)) = (NOTE.is_empty(), TITLE_BAND) {
@@ -613,7 +618,7 @@ unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
     let eye = Eye { mode: Mode::Best, id: rd::<i32>(judge), reading: coaching(judge, 0x21) };
     // (as `report_for`: the ban check takes a banned player out of the club's selection)
     let selection = ((club + 0x1e0) as *const [usize; 20]).read_unaligned();
-    let pool = candidates_in(judge, club, rd::<usize>(club + 0x57), &[], &[]);
+    let pool = candidates_in(judge, club, rd::<usize>(club + 0x57), 0, &[], &[]);
     ((club + 0x1e0) as *mut [usize; 20]).write_unaligned(selection);
     let first = eleven(&eye, &pool, &labels);
     let first: Vec<Option<usize>> = first.iter().map(|c| c.map(|i| pool[i].staff)).collect();
@@ -1272,11 +1277,24 @@ unsafe fn next_fixture(ts: Option<usize>, club: usize) -> usize {
 
 /// The players a club's assistant can choose from: not injured, banned or marked not available.
 unsafe fn candidates(a: usize, club: usize, fixture: usize, unavailable: &[usize], before: &[usize]) -> Vec<Candidate> {
-    candidates_in(a, club, if fixture != 0 { rd::<usize>(fixture + 0x14) } else { 0 }, unavailable, before)
+    candidates_in(a, club, if fixture != 0 { rd::<usize>(fixture + 0x14) } else { 0 }, fixture, unavailable, before)
 }
 
-/// `candidates` for a competition's bans.
-unsafe fn candidates_in(a: usize, club: usize, comp: usize, unavailable: &[usize], before: &[usize]) -> Vec<Candidate> {
+/// The fixture is a match of a European club competition (its registration rule applies).
+unsafe fn european(fixture: usize) -> bool {
+    if !readable(fixture, 0x50) {
+        return false;
+    }
+    let comp = rd::<usize>(fixture + 0x14);
+    mapped(comp, 4) && EURO_KEYS.iter().any(|&k| mapped(k, 4) && rd::<i32>(comp) == rd::<i32>(k))
+}
+
+/// `candidates` for a competition's bans; a European `fixture` also leaves out whom the game's own
+/// check (0x8cf5e0, as the pre-match check asks it) does not let play: not registered for Europe.
+unsafe fn candidates_in(a: usize, club: usize, comp: usize, fixture: usize, unavailable: &[usize], before: &[usize]) -> Vec<Candidate> {
+    let transfers = rd::<usize>(TRANSFER_MANAGER);
+    let registered = european(fixture) && mapped(transfers, 4);
+    let ineligible = |staff: usize| registered && game::<extern "thiscall" fn(usize, usize, usize) -> i32>(INELIGIBLE)(transfers, staff, fixture) & 0xff != 0;
     let injuries = rd::<usize>(INJURIES);
     let judge = game::<extern "C" fn(usize, usize, usize, i32, i32) -> i32>(JUDGE);
     let discipline = rd::<usize>(DISCIPLINE);
@@ -1288,7 +1306,7 @@ unsafe fn candidates_in(a: usize, club: usize, comp: usize, unavailable: &[usize
     let mut pool: Vec<Candidate> = Vec::new();
     for k in 0..50 {
         let staff = rd::<usize>(club + 0xd7 + 4 * k);
-        if !readable(staff, 0x6e) || !plays_for(staff, club) || unavailable.contains(&staff) || banned(staff) {
+        if !readable(staff, 0x6e) || !plays_for(staff, club) || unavailable.contains(&staff) || banned(staff) || ineligible(staff) {
             continue;
         }
         let player = ((staff + 0x61) as *const usize).read_unaligned();
@@ -1488,6 +1506,10 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
     }
     if mode == Mode::Rotation && reasons.is_empty() {
         reasons.push("no one needed a rest".to_string());
+    }
+    // (a European match: the rule he kept to comes first)
+    if european(fixture) {
+        reasons.insert(0, "only players registered for Europe".to_string());
     }
     // (three parts: what he did, why, who takes what; a narrow band shows the first and last)
     note += ".\n";

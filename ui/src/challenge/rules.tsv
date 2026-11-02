@@ -1,39 +1,39 @@
-P	Europa	CL Phase 2	3	0
-P	Europa	CL Winnaar	20	1
-P	Europa	CL Finalist	12	0
-P	Europa	CL Kwartfinale	5	0
-P	Europa	CL Halve finale	8	0
-P	Europa	UEFA Cup Winnaar	12	1
-P	Europa	UEFA Cup Finalist	7	0
-P	Europa	UEFA Cup Kwartfinale	3	0
-P	Europa	UEFA Cup Halve finale	5	0
-P	Supercup	Nat. Supercup	3	1
-P	Supercup	Europese Supercup Winnaar	3	1
-P	Nationaal	Kampioen	10	1
-P	Nationaal	2e plaats	6	0
-P	Nationaal	3e plaats	4	0
-P	Nationaal	Kampioen LL	5	1
-P	Nationaal	Promotie LL	3	0
-P	Nationaal	Bekerwinnaar	6	1
-P	Nationaal	Finalist beker	2	0
-P	Nationaal	Europees voetbal	2	0
-P	Teamwissel	3+ seizoenen	0	0
-P	Teamwissel	Vertrek na 1 seizoen	-10	0
-P	Teamwissel	Vertrek na 2 seizoenen	-5	0
-P	Teamwissel	5+ seizoenen (loyaliteit)	3	0
-P	Landenteams	WK Landenteams Winnaar	20	1
-P	Landenteams	WK Landenteams Finalist	12	0
-P	Landenteams	WK Landenteams Kwartfinale	5	0
-P	Landenteams	WK Landenteams Halve finale	8	0
-P	Landenteams	Continentaal landentoernooi Winnaar	10	1
-P	Landenteams	Continentaal landentoernooi Finalist	6	0
-P	Landenteams	Continentaal landentoernooi Halve finale	4	0
-P	Trophy Drought	Eerste prijs 10+ jaar	3	0
-P	Trophy Drought	Eerste prijs 20+ jaar	6	0
-P	Trophy Drought	Eerste prijs 30+ jaar	10	0
-P	Wereld (Clubs)	WK Clubteams Winnaar	15	1
-P	Wereld (Clubs)	WK Clubteams Finalist	8	0
-P	Wereld (Clubs)	WK Clubteams Halve finalist	4	0
+P	Europe	CL Phase 2	3	0
+P	Europe	CL Winner	20	1
+P	Europe	CL Finalist	12	0
+P	Europe	CL Quarter final	5	0
+P	Europe	CL Semi final	8	0
+P	Europe	UEFA Cup Winner	12	1
+P	Europe	UEFA Cup Finalist	7	0
+P	Europe	UEFA Cup Quarter final	3	0
+P	Europe	UEFA Cup Semi final	5	0
+P	Supercups	National Supercup	3	1
+P	Supercups	European Supercup Winner	3	1
+P	National	Champion	10	1
+P	National	2nd place	6	0
+P	National	3rd place	4	0
+P	National	Lower league champion	5	1
+P	National	Lower league promotion	3	0
+P	National	Cup winner	6	1
+P	National	Cup finalist	2	0
+P	National	European football	2	0
+P	Club changes	3+ seasons	0	0
+P	Club changes	Left after 1 season	-10	0
+P	Club changes	Left after 2 seasons	-5	0
+P	Club changes	5+ seasons (loyalty)	3	0
+P	National teams	World Cup Winner	20	1
+P	National teams	World Cup Finalist	12	0
+P	National teams	World Cup Quarter final	5	0
+P	National teams	World Cup Semi final	8	0
+P	National teams	Continental tournament Winner	10	1
+P	National teams	Continental tournament Finalist	6	0
+P	National teams	Continental tournament Semi final	4	0
+P	Trophy Drought	First prize in 10+ years	3	0
+P	Trophy Drought	First prize in 20+ years	6	0
+P	Trophy Drought	First prize in 30+ years	10	0
+P	World (clubs)	Club World Cup Winner	15	1
+P	World (clubs)	Club World Cup Finalist	8	0
+P	World (clubs)	Club World Cup Semi final	4	0
 G	Gold	150
 G	Bronze	25
 G	Legend	1000
@@ -41,61 +41,61 @@ G	Silver	75
 G	Diamond	350
 G	Champion	700
 G	Platinum	500
-C	Staff	Geen staf	6
-C	Staff	Assistent manager <10	3
-C	Staff	Max 2 stafleden totaal	3
-C	Staff	Alleen Nederlandse staf	3
-C	Staff	Geen fysio én geen scout	3
-C	Staff	Alle coaches met coaching attributes onder de 5	6
-C	Spelers	Keeper 10+ clean sheets	6
-C	Spelers	Speler scoort 20+ goals	9
-C	Spelers	Minstens 3 spelers met 10+ goals	6
-C	Spelers	Minstens 3 spelers met 5+ assists	6
-C	Spelers	Haal als team niet meer dan 3 rode kaarten	6
-C	Spelers	Haal als team niet meer dan 5 rode kaarten	3
-C	Spelers	Speler haalt twee van de drie (topscorer/assists/HG)	6
-C	Spelers	Speler wordt topscorer OF top assists OF hoogste gemiddelde	3
-C	Tactiek	Speel met sweeper in basiself	6
-C	Tactiek	Speel zonder vleugelverdedigers	6
-C	Tactiek	Speel met minstens drie aanvallers	3
-C	Tactiek	Altijd 4-4-2 (geen andere formatie)	3
-C	Tactiek	Speel met minstens vijf verdedigers	3
-C	Tactiek	Speel met minstens vijf middenvelders	3
-C	Tactiek	Speel zonder aanvallende vleugelspelers	6
-C	Tactiek	Speel zonder spits (min. 15 comp-wedstrijden)	6
-C	Tactiek	Speel park the bus, defensive, long ball, counter	6
-C	Leeftijd	3 spelers 35+ in basiself	6
-C	Leeftijd	5 spelers 30+ in basiself	6
-C	Leeftijd	5 spelers 32+ in basiself	9
-C	Leeftijd	5 spelers onder 21 in basiself	3
-C	Leeftijd	5 spelers onder 23 in basiself	3
-C	Leeftijd	Gemiddelde leeftijd basiself <=23	6
-C	Leeftijd	Gemiddelde leeftijd basiself >=30	6
-C	Leeftijd	Geen speler jonger dan 18 in basiself	3
-C	Selectie	5 spelers linksbenig in basiself	3
-C	Selectie	5 spelers rechtsbenig in basiself	3
-C	Selectie	Keeper + 4 verdedigers allemaal 28+	6
-C	Selectie	Minstens 3 homegrown spelers in basiself	6
-C	Selectie	Geen speler met waarde > €10M in basiself	6
-C	Selectie	Minstens 2 jeugdspelers gepromoveerd naar basiself	6
-C	Selectie	Minstens 3 spelers met internationale caps dit seizoen	6
-C	Transfers	Max 1 aankoop	9
-C	Transfers	Max 3 aankopen	6
-C	Transfers	Geen wintertransfers	3
-C	Transfers	Geen aankopen > €2M	6
-C	Transfers	Geen verkopen in winter	3
-C	Transfers	Alleen spelers <23 kopen	6
-C	Transfers	Grootste aankoop < €5M	6
-C	Transfers	Alleen Bosman/vrije transfers	6
-C	Transfers	Verkoop je beste speler (avg rating 1 januari)	6
-C	Transfers	Ontsla vijf spelers uit je team (zonder vergoeding)	6
-C	Nationaliteit	5 spelers uit Afrika	6
-C	Nationaliteit	5 spelers uit Z-Amerika	6
-C	Nationaliteit	5 spelers uit Oost-Europa	6
-C	Nationaliteit	5 spelers uit Scandinavië	6
-C	Nationaliteit	5 buitenlanders in basiself	3
-C	Nationaliteit	5 spelers uit NED/BEL/POR/TUR	3
-C	Nationaliteit	5 spelers uit ENG/SPA/GER/ITA/FRA	3
-C	Nationaliteit	3 spelers uit hetzelfde land (niet eigen land)	3
-C	Nationaliteit	Geen speler uit eigen land in basiself (min. 15x)	9
-C	Nationaliteit	Minstens 5 verschillende nationaliteiten in basiself	6
+C	Staff	No staff	6
+C	Staff	Assistant manager <10	3
+C	Staff	Max 2 staff members in total	3
+C	Staff	Dutch staff only	3
+C	Staff	No physio and no scout	3
+C	Staff	All coaches with coaching attributes below 5	6
+C	Players	Keeper 10+ clean sheets	6
+C	Players	Player scores 20+ goals	9
+C	Players	At least 3 players with 10+ goals	6
+C	Players	At least 3 players with 5+ assists	6
+C	Players	Team gets no more than 3 red cards	6
+C	Players	Team gets no more than 5 red cards	3
+C	Players	Player gets two of three (top scorer/assists/average rating)	6
+C	Players	Player becomes top scorer OR top assists OR highest average rating	3
+C	Tactics	Play with a sweeper in the starting XI	6
+C	Tactics	Play without wing backs	6
+C	Tactics	Play with at least three attackers	3
+C	Tactics	Always 4-4-2 (no other formation)	3
+C	Tactics	Play with at least five defenders	3
+C	Tactics	Play with at least five midfielders	3
+C	Tactics	Play without attacking wingers	6
+C	Tactics	Play without a striker (min. 15 competitive matches)	6
+C	Tactics	Play park the bus, defensive, long ball, counter	6
+C	Age	3 players 35+ in the starting XI	6
+C	Age	5 players 30+ in the starting XI	6
+C	Age	5 players 32+ in the starting XI	9
+C	Age	5 players under 21 in the starting XI	3
+C	Age	5 players under 23 in the starting XI	3
+C	Age	Average age starting XI <=23	6
+C	Age	Average age starting XI >=30	6
+C	Age	No player younger than 18 in the starting XI	3
+C	Squad	5 left-footed players in the starting XI	3
+C	Squad	5 right-footed players in the starting XI	3
+C	Squad	Keeper + 4 defenders all 28+	6
+C	Squad	At least 3 homegrown players in the starting XI	6
+C	Squad	No player worth more than €10M in the starting XI	6
+C	Squad	At least 2 youth players promoted to the starting XI	6
+C	Squad	At least 3 players with international caps this season	6
+C	Transfers	Max 1 purchase	9
+C	Transfers	Max 3 purchases	6
+C	Transfers	No winter transfers	3
+C	Transfers	No purchases > €2M	6
+C	Transfers	No sales in winter	3
+C	Transfers	Only buy players <23	6
+C	Transfers	Biggest purchase < €5M	6
+C	Transfers	Only Bosman/free transfers	6
+C	Transfers	Sell your best player (avg rating 1 January)	6
+C	Transfers	Release five players from your squad (no fee)	6
+C	Nationality	5 players from Africa	6
+C	Nationality	5 players from South America	6
+C	Nationality	5 players from Eastern Europe	6
+C	Nationality	5 players from Scandinavia	6
+C	Nationality	5 foreigners in the starting XI	3
+C	Nationality	5 players from NED/BEL/POR/TUR	3
+C	Nationality	5 players from ENG/SPA/GER/ITA/FRA	3
+C	Nationality	3 players from the same country (not your own)	3
+C	Nationality	No player from your own country in the starting XI (min. 15 times)	9
+C	Nationality	At least 5 different nationalities in the starting XI	6

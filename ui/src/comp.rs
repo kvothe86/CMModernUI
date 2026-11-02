@@ -36,52 +36,312 @@ const FREE: usize = 0x9452ca; // operator delete
 /// The competition the forms are of, and each club's ("WWDLX").
 static mut FORMS: (usize, Vec<(usize, Vec<u8>)>) = (0, Vec::new());
 
-/// A club's form in the competition on screen (single player and the host: the game's own
-/// writer; a network client none).
+/// The clubs' forms in a competition (the game's own writer; the host and single player).
+unsafe fn forms(comp: usize) -> Vec<(usize, Vec<u8>)> {
+    let mut out = Vec::new();
+    if !mapped(comp, 12) {
+        return out;
+    }
+    let stats = rd::<usize>(comp + 8);
+    let mut buf = [0u8; 64];
+    let label = game::<extern "stdcall" fn(i32, *mut u8, i32) -> i32>(TEAM_STAT_LABEL);
+    // (stats 1..=17: another number asserts, comp_stats.cpp 2104)
+    let stat = (1..=17).find(|&s| label(s, buf.as_mut_ptr(), 64) != 0 && buf.split(|&c| c == 0).next() == Some(b"Form"));
+    if let (Some(stat), true) = (stat, mapped(stats, 4)) {
+        let mut count = 0i32;
+        let entries = game::<extern "thiscall" fn(usize, i32, *mut i32, i32) -> usize>(TEAM_ENTRIES)(stats, stat, &mut count, 0x4b);
+        let format = game::<extern "stdcall" fn(usize, i32, *mut u8, i32, i32) -> i32>(FORMAT_TEAM_STAT);
+        for i in 0..count.clamp(0, 64) as usize {
+            let e = entries + i * 0x76;
+            let index = rd::<i32>(e);
+            if index < 0 || format(e, stat, buf.as_mut_ptr(), 64, 1) == 0 {
+                continue;
+            }
+            let club = rd::<usize>(CLUB_TABLE) + index as usize * CLUB_SIZE;
+            out.push((club, buf.split(|&c| c == 0).next().unwrap_or(&[]).to_vec()));
+        }
+        if entries != 0 {
+            game::<extern "C" fn(usize)>(FREE)(entries);
+        }
+    }
+    out
+}
+
+/// A club's form in the table on screen.
 #[allow(static_mut_refs)]
 unsafe fn form_of(club: usize) -> Option<Vec<u8>> {
-    if remote::CLIENT {
-        return None;
-    }
-    let comp = screen_param(0);
-    if !mapped(comp, 12) {
-        return None;
-    }
-    if FORMS.0 != comp {
-        FORMS = (comp, Vec::new());
-        let stats = rd::<usize>(comp + 8);
-        let mut buf = [0u8; 64];
-        let label = game::<extern "stdcall" fn(i32, *mut u8, i32) -> i32>(TEAM_STAT_LABEL);
-        // (stats 1..=17: another number asserts, comp_stats.cpp 2104)
-        let stat = (1..=17).find(|&s| label(s, buf.as_mut_ptr(), 64) != 0 && buf.split(|&c| c == 0).next() == Some(b"Form"));
-        if let (Some(stat), true) = (stat, mapped(stats, 4)) {
-            let mut count = 0i32;
-            let entries = game::<extern "thiscall" fn(usize, i32, *mut i32, i32) -> usize>(TEAM_ENTRIES)(stats, stat, &mut count, 0x4b);
-            let format = game::<extern "stdcall" fn(usize, i32, *mut u8, i32, i32) -> i32>(FORMAT_TEAM_STAT);
-            for i in 0..count.clamp(0, 64) as usize {
-                let e = entries + i * 0x76;
-                let index = rd::<i32>(e);
-                if index < 0 || format(e, stat, buf.as_mut_ptr(), 64, 1) == 0 {
-                    continue;
-                }
-                let club = rd::<usize>(CLUB_TABLE) + index as usize * CLUB_SIZE;
-                FORMS.1.push((club, buf.split(|&c| c == 0).next().unwrap_or(&[]).to_vec()));
-            }
-            if entries != 0 {
-                game::<extern "C" fn(usize)>(FREE)(entries);
-            }
-        }
+    if FORMS.0 != OWN_TABLE {
+        FORMS = (OWN_TABLE, forms(OWN_TABLE));
     }
     FORMS.1.iter().find(|f| f.0 == club).map(|f| f.1.clone())
 }
 
 /// The form of the club of this competition called `name`: more clubs can have that name, the
-/// club table's first is another's ("Excelsior").
+/// club table's first is another's ("Excelsior"). A network client has it from the block.
 #[allow(static_mut_refs)]
-unsafe fn form_named(name: &[u8], club: usize) -> Option<Vec<u8>> {
-    let form = form_of(club);
+unsafe fn form_named(name: &[u8]) -> Option<Vec<u8>> {
+    if remote::CLIENT {
+        return block_forms().1.into_iter().find(|f| f.0 == name || f.1 == name).map(|f| f.2);
+    }
+    // (a table the tab did not draw, or another game loaded since: no competition to ask, and the
+    // forms kept are another table's)
+    if screen_param(0) != OWN_TABLE {
+        return None;
+    }
+    let form = club_named(name).and_then(|club| form_of(club));
     let named = |c: usize, at: usize, max: usize| std::slice::from_raw_parts((c + at) as *const u8, max).split(|&b| b == 0).next() == Some(name);
     form.or_else(|| FORMS.1.iter().find(|f| named(f.0, 0x38, 26) || named(f.0, 4, 51)).map(|f| f.1.clone()))
+}
+
+/// The competition of the table this host or single player shows, and of the table just built for
+/// a client (given to it by `form_block`); the stage the table tab is drawing.
+static mut OWN_TABLE: usize = 0;
+static mut SENT_TABLE: usize = 0;
+static mut TABLE_STAGE: usize = 0;
+/// The table on this game's screen has the game's own nation column (`nation_column`).
+static mut OWN_NATION: bool = false;
+
+const LEAGUE_TAB: usize = 0x491380; // comp_screens_draw_league_table_tab(stage, top, bottom), cdecl
+const COMP_SCREEN: usize = 0x48fcd0; // comp_screens_draw_comp_screen, its one caller; screen parameter 0 the Comp
+const TAB_BAND: usize = 0x491b06; // its add_text_item of the title band (x 0x6e..0x30c, 35 high)
+const TAB_BAND_HEIGHT: usize = 0x491b0f; // add ebx, 0x28: the band's room
+const TAB_LIST: usize = 0x491c27; // its add_area of the list
+const ADD_TEXT_ITEM: usize = 0x803fd0; // ScreenManager::add_text_item, thiscall, 11 stack args
+const FONT_HEIGHT: usize = 0x5e5cd0; // font_get_height(font), cdecl
+const CHANNEL_NOW: usize = 0xb77c7a; // the channel the screen manager serves (0: this game's own)
+/// The free part of the View row, design coordinates (View button left, stage drop-downs right).
+const ROW_TITLE: (i32, i32) = (0xf0, 0x20c);
+
+/// The table tab: a table lays out on one view (`table_band`, `table_area`), and what it is about
+/// is noted for the forms.
+pub unsafe fn one_view() {
+    patch_call(COMP_SCREEN, 5808, LEAGUE_TAB, league_tab as usize);
+    patch_call(TAB_BAND, 5, ADD_TEXT_ITEM, table_band as usize);
+    patch_call(TAB_LIST, 5, ADD_AREA, table_area as usize);
+    if *(TAB_BAND_HEIGHT as *const [u8; 3]) == [0x83, 0xc3, 0x28] {
+        let mut old = 0;
+        VirtualProtect((TAB_BAND_HEIGHT + 2) as *mut u8, 1, 0x40, &mut old);
+        *((TAB_BAND_HEIGHT + 2) as *mut u8) = 0;
+        VirtualProtect((TAB_BAND_HEIGHT + 2) as *mut u8, 1, old, &mut old);
+    }
+}
+
+extern "C" fn league_tab(stage: usize, top: i32, bottom: i32) {
+    unsafe {
+        let comp = screen_param(0);
+        TABLE_STAGE = stage;
+        if *(CHANNEL_NOW as *const i16) > 0 {
+            SENT_TABLE = comp; // (built for a client: `form_block` takes it at once)
+        } else {
+            OWN_TABLE = comp;
+            OWN_NATION = has_nation_column(comp);
+            FORMS.0 = 0; // (the results go on)
+        }
+        game::<extern "C" fn(usize, i32, i32)>(LEAGUE_TAB)(stage, top, bottom)
+    }
+}
+
+/// Europe's and the world's club cups list each club's nation between its name and Pld
+/// (0x491bd6).
+unsafe fn has_nation_column(comp: usize) -> bool {
+    mapped(comp, 0x43) && rd::<u8>(comp + 0x42) == 2
+}
+
+const MATCH_INPUT: usize = 0x71a240; // handle_match_screen_input(widget), cdecl
+const LIVE_TAB: usize = 0x71af0a; // its League Table tab: get_area_scroll_row, then a full rebuild
+const AREA_SCROLL_ROW: usize = 0x803320; // ScreenManager::get_area_scroll_row, thiscall
+const REBUILD: usize = 0xb6b7b0; // the pass already rebuilds (an event)
+/// The live table is built this far apart.
+const LIVE_TABLE_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+static mut MATCH_INPUT_ORIG: usize = 0;
+/// This pass of the match input comes with no click.
+static mut POLLING: bool = false;
+/// The live match's flags byte whose "running" bit this pass took away.
+static mut HELD: usize = 0;
+static mut LIVE_BUILT: [Option<std::time::Instant>; 16] = [None; 16];
+
+/// The match screen's League Table tab rebuilds the whole screen on every pass while a match runs
+/// (0x71af27, not only after a step): 10 to 18 screens a second to a client, which flickered
+/// (night 5 b0). It stays built for LIVE_TABLE_EVERY now, by each channel's clock.
+pub unsafe fn live_table_paced() {
+    // mov eax, [0xb77c84]
+    MATCH_INPUT_ORIG = hook_entry(MATCH_INPUT, &[0xa1, 0x84, 0x7c, 0xb7, 0x00], match_input as usize);
+    patch_call(LIVE_TAB, 5, AREA_SCROLL_ROW, live_tab as usize);
+}
+
+extern "C" fn match_input(widget: i32) -> i32 {
+    unsafe {
+        POLLING = widget as i16 == -1;
+        let r = game::<extern "C" fn(i32) -> i32>(MATCH_INPUT_ORIG)(widget);
+        if HELD != 0 {
+            *(HELD as *mut u8) |= 4;
+            HELD = 0;
+        }
+        r
+    }
+}
+
+/// Just before the tab asks whether the match runs: a pass with nothing else to do (no click, no
+/// event) and a table built moments ago: not running, for this pass.
+extern "thiscall" fn live_tab(this: usize, area: i32) -> i32 {
+    unsafe {
+        let r = game::<extern "thiscall" fn(usize, i32) -> i32>(AREA_SCROLL_ROW)(this, area);
+        let flags = rd::<usize>(screen_param(0) + 0x5b);
+        if POLLING && rd::<i32>(REBUILD) == 0 && mapped(flags, 1) && rd::<u8>(flags) & 4 != 0 {
+            #[allow(static_mut_refs)]
+            let built = &mut LIVE_BUILT[(*(CHANNEL_NOW as *const i16)).clamp(0, 15) as usize];
+            if built.is_some_and(|t| t.elapsed() < LIVE_TABLE_EVERY) {
+                *(flags as *mut u8) &= !4;
+                HELD = flags;
+            } else {
+                *built = Some(std::time::Instant::now());
+            }
+        }
+        r
+    }
+}
+
+/// The band's title on the View row, between the View button and the stage drop-downs: the rows
+/// get its height.
+#[allow(clippy::too_many_arguments)]
+extern "thiscall" fn table_band(this: usize, _x1: i32, y1: i32, _x2: i32, _y2: i32, style: i32, colour: i32, flags: i32, font: i32, text_colour: i32, text: usize, unused: i32) -> i32 {
+    unsafe {
+        let top = y1 - 0x19;
+        game::<extern "thiscall" fn(usize, i32, i32, i32, i32, i32, i32, i32, i32, i32, usize, i32) -> i32>(ADD_TEXT_ITEM)(this, ROW_TITLE.0, top, ROW_TITLE.1, top + 0x14, style, colour, flags, font, text_colour, text, unused)
+    }
+}
+
+/// The table's list: as many rows as the competition has (a head, the clubs, a dashed row per
+/// zone, 0x491b3c), so it shows whole, where the rows stay readable; the game's count (scrolling)
+/// otherwise.
+#[allow(clippy::too_many_arguments)]
+extern "thiscall" fn table_area(this: usize, x1: i32, y1: i32, x2: i32, y2: i32, cols: i32, widths: usize, rows: i32, extra: usize, a: u32, b: u32, c: i32) -> i32 {
+    unsafe {
+        let s = TABLE_STAGE;
+        let mut rows = rows;
+        if mapped(s, 0xda) {
+            let zones = (rd::<u8>(s + 0xbe) != 0 || rd::<u8>(s + 0xd9) & 1 != 0) as i32 + [0xbf, 0xc0, 0xc1].iter().filter(|&&o| rd::<u8>(s + o) != 0).count() as i32;
+            let need = rd::<i16>(s + 0x3e) as i32 + 1 + zones;
+            // (a client's rows on the client's screen, once a click told its height)
+            let channel = (*(CHANNEL_NOW as *const i16)).clamp(0, 15) as usize;
+            let height = if CLIENT_HEIGHT[channel] > 0 { CLIENT_HEIGHT[channel] } else { screen().1 };
+            let row = (y2 - y1) * height / 600 / need.max(1);
+            // (800x600: rows in the font a size down, `cell_font`)
+            let least = if height < 700 { NARROW_ROW } else { game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)(3) };
+            if need > rows & 0xff && need <= 30 && row >= least {
+                rows = need;
+            }
+        }
+        game::<extern "thiscall" fn(usize, i32, i32, i32, i32, i32, usize, i32, usize, u32, u32, i32) -> i32>(ADD_AREA)(this, x1, y1, x2, y2, cols, widths, rows, extra, a, b, c)
+    }
+}
+
+/// A client's screen height by its channel (0: not told yet).
+static mut CLIENT_HEIGHT: [i32; 16] = [0; 16];
+
+pub unsafe fn client_height(channel: i16, height: i32) {
+    CLIENT_HEIGHT[channel.clamp(0, 15) as usize] = height;
+}
+
+/// The height of the screen being built: a client's on the host (0 until it told), else this one.
+pub unsafe fn viewer_height() -> i32 {
+    match (*(CHANNEL_NOW as *const i16)).clamp(0, 15) as usize {
+        0 => screen().1,
+        channel => CLIENT_HEIGHT[channel],
+    }
+}
+
+/// Host: the table section of a client's block, after the history section: flags (1: a nation
+/// column), a count, per club its form, short name, full name as a length byte and the bytes.
+/// Two zeros for a screen with no table.
+pub unsafe fn form_block() -> Vec<u8> {
+    let comp = std::mem::take(&mut SENT_TABLE);
+    let mut out = vec![0u8, 0];
+    if comp == 0 {
+        return out;
+    }
+    if has_nation_column(comp) {
+        out[0] = 1;
+        return out;
+    }
+    let text = |at: usize, max: usize| std::slice::from_raw_parts(at as *const u8, max).split(|&c| c == 0).next().unwrap_or(&[]).to_vec();
+    for (club, form) in forms(comp) {
+        out.push(form.len() as u8);
+        out.extend(form);
+        for name in [text(club + 0x38, 26), text(club + 4, 51)] {
+            out.push(name.len() as u8);
+            out.extend(name);
+        }
+        out[1] += 1;
+    }
+    out
+}
+
+/// Client: the table section of the block (`form_block`): a nation column?, and per club its short
+/// name, full name and form.
+unsafe fn block_forms() -> (bool, Vec<(Vec<u8>, Vec<u8>, Vec<u8>)>) {
+    let b = news::block_tail();
+    let mut at = 2 + if b.len() >= 2 { u16::from_le_bytes([b[0], b[1]]) as usize } else { 0 } * 8;
+    let nation = b.get(at).is_some_and(|&f| f & 1 != 0);
+    let count = b.get(at + 1).copied().unwrap_or(0);
+    at += 2;
+    let mut text = || {
+        let n = *b.get(at)? as usize;
+        let t = b.get(at + 1..at + 1 + n)?.to_vec();
+        at += 1 + n;
+        Some(t)
+    };
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let (Some(form), Some(short), Some(full)) = (text(), text(), text()) else { break };
+        out.push((short, full, form));
+    }
+    (nation, out)
+}
+
+/// The table on screen has the game's nation column: no form there, and GD left of it.
+unsafe fn nation_column() -> bool {
+    if remote::CLIENT {
+        block_forms().0
+    } else {
+        OWN_NATION && !live_table()
+    }
+}
+
+/// The match screen's table (no `league_tab` behind it, so no forms to show); a cup group's has
+/// another title.
+#[allow(static_mut_refs)]
+unsafe fn live_table() -> bool {
+    MATCH || VIEW == b"Live League Table"
+}
+
+/// Where a table's name cell ends: Pld, or the nation column (4 of the list's 50 column units).
+unsafe fn name_end(pld: i32) -> i32 {
+    pld - if nation_column() { 54 * screen().0 / 800 } else { 0 }
+}
+
+/// 800x600: a table's rows a size down, form and GD up against the numbers: a row has no room for
+/// the game's font and all of them.
+fn narrow() -> bool {
+    screen().0 < 1000
+}
+const NARROW_ROW: i32 = 14; // the least row that stays readable there
+const NARROW_FORM: (i32, i32) = (13, 18); // a pill's width, how far left of Pld the pills end
+
+/// The right edge of GD (Pld's numbers are centred in a wide cell).
+unsafe fn gd_right(pld: i32) -> i32 {
+    name_end(pld) + if narrow() && !nation_column() { 6 } else { -12 }
+}
+
+/// The font of a cell (`narrow`): a table's rows are as high as its head, what else the screen
+/// draws meanwhile is not.
+pub unsafe fn cell_font(y1: i32, y2: i32, font: u32) -> u32 {
+    let row = HEADS.iter().find(|h| h.0 == b"Pts").is_some_and(|h| y1 > h.3 && (y2 - y1 - (h.4 - h.3)).abs() <= 1);
+    if narrow() && row && !live_table() && font & 0xffff > 2 {
+        font & !0xffff | 2
+    } else {
+        font
+    }
 }
 
 /// Form pills (W green, D grey, L red, X dim), `n` wide, from x.
@@ -330,7 +590,11 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
         return false;
     }
     // (in the upper half: the Back button at the bottom is as wide and tall)
-    if flags == 0xc && w > 1000 && (40..=90).contains(&h) && y1 < sh / 2 {
+    // (a table's title stands on its View row, `table_band`: 20 of 600 high, a third of the
+    // width; the bar left of the list scales apart from the rest, so no exact place)
+    let sw = screen().0;
+    let row_title = !MATCH && (18..=22).contains(&(h * 600 / sh)) && (sw / 4..=sw * 2 / 5).contains(&w) && x1 > sw / 4;
+    if flags == 0xc && (row_title || (w > 1000 && (40..=90).contains(&h))) && y1 < sh / 2 {
         if !std::mem::replace(&mut TITLES_SEEN.1, true) && VIEW != t {
             VIEW = t.to_vec();
             REDRAW = true;
@@ -416,8 +680,11 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
         fill(x1, y1, x2 + 1, y2 + 1, AREA);
         text_at((x1 + x2) / 2, y1, y2, font, GREY, t, 1);
         if t == b"Pld" {
-            text_at(x1 - 12, y1, y2, font, GREY, b"GD", 2);
-            text_at(x1 - 70 - 5 * 22 / 2 - 10, y1, y2, font, GREY, b"Form", 1);
+            text_at(gd_right(x1), y1, y2, font, GREY, b"GD", 2);
+            if !nation_column() && !live_table() {
+                let (bw, gap) = if narrow() { NARROW_FORM } else { (22, 70) };
+                text_at(x1 - gap - 5 * bw / 2 - 10, y1, y2, font, GREY, b"Form", 1);
+            }
         }
         return true;
     }
@@ -561,9 +828,9 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
                     // the goal difference at once (a table redrawn alone has no flip pass)
                     let (f, a) = (row.1, row.2);
                     if let (true, Some(pld)) = (f != i32::MIN && a != i32::MIN, HEADS.iter().find(|h| h.0 == b"Pld")) {
-                        let x = pld.1 - 12;
+                        let x = gd_right(pld.1);
                         let small = SMALL_FONT.unwrap_or(0xffff0001);
-                        fill(x - 50, y1, x + 2, y2, AREA);
+                        fill(x - if narrow() { 20 } else { 50 }, y1, x + 2, y2, AREA);
                         let d = f - a;
                         let c = if d > 0 { [0x4c, 0xc0, 0x7a] } else if d < 0 { [0xe0, 0x60, 0x58] } else { GREY };
                         let s = if d > 0 { format!("+{d}") } else { d.to_string() };
@@ -578,11 +845,11 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
         // the club: its crest before the name, its form at the right of the cell (before GD)
         if flags & 0xf == 0x1 && w > 200 {
             let drawn = crest_name(x1, y1, x2, y2, flags, font, colour, raw);
-            if let (Some(club), Some(pld)) = (club_named(t.trim_ascii()), HEADS.iter().find(|h| h.0 == b"Pld")) {
-                if let Some(f) = form_named(t.trim_ascii(), club) {
-                    let bw = (h + 2).min(22);
+            if let Some(pld) = HEADS.iter().find(|h| h.0 == b"Pld").filter(|_| !nation_column() && !live_table()) {
+                if let Some(f) = form_named(t.trim_ascii()) {
+                    let (bw, gap) = if narrow() { NARROW_FORM } else { ((h + 2).min(22), 70) };
                     let small = SMALL_FONT.unwrap_or(0xffff0001);
-                    form_pills(pld.1 - 70 - f.len() as i32 * bw, y1, y2, bw, small, &f);
+                    form_pills(pld.1 - gap - f.len() as i32 * bw, y1, y2, bw, small, &f);
                 }
             }
             return drawn;

@@ -1,5 +1,6 @@
-//! CM Challenge: the managers' league of a network game as a page of its own (switch `challenge`),
-//! opened by a button under the menu bar. The host works it out, a client asks for the page (key
+//! CM Challenge: the managers' league of a network game, or the career of the one manager of a
+//! single player game, as a page of its own (switch `challenge`), opened by a button under the menu
+//! bar. The host (a single player game's player too) works it out, a client asks for the page (key
 //! 'E') and only draws it. The prizes come from the game's own staff history (hired, sacked,
 //! winners, rounds reached, league finishes), so they need no typing; the file `cmchallenge.tsv`
 //! next to the host's exe keeps what the game does not: seasons entered on the old site
@@ -13,6 +14,10 @@ mod track;
 pub use draw::{bar_item, flip, input, overlay};
 
 const RULES: &[u8] = include_bytes!("rules.tsv");
+/// The Dutch names of the first version: a league file that has them counts as with the new ones.
+const RENAMES: &[u8] = include_bytes!("renames.tsv");
+/// The game's own competition names and the family each counts for, per database (`comp_names.py`).
+const TABLES: [&[u8]; 3] = [include_bytes!("comps_original.tsv"), include_bytes!("comps_cm25.tsv"), include_bytes!("comps_restructured.tsv")];
 /// A league as `challenge_import.py` writes it: taken over by the first game with its managers,
 /// then named after that game (`cmchallenge_<key>.tsv`), so a new game starts a league of its own.
 const IMPORTED: &str = "cmchallenge.tsv";
@@ -27,6 +32,9 @@ const TODAY: usize = 0xae2c90; // Date: i16 day of the year, i16 year
 /// the supercups. A hiring goes by `HIRED_FROM`: after the leagues end it is the coming season's
 /// (a manager hired days after his title won it at his old club); a move up to `LEFT_UNTIL` left last season's club.
 const SEASON_FROM: i16 = 200;
+/// The running season (the page, the spins, the RAD rows) turns on 1 July (day 181, a day later in a
+/// leap year): a game starts in July, before `SEASON_FROM`, and its first season is that year's.
+const RUNNING_FROM: i16 = 181;
 const HIRED_FROM: i16 = 130;
 const LEFT_UNTIL: i16 = 260;
 const KIND_WON: u8 = 0;
@@ -56,21 +64,52 @@ struct Fact {
 
 /// A cup's prizes by how far a club got: won, lost the final, semi final, quarter final, phase 2.
 const FAMILIES: [[&str; 5]; 8] = [
-    ["CL Winnaar", "CL Finalist", "CL Halve finale", "CL Kwartfinale", "CL Phase 2"],
-    ["UEFA Cup Winnaar", "UEFA Cup Finalist", "UEFA Cup Halve finale", "UEFA Cup Kwartfinale", ""],
-    ["Europese Supercup Winnaar", "", "", "", ""],
-    ["WK Clubteams Winnaar", "WK Clubteams Finalist", "WK Clubteams Halve finalist", "", ""],
-    ["WK Landenteams Winnaar", "WK Landenteams Finalist", "WK Landenteams Halve finale", "WK Landenteams Kwartfinale", ""],
-    ["Continentaal landentoernooi Winnaar", "Continentaal landentoernooi Finalist", "Continentaal landentoernooi Halve finale", "", ""],
-    ["Bekerwinnaar", "Finalist beker", "", "", ""],
-    ["Nat. Supercup", "", "", "", ""],
+    ["CL Winner", "CL Finalist", "CL Semi final", "CL Quarter final", "CL Phase 2"],
+    ["UEFA Cup Winner", "UEFA Cup Finalist", "UEFA Cup Semi final", "UEFA Cup Quarter final", ""],
+    ["European Supercup Winner", "", "", "", ""],
+    ["Club World Cup Winner", "Club World Cup Finalist", "Club World Cup Semi final", "", ""],
+    ["World Cup Winner", "World Cup Finalist", "World Cup Semi final", "World Cup Quarter final", ""],
+    ["Continental tournament Winner", "Continental tournament Finalist", "Continental tournament Semi final", "", ""],
+    ["Cup winner", "Cup finalist", "", "", ""],
+    ["National Supercup", "", "", "", ""],
 ];
 
-/// The row of `FAMILIES` a competition is in, by its name (the database's words, or a data
-/// update's): None for what the rules give nothing for. Of a nation's cups only the main one
-/// counts: the old site has no Scottish League or Challenge Cup.
-// ponytail: names, a database with other words needs its own here; the Comp's class would do too
+/// The table of the database that is loaded (index of `TABLES`): the one that knows most of the
+/// game's competition names, chosen when a game is read (`use_game`).
+static mut TABLE: usize = 0;
+
+/// What a database's table says of a name (lower case): None when it is not listed, else the
+/// family or None for a name that counts for nothing.
+fn listed(table: usize, comp: &str) -> Option<Option<usize>> {
+    let text = latin1(TABLES[table]);
+    text.lines().filter(|l| !l.starts_with('#')).find_map(|l| {
+        let (name, family) = l.split_once('\t')?;
+        (name.to_lowercase() == comp).then(|| family.trim().parse().ok())
+    })
+}
+
+/// The database a game runs on: the table that knows most of the competitions in it.
+unsafe fn best_table() -> usize {
+    let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if count <= 0 || !readable(comps, count as usize * COMP_SIZE) {
+        return 0;
+    }
+    let names: Vec<String> = (0..count as usize).map(|k| latin1(&game_text(comps + k * COMP_SIZE + 4, 51)).to_lowercase()).collect();
+    (0..TABLES.len()).max_by_key(|&t| (names.iter().filter(|n| listed(t, n).is_some()).count(), usize::MAX - t)).unwrap_or(0)
+}
+
 fn family(comp: &str, domestic: bool, top: bool) -> Option<usize> {
+    family_in(unsafe { TABLE }, comp, domestic, top)
+}
+
+/// The row of `FAMILIES` a competition is in, by its name: the database's table where it knows
+/// the name, else the words (a data update's or an edited database's names): None for what the
+/// rules give nothing for. Of a nation's cups only the main one counts: the old site has no
+/// Scottish League or Challenge Cup.
+fn family_in(table: usize, comp: &str, domestic: bool, top: bool) -> Option<usize> {
+    if let Some(known) = listed(table, comp) {
+        return known;
+    }
     let has = |words: &[&str]| words.iter().any(|w| comp.contains(w));
     if domestic {
         return if has(&["super", "shield", "schaal", "trophy", "supertaca"]) { Some(7) } else { top.then_some(6) };
@@ -109,22 +148,22 @@ fn prizes(facts: &[Fact]) -> Vec<String> {
             best[fam] = Some(best[fam].map_or(s, |b: usize| b.min(s)));
         }
         if f.kind == KIND_CHAMPIONS {
-            out.push(if f.top { "Kampioen" } else { "Kampioen LL" }.to_string());
+            out.push(if f.top { "Champion" } else { "Lower league champion" }.to_string());
         }
         // (a lower league won by a group or a play-off has no champions line)
-        if f.kind == KIND_FINISHED && !f.top && f.text.contains("finished 1st") && !out.iter().any(|i| i == "Kampioen LL") {
-            out.push("Kampioen LL".to_string());
+        if f.kind == KIND_FINISHED && !f.top && f.text.contains("finished 1st") && !out.iter().any(|i| i == "Lower league champion") {
+            out.push("Lower league champion".to_string());
         }
         if f.kind == KIND_FINISHED && f.top {
-            for (place, item) in [("finished 2nd", "2e plaats"), ("finished 3rd", "3e plaats")] {
+            for (place, item) in [("finished 2nd", "2nd place"), ("finished 3rd", "3rd place")] {
                 if f.text.contains(place) {
                     out.push(item.to_string());
                 }
             }
         }
     }
-    if facts.iter().any(|f| f.kind == KIND_PROMOTED) && !out.iter().any(|i| i == "Kampioen LL") {
-        out.push("Promotie LL".to_string());
+    if facts.iter().any(|f| f.kind == KIND_PROMOTED) && !out.iter().any(|i| i == "Lower league champion") {
+        out.push("Lower league promotion".to_string());
     }
     for (fam, s) in best.iter().enumerate() {
         if let Some(item) = s.map(|s| FAMILIES[fam][s]).filter(|i| !i.is_empty()) {
@@ -143,7 +182,7 @@ fn same_club(a: &str, b: &str) -> bool {
 
 /// The fifth season running at a club counts once (`clubs`: a manager's by season).
 fn loyalty(clubs: &[String], k: usize) -> Option<&'static str> {
-    (clubs[..k].iter().rev().take_while(|c| same_club(c, &clubs[k])).count() == 4).then_some("5+ seizoenen (loyaliteit)")
+    (clubs[..k].iter().rev().take_while(|c| same_club(c, &clubs[k])).count() == 4).then_some("5+ seasons (loyalty)")
 }
 
 /// A line of a manager's jobs: a date, the club (a national team's left out).
@@ -165,8 +204,8 @@ fn moves(jobs: &[Job]) -> Vec<(i32, &'static str)> {
             let days = (j.year - s.year) * 365 + (j.day - s.day) as i32;
             let season = if j.day < LEFT_UNTIL { j.year - 1 } else { j.year };
             match (days + 100) / 365 {
-                0 | 1 => out.push((season, "Vertrek na 1 seizoen")),
-                2 => out.push((season, "Vertrek na 2 seizoenen")),
+                0 | 1 => out.push((season, "Left after 1 season")),
+                2 => out.push((season, "Left after 2 seasons")),
                 _ => {}
             }
         }
@@ -215,6 +254,9 @@ struct League {
 impl League {
     fn parse(rules: &str, file: &str) -> League {
         let mut l = League::default();
+        let renames = latin1(RENAMES);
+        // (a name of the Dutch first version, as the new one; only a league file has such, the rules the new)
+        let english = |s: &str| renames.lines().find_map(|r| r.split_once('\t').filter(|p| p.0 == s)).map_or(s.to_string(), |p| p.1.to_string());
         for line in rules.lines().chain(file.lines()) {
             let c: Vec<&str> = line.split('\t').collect();
             let number = |k: usize| c.get(k).and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
@@ -233,7 +275,7 @@ impl League {
                     scorer: text(4),
                     goals: text(5),
                     rating: text(6),
-                    items: text(7).split('|').filter(|i| !i.is_empty()).map(str::to_string).collect(),
+                    items: text(7).split('|').filter(|i| !i.is_empty()).map(english).collect(),
                 }),
                 "R" => l.rads.push(Rad {
                     id: number(1) as u32,
@@ -241,10 +283,14 @@ impl League {
                     year: number(3),
                     points: number(4),
                     done: number(5) != 0,
-                    text: text(6),
+                    text: english(&text(6)),
                     state: number(7) as u8,
                     value: c.get(8).and_then(|s| s.parse().ok()),
-                    note: text(9),
+                    // ("1 / 3 aankopen": the unit is the words after the limit)
+                    note: match text(9).splitn(4, ' ').collect::<Vec<_>>()[..] {
+                        [a, b, n, unit] if b == "/" => format!("{a} {b} {n} {}", english(unit)),
+                        _ => text(9),
+                    },
                     manual: number(10) != 0,
                     closed: number(11) != 0,
                 }),
@@ -260,7 +306,7 @@ impl League {
     fn lines(&self) -> String {
         let mut out = String::new();
         for s in &self.seasons {
-            out += &format!("S\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", s.name, s.year, s.club, s.scorer, s.goals, s.rating, s.items.join("|"));
+            out += &format!("S\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", s.name, s.year, s.club, scorer_name(&s.scorer), s.goals, s.rating, s.items.join("|"));
         }
         for r in &self.rads {
             let value = r.value.map_or(String::new(), |v| v.to_string());
@@ -354,10 +400,14 @@ unsafe fn use_game() {
         return;
     }
     let names: Vec<String> = humans.iter().map(|h| h.1.clone()).collect();
-    if !std::path::Path::new(&file).exists() && std::fs::read(IMPORTED).is_ok_and(|t| belongs(&latin1(&t), &names)) {
+    // (the friends' league is for a game of friends: a single player game of one of them leaves it)
+    if humans.len() >= 2 && !std::path::Path::new(&file).exists() && std::fs::read(IMPORTED).is_ok_and(|t| belongs(&latin1(&t), &names)) {
         let _ = std::fs::rename(IMPORTED, &file);
     }
+    // (a game without a file yet, a single player's first opening or a save from before: the rules
+    // alone, results from the save's history, the file made at the first change)
     LEAGUE = Some(League::parse(&latin1(RULES), &latin1(&std::fs::read(&file).unwrap_or_default())));
+    TABLE = best_table();
     log(&format!("challenge: league file {file}"));
     FILE = file;
 }
@@ -375,10 +425,10 @@ fn save() {
     }
 }
 
-/// A network game: a client, or a host with a second manager in it.
-// ponytail: two humans at one machine count too; the league needs two managers either way
-unsafe fn network_game() -> bool {
-    remote::CLIENT || human_staff().len() >= 2
+/// A game with a manager in it: a client's, a host's or a single player's. Network or not, the page
+/// is the same; with one manager it is his career.
+unsafe fn game_on() -> bool {
+    remote::CLIENT || !human_staff().is_empty()
 }
 
 /// The human managers' staff records: the end of the staff table, +0x5f set.
@@ -414,7 +464,7 @@ unsafe fn facts_of(staff: usize) -> (Vec<Fact>, Vec<Job>) {
     let list = game::<extern "thiscall" fn(usize, usize, u32) -> usize>(history::STAFF_LIST)(records, staff, 0);
     for item in history::newest(list).into_iter().rev() {
         let (day, year, kind) = (rd::<i16>(item), rd::<i16>(item + 2) as i32, rd::<u8>(item + 0xc));
-        let season = if day >= SEASON_FROM { year } else { year - 1 };
+        let season = season_from(day, year, SEASON_FROM);
         if kind == KIND_JOB {
             let (club, hired) = (rd::<i32>(item + 8), rd::<u8>(item + 0xd) == 1);
             if trace() {
@@ -476,25 +526,37 @@ unsafe fn drought(club: usize, comp: usize, year: i32) -> Option<&'static str> {
         return None;
     }
     let last = won.iter().filter(|w| w.0 == comp && w.1 < year).map(|w| w.1).max()?;
-    [(30, "Eerste prijs 30+ jaar"), (20, "Eerste prijs 20+ jaar"), (10, "Eerste prijs 10+ jaar")].into_iter().find(|t| year - last >= t.0).map(|t| t.1)
+    [(30, "First prize in 30+ years"), (20, "First prize in 20+ years"), (10, "First prize in 10+ years")].into_iter().find(|t| year - last >= t.0).map(|t| t.1)
 }
 
-/// The club's league top scorer this season: name, goals.
+/// The season a date belongs to when the year turns on day `from`.
+fn season_from(day: i16, year: i32, from: i16) -> i32 {
+    if day >= from { year } else { year - 1 }
+}
+
+/// The name a top scorer is kept and shown by: the first name, as the typed rows have it. A line
+/// of the file with the full name reads the same.
+fn scorer_name(name: &str) -> String {
+    name.split_whitespace().next().unwrap_or("").to_string()
+}
+
+/// The highest of (name, goals), None when nobody has scored.
+fn best_scorer(players: impl Iterator<Item = (String, i32)>) -> Option<(String, i32)> {
+    players.max_by_key(|p| p.1).filter(|p| p.1 > 0).map(|p| (scorer_name(&p.0), p.1))
+}
+
+/// The club's league top scorer this season: name, goals. League row (2) of the stats table, not
+/// the senior club row (6): that one holds cup and qualifying games too, and a player's goals for
+/// his old club.
 unsafe fn top_scorer(club: usize) -> Option<(String, i32)> {
     if !readable(club, 0xd7 + 50 * 4) {
         return None;
     }
-    (0..50)
-        .map(|k| rd::<usize>(club + 0xd7 + k * 4))
-        .filter(|&s| valid_staff(s))
-        .map(|s| (latin1(&staff_name(s)).to_string(), latin1(&season_stat(s, 2)).trim().parse::<i32>().unwrap_or(0)))
-        .max_by_key(|p| p.1)
-        .filter(|p| p.1 > 0)
+    best_scorer(track::squad(club).into_iter().map(|s| (latin1(&staff_name(s)).to_string(), track::stat(s, 2, 2) as i32)))
 }
 
 unsafe fn this_season() -> i32 {
-    let (day, year) = (rd::<i16>(TODAY), rd::<i16>(TODAY + 2) as i32);
-    if day >= SEASON_FROM { year } else { year - 1 }
+    season_from(rd::<i16>(TODAY), rd::<i16>(TODAY + 2) as i32, RUNNING_FROM)
 }
 
 /// Every manager's seasons: as entered where the file has them, else from the game. This
@@ -529,7 +591,7 @@ unsafe fn seasons() -> Vec<Season> {
                 if let (Some((scorer, goals)), None) = (top_scorer(current), kept.filter(|&i| !l.seasons[i].items.is_empty())) {
                     let goals = goals.to_string();
                     match kept {
-                        Some(i) if l.seasons[i].scorer == scorer && l.seasons[i].goals == goals => {}
+                        Some(i) if scorer_name(&l.seasons[i].scorer) == scorer && l.seasons[i].goals == goals => {}
                         Some(i) => (l.seasons[i].scorer, l.seasons[i].goals, changed) = (scorer, goals, true),
                         None => {
                             l.seasons.push(Season { name: name.clone(), year, club: names[k].clone(), scorer, goals, ..Default::default() });
@@ -588,12 +650,23 @@ unsafe fn page(me: &str, all: bool) -> String {
     };
     let years = rows.iter().map(|s| s.year).collect::<std::collections::BTreeSet<_>>().len();
     let trophies: usize = rows.iter().map(|s| l.trophies(&s.items)).sum();
-    out += &format!("F\tSeizoenen\t{years}\nF\tPrijzen\t{trophies}\n");
+    out += &format!("F\tSeasons\t{years}\nF\tTrophies\t{trophies}\n");
     if let Some(n) = names.iter().max_by_key(|n| clubs_of(n)) {
-        out += &format!("F\tClubhopper\t{n} ({} clubs)\n", clubs_of(n));
+        // (a single player's career: his clubs; a league: who has had most)
+        out += &if names.len() == 1 { format!("F\tClubs\t{}\n", clubs_of(n)) } else { format!("F\tClub hopper\t{n} ({} clubs)\n", clubs_of(n)) };
     }
     if let Some(s) = rows.iter().filter(|s| !s.goals.is_empty()).max_by_key(|s| s.goals.parse::<i32>().unwrap_or(0)) {
-        out += &format!("F\tBeste topscorer\t{} ({})\n", s.scorer, s.goals);
+        out += &format!("F\tBest top scorer\t{} ({})\n", scorer_name(&s.scorer), s.goals);
+    }
+    // (one manager: his career as tiles, the points a season and his best season besides)
+    if let [n] = &names[..] {
+        let total = total_of(n);
+        let own: Vec<&Season> = rows.iter().filter(|s| mine(s, n)).collect();
+        let best = own.iter().map(|s| (l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year)), s.year)).max();
+        out += &format!("F\tPoints a season\t{}\n", total / own.len().max(1) as i32);
+        if let Some((points, year)) = best {
+            out += &format!("F\tBest season\t{points} ({year}/{})\n", year + 1);
+        }
     }
     for n in &names {
         let (items, club) = rows.iter().find(|s| s.year == now && mine(s, n)).map_or((Vec::new(), ""), |s| (s.items.clone(), s.club.as_str()));
@@ -606,7 +679,7 @@ unsafe fn page(me: &str, all: bool) -> String {
     }
     for s in rows.iter().rev().take(HISTORY_ROWS) {
         let points = l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
-        out += &format!("H\t{}/{}\t{}\t{}\t{}\t{}\t{}\t{points}\t{}\n", s.year, s.year + 1, s.name, s.club, s.scorer, s.goals, s.rating, s.items.join(", "));
+        out += &format!("H\t{}/{}\t{}\t{}\t{}\t{}\t{}\t{points}\t{}\n", s.year, s.year + 1, s.name, s.club, scorer_name(&s.scorer), s.goals, s.rating, s.items.join(", "));
     }
     out += &stats_lines(&rows, &names);
     for (category, item, points, trophy) in &l.prizes {
@@ -624,7 +697,7 @@ fn stats_lines(rows: &[Season], names: &[String]) -> String {
     let total = |s: &Season| l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
     let mut out = String::new();
     if let Some(s) = rows.iter().max_by_key(|s| total(s)) {
-        out += &format!("T\tRecord Seizoen\t{}\t{} ({}/{})\n", total(s), s.name, s.year, s.year + 1);
+        out += &format!("T\tSeason record\t{}\t{} ({}/{})\n", total(s), s.name, s.year, s.year + 1);
     }
     let trophies = |n: &String| rows.iter().filter(|s| same_manager(&s.name, n)).map(|s| l.trophies(&s.items)).sum::<usize>();
     let done = |n: &String| l.rads.iter().filter(|r| r.done && same_manager(&r.name, n)).count();
@@ -632,7 +705,7 @@ fn stats_lines(rows: &[Season], names: &[String]) -> String {
         out += &format!("T\tTrophy Collector\t{}\t{n}\n", trophies(n));
     }
     if let Some(n) = names.iter().max_by_key(|n| done(n)) {
-        out += &format!("T\tRAD Meester\t{}\t{n}\n", done(n));
+        out += &format!("T\tRAD Master\t{}\t{n}\n", done(n));
     }
     for n in names {
         let own: Vec<&Season> = rows.iter().filter(|s| same_manager(&s.name, n)).collect();
@@ -660,7 +733,7 @@ fn stats_lines(rows: &[Season], names: &[String]) -> String {
                 }
             }
         }
-        let scorer = own.iter().copied().filter(|s| !s.goals.is_empty()).max_by_key(|s| s.goals.parse::<i32>().unwrap_or(0)).map_or(String::new(), |s| format!("{} ({})", s.scorer, s.goals));
+        let scorer = own.iter().copied().filter(|s| !s.goals.is_empty()).max_by_key(|s| s.goals.parse::<i32>().unwrap_or(0)).map_or(String::new(), |s| format!("{} ({})", scorer_name(&s.scorer), s.goals));
         let all_rads = l.rads.iter().filter(|r| same_manager(&r.name, n)).count();
         out += &format!(
             "Y\t{n}\t{rank}\t{}\t{avg}\t{}\t{}\t{}\t{}\t{all_rads}\t{items}\t{rads}\t{scorer}\t{}\t{}\n",
@@ -711,11 +784,22 @@ unsafe fn act(action: u32, arg: u32, name: &[u8]) {
     }
 }
 
+/// The page as the game's fonts can draw it: they have no euro sign (the rules' amounts).
+fn page_bytes(text: &str) -> Vec<u8> {
+    to_latin1(text).split(|&c| c == 0x80).collect::<Vec<_>>().join(&b"EUR "[..])
+}
+
 /// Host: a client's 'E': the page for its manager, read only.
 pub unsafe fn remote(channel: i16) -> Vec<u8> {
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
     let me = humans().into_iter().find(|h| h.0 == manager).map_or(String::new(), |h| h.1);
-    to_latin1(&page(&me, false))
+    // (a packet's room: whole lines)
+    let mut text = page_bytes(&page(&me, false));
+    if text.len() > 38_000 {
+        let cut = text[..38_000].iter().rposition(|&c| c == b'\n').map_or(0, |at| at + 1);
+        text.truncate(cut);
+    }
+    text
 }
 
 #[cfg(test)]
@@ -739,23 +823,24 @@ mod tests {
             fact(KIND_CHAMPIONS, "dutch premier division", true, true, "dutch premier division champions"),
             fact(KIND_FINISHED, "dutch premier division", true, true, "finished 1st in dutch premier division"),
         ]);
-        assert_eq!(got, ["Kampioen", "CL Finalist", "Europese Supercup Winnaar", "WK Clubteams Winnaar", "Nat. Supercup"]);
+        assert_eq!(got, ["Champion", "CL Finalist", "European Supercup Winner", "Club World Cup Winner", "National Supercup"]);
     }
 
     #[test]
     fn lower_leagues() {
-        assert_eq!(prizes(&[fact(KIND_CHAMPIONS, "turkish 2. division group 4", true, false, ""), fact(KIND_PROMOTED, "turkish 2. division group 4", true, false, "")]), ["Kampioen LL"]);
-        assert_eq!(prizes(&[fact(KIND_PROMOTED, "german second division", true, false, "")]), ["Promotie LL"]);
-        assert_eq!(prizes(&[fact(KIND_FINISHED, "turkish 2. division group 4", true, false, "finished 1st in turkish 2. division group 4"), fact(KIND_PROMOTED, "", true, false, "")]), ["Kampioen LL"]);
+        assert_eq!(prizes(&[fact(KIND_CHAMPIONS, "turkish 2. division group 4", true, false, ""), fact(KIND_PROMOTED, "turkish 2. division group 4", true, false, "")]), ["Lower league champion"]);
+        assert_eq!(prizes(&[fact(KIND_PROMOTED, "german second division", true, false, "")]), ["Lower league promotion"]);
+        assert_eq!(prizes(&[fact(KIND_FINISHED, "turkish 2. division group 4", true, false, "finished 1st in turkish 2. division group 4"), fact(KIND_PROMOTED, "", true, false, "")]), ["Lower league champion"]);
         assert_eq!(prizes(&[fact(KIND_FINISHED, "scottish first division", true, false, "finished 2nd in scottish first division")]), Vec::<String>::new());
-        assert_eq!(prizes(&[fact(KIND_FINISHED, "italian serie a", true, true, "finished 2nd in italian serie a")]), ["2e plaats"]);
+        assert_eq!(prizes(&[fact(KIND_FINISHED, "italian serie a", true, true, "finished 2nd in italian serie a")]), ["2nd place"]);
     }
 
     #[test]
     fn cups_go_by_the_furthest_round() {
         let semi = fact(KIND_KNOCKED_OUT, "uefa cup", false, false, "knocked out in uefa cup semi final leg 2");
         let quarter = fact(KIND_QUALIFIED, "uefa cup", false, false, "qualified for uefa cup quarter finals");
-        assert_eq!(prizes(&[quarter, semi]), ["UEFA Cup Halve finale"]);
+        assert_eq!(prizes(&[quarter, semi]), ["UEFA Cup Semi final"]);
+        // (names the tables do not list: the words)
         assert_eq!(family("asian champions cup", false, false), None);
         assert_eq!(family("european cup winners cup", false, false), None);
         assert_eq!(family("european championship", false, false), Some(5));
@@ -763,21 +848,71 @@ mod tests {
         assert_eq!(family("scottish league cup", true, false), None);
     }
 
+    /// Per database: what its own names count for, and where the words alone were wrong.
+    #[test]
+    fn competitions_per_database() {
+        let (original, cm25, restructured) = (0, 1, 2);
+        let fam = |t, name: &str, national| family_in(t, name, national, true);
+        // the cases that went wrong by words: "european champions cup" matched wrongly once
+        assert_eq!(fam(original, "european champions cup", false), Some(0));
+        assert_eq!(fam(original, "european cup winners cup", false), None);
+        assert_eq!(fam(original, "uefa cup", false), Some(1));
+        assert_eq!(fam(original, "european super cup", false), Some(2));
+        assert_eq!(fam(original, "fifa club world championship", false), Some(3));
+        assert_eq!(fam(original, "fifa world cup", false), Some(4));
+        assert_eq!(fam(original, "european football championship", false), Some(5)); // (the words missed it)
+        assert_eq!(fam(original, "world cup european qualifying section", false), None); // (the words: a World Cup)
+        assert_eq!(fam(original, "asian cup winners' cup", false), None); // (the words: "asian cup")
+        assert_eq!(fam(original, "dutch super cup", true), Some(7));
+        assert_eq!(fam(original, "english fa trophy", true), None); // (the words: a supercup)
+        assert_eq!(fam(cm25, "uefa champions league", false), Some(0));
+        assert_eq!(fam(cm25, "caf champions league", false), None); // (the words: the Champions League)
+        assert_eq!(fam(cm25, "afc champions league", false), None);
+        assert_eq!(fam(cm25, "uefa europa league qualifying", false), None);
+        assert_eq!(fam(cm25, "copa am\u{e9}rica", false), Some(5)); // (the accent: the words missed it)
+        assert_eq!(fam(cm25, "troph\u{e9}e des champions", true), Some(7));
+        assert_eq!(fam(cm25, "greek super league", true), None);
+        assert_eq!(fam(restructured, "afc champions league elite", false), None);
+        assert_eq!(fam(restructured, "uefa nations league", false), Some(5));
+        assert_eq!(fam(restructured, "world cup play-off tournament", false), None);
+        assert_eq!(fam(restructured, "uefa conference league", false), None);
+        assert_eq!(fam(restructured, "english fa community shield", true), Some(7));
+        // an edited database: a name no table has goes by its words, in every table
+        for t in [original, cm25, restructured] {
+            assert_eq!(fam(t, "mars champions league", false), Some(0));
+            assert_eq!(fam(t, "mars super cup", true), Some(7));
+            assert_eq!(family_in(t, "martian cup", true, true), Some(6));
+            assert_eq!(family_in(t, "martian cup", true, false), None);
+        }
+    }
+
+    /// The tables are well formed: a family is 0 to 7 or '-', and a database picks its own table.
+    #[test]
+    fn the_tables_are_well_formed() {
+        for (t, table) in TABLES.iter().enumerate() {
+            let rows: Vec<(String, String)> = latin1(table).lines().filter(|l| !l.starts_with('#')).map(|l| l.split_once('\t').map(|p| (p.0.to_string(), p.1.to_string())).unwrap()).collect();
+            assert!(rows.len() > 80, "table {t}");
+            assert!(rows.iter().all(|r| r.1 == "-" || r.1.parse::<usize>().is_ok_and(|n| n < FAMILIES.len())), "table {t}");
+            // (a name has one family within a table, in lower case)
+            assert!(rows.iter().all(|r| rows.iter().filter(|o| o.0.to_lowercase() == r.0.to_lowercase()).count() == 1), "table {t}");
+        }
+    }
+
     #[test]
     fn club_moves() {
         let clubs: Vec<String> = ["Ajax", "Ajax", "Ajax", "Ajax", "Ajax", "Ajax", "AC Milan", "Milan"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(loyalty(&clubs, 4), Some("5+ seizoenen (loyaliteit)"));
+        assert_eq!(loyalty(&clubs, 4), Some("5+ seasons (loyalty)"));
         assert_eq!((loyalty(&clubs, 3), loyalty(&clubs, 5)), (None, None));
         assert!(same_club("AC Milan", "Milan") && !same_club("Ajax", "Milan"));
         // hired in April, gone the next June; then two seasons at a third club
         let job = |year, day, club| Job { year, day, club, hired: true };
         let jobs = [job(2025, 192, 1), job(2030, 116, 2), job(2031, 152, 3), job(2033, 180, 4)];
-        assert_eq!(moves(&jobs), [(2030, "Vertrek na 1 seizoen"), (2032, "Vertrek na 2 seizoenen")]);
+        assert_eq!(moves(&jobs), [(2030, "Left after 1 season"), (2032, "Left after 2 seasons")]);
     }
 
     fn sample() -> League {
-        let rules = "P\tNationaal\tKampioen\t10\t1\nP\tTeamwissel\tVertrek na 1 seizoen\t-10\t0\nG\tBronze\t25\nG\tSilver\t75\nC\tLeeftijd\tA\t6\nC\tLeeftijd\tB\t3\nC\tStaff\tC\t3\n";
-        let file = "S\tAnn\t2031\tAjax\tDoe\t50\t10\tKampioen|Vertrek na 1 seizoen\nS\tAnn\t2032\tAjax\t\t\t\tKampioen\nR\t1\tAnn\t2032\t6\t1\tA\nR\t2\tAnn\t2032\t3\t0\tB\n";
+        let rules = "P\tNational\tChampion\t10\t1\nP\tClub changes\tLeft after 1 season\t-10\t0\nG\tBronze\t25\nG\tSilver\t75\nC\tAge\tA\t6\nC\tAge\tB\t3\nC\tStaff\tC\t3\n";
+        let file = "S\tAnn\t2031\tAjax\tDoe\t50\t10\tChampion|Left after 1 season\nS\tAnn\t2032\tAjax\t\t\t\tChampion\nR\t1\tAnn\t2032\t6\t1\tA\nR\t2\tAnn\t2032\t3\t0\tB\n";
         League::parse(rules, file)
     }
 
@@ -786,6 +921,31 @@ mod tests {
         assert!(belongs("S\tAnn\t2031\tAjax\nR\t1\tBob\t2031\t3\t0\tX\n", &["Bob Jones".to_string()]));
         assert!(!belongs("S\tAnn\t2031\tAjax\n", &["Carl Doe".to_string()]));
         assert_ne!(game_key("Ann Smith", 2025, 192, 16), game_key("Ann Smith", 2025, 192, 17));
+    }
+
+    /// A game starts in July: its first season is that year's, results still turn at SEASON_FROM.
+    #[test]
+    fn the_first_season_of_a_new_game() {
+        assert_eq!(season_from(192, 2025, RUNNING_FROM), 2025); // 11 July, the usual start
+        assert_eq!(season_from(RUNNING_FROM, 2025, RUNNING_FROM), 2025);
+        assert_eq!(season_from(RUNNING_FROM - 1, 2026, RUNNING_FROM), 2025); // 30 June
+        assert_eq!(season_from(30, 2026, RUNNING_FROM), 2025);
+        // a supercup in the days before 200 still counts to the season gone
+        assert_eq!(season_from(192, 2025, SEASON_FROM), 2024);
+        assert_eq!(season_from(SEASON_FROM, 2025, SEASON_FROM), 2025);
+    }
+
+    #[test]
+    fn the_top_scorer_by_one_name() {
+        let players = |v: &[(&str, i32)]| v.iter().map(|p| (p.0.to_string(), p.1)).collect::<Vec<_>>().into_iter();
+        assert_eq!(best_scorer(players(&[("Ann Smith", 3), ("Bob Jones", 7)])), Some(("Bob".to_string(), 7)));
+        assert_eq!(best_scorer(players(&[("Ann Smith", 0)])), None);
+        assert_eq!(scorer_name("Ann Smith"), scorer_name("Ann"));
+        // a file with the full name loads as before and writes the one form, the goals untouched
+        let l = League::parse("", "S\tAnn\t2031\tAjax\tBob Jones\t7\t\tChampion\nS\tAnn\t2032\tAjax\tBob\t4\t\t\n");
+        assert_eq!(l.seasons[0].scorer, "Bob Jones");
+        assert_eq!(l.seasons[0].goals, "7");
+        assert_eq!(l.lines(), "S\tAnn\t2031\tAjax\tBob\t7\t\tChampion\nS\tAnn\t2032\tAjax\tBob\t4\t\t\n");
     }
 
     #[test]
@@ -805,10 +965,37 @@ mod tests {
         assert_eq!(l.rank(80), ("Silver".to_string(), 75, 100));
     }
 
+    /// The friends' league was typed with the Dutch names: that file counts the same as its English
+    /// version, with the real rules.
+    #[test]
+    fn a_dutch_file_counts_as_its_english_one() {
+        let rules = latin1(RULES);
+        let old = "S\tAnn\t2031\tAjax\tBob\t7\t\tKampioen|CL Winnaar|Bekerwinnaar|Vertrek na 1 seizoen|5+ seizoenen (loyaliteit)|WK Clubteams Halve finalist|Eerste prijs 20+ jaar|Europees voetbal\nS\tBob\t2032\tPSV\t\t\t\t2e plaats|Kampioen LL|Nat. Supercup|Continentaal landentoernooi Finalist\n\
+                   R\t1\tAnn\t2031\t9\t1\tSpeler scoort 20+ goals\t1\t3 / 20 goals\t0\t1\nR\t2\tBob\t2032\t6\t1\tMax 3 aankopen\t0\t2 / 3 aankopen\t0\t1\nR\t3\tBob\t2032\t3\t1\tGeen fysio \u{e9}n geen scout\t0\t1 / 0 fysio's en scouts\t0\t1\n";
+        let new = "S\tAnn\t2031\tAjax\tBob\t7\t\tChampion|CL Winner|Cup winner|Left after 1 season|5+ seasons (loyalty)|Club World Cup Semi final|First prize in 20+ years|European football\nS\tBob\t2032\tPSV\t\t\t\t2nd place|Lower league champion|National Supercup|Continental tournament Finalist\n\
+                   R\t1\tAnn\t2031\t9\t1\tPlayer scores 20+ goals\t1\t3 / 20 goals\t0\t1\nR\t2\tBob\t2032\t6\t1\tMax 3 purchases\t0\t2 / 3 purchases\t0\t1\nR\t3\tBob\t2032\t3\t1\tNo physio and no scout\t0\t1 / 0 physios and scouts\t0\t1\n";
+        let (a, b) = (League::parse(&rules, old), League::parse(&rules, new));
+        assert_eq!(a.lines(), b.lines());
+        for (name, year) in [("Ann", 2031), ("Bob", 2032)] {
+            let items = |l: &League| l.seasons.iter().find(|s| s.name == name && s.year == year).unwrap().items.clone();
+            // (every item found in the rules: none dropped for a name it lost)
+            assert!(items(&b).iter().all(|i| b.points.iter().any(|p| p.0 == *i)), "{:?}", items(&b));
+            assert_eq!(a.item_points(&items(&a)), b.item_points(&items(&b)));
+            assert!(b.item_points(&items(&b)) != 0);
+            assert_eq!(a.rad_points(name, Some(year)), b.rad_points(name, Some(year)));
+            assert!(b.rad_points(name, Some(year)) > 0);
+        }
+        assert!(b.rads.iter().all(|r| track::rule(&r.text).is_some()), "a challenge the game follows keeps its rule");
+        // a name of the old version is never a name of the new one, or a new file would be changed
+        let names: Vec<(String, String)> = latin1(RENAMES).lines().filter_map(|l| l.split_once('\t')).map(|p| (p.0.to_string(), p.1.to_string())).collect();
+        assert!(names.iter().all(|n| !b.points.iter().any(|p| p.0 == n.0) && !b.tasks.iter().any(|t| t.1 == n.0 || t.0 == n.0)));
+        assert!(names.iter().filter(|n| b.points.iter().any(|p| p.0 == n.1) || b.tasks.iter().any(|t| t.1 == n.1)).count() >= 90);
+    }
+
     #[test]
     fn a_roll_keeps_the_rules() {
         let mut l = sample();
-        // (Leeftijd is used this season, so only Staff's C is left)
+        // (Age is used this season, so only Staff's C is left)
         for pick in 0..3 {
             let mut l2 = sample();
             assert!(l2.roll("Ann", 2032, pick));

@@ -22,6 +22,9 @@ const DIM: [u8; 3] = [0xa4, 0xaa, 0xb2];
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Transfer,
+    /// A finished transfer (its list icon is a briefcase); everywhere else it is a `Transfer`.
+    Signed,
+    Sacked,
     Injury,
     Ban,
     Scout,
@@ -46,6 +49,18 @@ fn gets_player(head: &[u8]) -> bool {
     })
 }
 
+/// A transfer that has happened ("X sign Y", "X get Y", "Y moves to X", "Y joins X"), not one
+/// still going on (a bid, talks, a rumour, "to sign"). The game gives a client only the headline,
+/// so host and client both go by its words.
+fn finished_transfer(head: &[u8]) -> bool {
+    let h = format!(" {} ", latin1(head).to_lowercase());
+    let going = [" bid", "talks", "rumour", "target", "linked", "interest", "offer", "could ", " may ", " to sign", " to join", " to move", " want", " eye", " chase", " plan", "?"];
+    if going.iter().any(|w| h.contains(w)) {
+        return false;
+    }
+    gets_player(head) || [" sign ", " signs ", " signed ", " moves to ", " joins ", " completes ", " seal "].iter().any(|w| h.contains(w))
+}
+
 #[cfg(test)]
 #[test]
 fn signing_headlines() {
@@ -55,12 +70,32 @@ fn signing_headlines() {
     assert!(!gets_player(b"Ajax get Champions League place"));
 }
 
+#[cfg(test)]
+#[test]
+fn kinds_of_headlines() {
+    // a finished transfer: the briefcase, in three phrasings
+    for h in [&b"Dunmere sign Kolvar"[..], b"Brightwick get Tamsen", b"Orsolo moves to Dunmere", b"Dunmere sign Orsolo from Brightwick"] {
+        assert!(kind(h) == Kind::Signed, "{}", String::from_utf8_lossy(h));
+    }
+    // still going on: the two arrows
+    for h in [&b"Dunmere bid for Kolvar"[..], b"Brightwick in transfer talks for Tamsen", b"Dunmere to sign Orsolo", b"Rumour: Dunmere target Kolvar"] {
+        assert!(kind(h) == Kind::Transfer, "{}", String::from_utf8_lossy(h));
+    }
+    // a Discipline Player report is no transfer; a sacking has its own kind
+    assert!(kind(b"Kolvar accepts warning") == Kind::Ban);
+    assert!(kind(b"Orsolo accepts reprimand") == Kind::Ban);
+    assert!(kind(b"Dunmere sack Tamsen") == Kind::Sacked);
+    assert!(kind(b"Brightwick manager sacked") == Kind::Sacked);
+}
+
 /// What a story is about, by its headline's words.
 fn kind(head: &[u8]) -> Kind {
     let h = latin1(head).to_lowercase();
     let any = |ws: &[&str]| ws.iter().any(|w| h.contains(w));
-    if any(&["banned", "suspen", "sent off", "fined", "disciplin"]) {
+    if any(&["banned", "suspen", "sent off", "fined", "disciplin", "warning", "reprimand"]) {
         Kind::Ban
+    } else if any(&["sacked", "sacks", " sack ", "dismiss", "fired", "relieved of"]) {
+        Kind::Sacked
     } else if any(&["injur", "training", "fitness", "out for", "resumes", "surgery", "knock", "returns to"]) {
         Kind::Injury
     } else if any(&["scout"]) {
@@ -73,6 +108,8 @@ fn kind(head: &[u8]) -> Kind {
         Kind::MoodDown
     } else if any(&["contract", "renew", "extension", "new deal", "retire"]) {
         Kind::Contract
+    } else if finished_transfer(head) {
+        Kind::Signed
     } else if any(&["transfer", "bid", "sign", "offer", "loan", "fee", "joins", "accepts", "move", "swap", "release", "free agent", "target"]) || gets_player(head) {
         Kind::Transfer
     } else if any(&["rumour", "linked", "mark on", "media", "speculat", "claims", "press", "tipped", "backs", "warns", "insists", "says"]) {
@@ -91,7 +128,8 @@ fn kind(head: &[u8]) -> Kind {
 /// The category label and colour of a kind.
 fn label(k: Kind) -> (&'static [u8], [u8; 3]) {
     match k {
-        Kind::Transfer => (b"TRANSFER", [0x4c, 0x9c, 0xe8]),
+        Kind::Transfer | Kind::Signed => (b"TRANSFER", [0x4c, 0x9c, 0xe8]),
+        Kind::Sacked => (b"CLUB", [0xe0, 0x50, 0x50]),
         Kind::Injury => (b"INJURY", [0xe0, 0x60, 0x58]),
         Kind::Ban => (b"DISCIPLINE", [0xd8, 0x30, 0x30]),
         Kind::Scout => (b"SCOUTING", [0x3e, 0xb0, 0xa8]),
@@ -144,6 +182,23 @@ unsafe fn icon(k: Kind, cx: i32, cy: i32, r: i32) {
                 for i in 0..=h {
                     fill(tip - dir * i, y - i, tip - dir * i + 1, y + i + 1, c);
                 }
+            }
+        }
+        Kind::Signed => {
+            // a briefcase: handle over a body with a clasp line
+            let t = (r / 4).max(1);
+            let hw = r / 2;
+            fill(cx - hw, cy - r, cx - hw + t, cy - r / 4, c);
+            fill(cx + hw - t + 1, cy - r, cx + hw + 1, cy - r / 4, c);
+            fill(cx - hw, cy - r, cx + hw + 1, cy - r + t, c);
+            fill(cx - r, cy - r / 4, cx + r + 1, cy + r + 1, c);
+            fill(cx - r, cy + r / 4, cx + r + 1, cy + r / 4 + 1, AREA);
+        }
+        Kind::Sacked => {
+            // a cross
+            for i in -r..=r {
+                fill(cx + i, cy + i, cx + i + 2, cy + i + 1, c);
+                fill(cx + i, cy - i, cx + i + 2, cy - i + 1, c);
             }
         }
         Kind::Scout => {
@@ -907,7 +962,11 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     HIDE = Some(((header.0, header.1, header.2, by2), (bx1 + 2, by1 + 2)));
     let (left, right) = (bx1 + 22, bx2 - 22);
     let small = smaller(font, 2);
-    let what = kind(head);
+    // (the briefcase is a list icon only: the card and the label are a transfer's)
+    let what = match kind(head) {
+        Kind::Signed => Kind::Transfer,
+        k => k,
+    };
 
     // the words, with where a paragraph starts (a blank line, or a gap, before its line)
     let lf = lines[0].1;

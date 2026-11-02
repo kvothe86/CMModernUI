@@ -44,6 +44,7 @@ silences the client's questions (test switch).
 | `B` n, club | the scout's report on a club for the channel's manager (n: a new one each time) | `assistant::remote_scout`, as `T` but reads no screen parameter |
 | `U` club | a club's three best by the intrinsic score | `scout::best_three`, staff pointers |
 | `E` n | the CM Challenge page for the channel's manager, read only (n: a new one each time) | `challenge::remote`, text; reads no screen parameter |
+| `p` height | sent with every click: its answer says the host is there; the client's screen height, for its table rows | `remote::clicked`, `comp::client_height`; no answer in 1.5 s: "Waiting for the host ..." |
 | `b` (not a key) | packet `[0x7c,'b', block]`, host to client, unasked | `remote::BLOCK` |
 
 Host-side checks: staff pointers must lie in the staff table (`valid_staff`), mapped memory only.
@@ -61,6 +62,7 @@ all cached answers).
 |---|---|---|---|
 | Links | `news::screen_block` | `news::block_links`, `block_words` | u16 count; per link: kind u16, object u32, cell u16, text, name, crest key (length-byte strings). Menu bar's own-text items left out. |
 | History | `comp::history_block` | `comp::titles` via `news::block_tail` | u16 count; per winner row: season i16, winner u32, titles u16. Empty unless screen param 0 is a competition. |
+| Table | `comp::form_block` | `comp::block_forms` | flags (1: the game's nation column), u8 count; per club its form, short name, full name, each a length byte and the bytes. Two zeros on a screen with no table. Filled from the `league_tab` hook, so only a real table tab. |
 
 `block_words` places each link on the story's words (by name, key, or shorter parts, last item
 first); stories the game links nothing in fall back to `word_links` (clubs open by `K`).
@@ -197,7 +199,10 @@ which fails on these games here (access denied).
 ## Other client fixes
 
 `client_rects_as_sent`: the client's `add_area` / `add_item` calls skip a resolution patch's
-scaling (rects were scaled twice). `contacting_box_lower`: "Contacting Server..." rows moved below
+scaling (rects were scaled twice). So a client shows the host's coordinates: host and client play at
+one resolution, mixed sizes are no case. What the host sizes for a client goes by
+`comp::viewer_height` (key `p`, 0 until told): table rows, dropdown rows.
+`contacting_box_lower`: "Contacting Server..." rows moved below
 the menu bar items (rows 0x7fe162..0x7fe1b4). Dropdowns: the client redraws only two rows, so
 `menu_row` shades a lone row from `MENU_ROWS`.
 

@@ -76,35 +76,35 @@ type Reading = fn(&Readings) -> i32;
 /// 0x80): the reading, the way, the unit. None: the host's to tick.
 pub fn rule(text: &str) -> Option<(Reading, Way, &'static str)> {
     let r: (Reading, Way, &'static str) = match text {
-        "Max 1 aankoop" => (|r| r.bought, Way::Most(1), "aankopen"),
-        "Max 3 aankopen" => (|r| r.bought, Way::Most(3), "aankopen"),
-        "Geen aankopen > \u{80}2M" => (|r| r.biggest, Way::Most(2000), "k"),
-        "Grootste aankoop < \u{80}5M" => (|r| r.biggest, Way::Most(4999), "k"),
-        "Alleen Bosman/vrije transfers" => (|r| r.paid, Way::Most(0), "betaalde aankopen"),
-        "Alleen spelers <23 kopen" => (|r| r.over_23, Way::Most(0), "aankopen van 23+"),
-        "Geen wintertransfers" => (|r| r.winter_deals, Way::Most(0), "wintertransfers"),
-        "Geen verkopen in winter" => (|r| r.winter_sales, Way::Most(0), "winterverkopen"),
-        "Ontsla vijf spelers uit je team (zonder vergoeding)" => (|r| r.released, Way::Least(5), "ontslagen"),
-        "Verkoop je beste speler (avg rating 1 januari)" => (|r| r.best_sold, Way::Least(1), "verkocht"),
-        "Haal als team niet meer dan 3 rode kaarten" => (|r| r.reds, Way::Most(3), "rode kaarten"),
-        "Haal als team niet meer dan 5 rode kaarten" => (|r| r.reds, Way::Most(5), "rode kaarten"),
-        "Minstens 3 spelers met 10+ goals" => (|r| r.scorers_10, Way::Least(3), "spelers"),
-        "Minstens 3 spelers met 5+ assists" => (|r| r.assists_5, Way::Least(3), "spelers"),
-        "Speler scoort 20+ goals" => (|r| r.top_goals, Way::Least(20), "goals"),
-        "Speler wordt topscorer OF top assists OF hoogste gemiddelde" => (|r| r.leads, Way::EndLeast(1), "van 3"),
-        "Speler haalt twee van de drie (topscorer/assists/HG)" => (|r| r.leads, Way::EndLeast(2), "van 3"),
-        "Geen staf" => (|r| r.staff, Way::EndMost(0), "stafleden"),
-        "Max 2 stafleden totaal" => (|r| r.staff, Way::EndMost(2), "stafleden"),
-        "Geen fysio \u{e9}n geen scout" => (|r| r.scouts_physios, Way::EndMost(0), "fysio's en scouts"),
-        "Alleen Nederlandse staf" => (|r| r.foreign_staff, Way::EndMost(0), "buitenlandse stafleden"),
-        "Alle coaches met coaching attributes onder de 5" => (|r| r.coach_best, Way::EndMost(4), "hoogste attribuut"),
-        "Assistent manager <10" => (|r| r.assistant_best, Way::EndMost(9), "hoogste attribuut"),
+        "Max 1 purchase" => (|r| r.bought, Way::Most(1), "purchases"),
+        "Max 3 purchases" => (|r| r.bought, Way::Most(3), "purchases"),
+        "No purchases > \u{80}2M" => (|r| r.biggest, Way::Most(2000), "k"),
+        "Biggest purchase < \u{80}5M" => (|r| r.biggest, Way::Most(4999), "k"),
+        "Only Bosman/free transfers" => (|r| r.paid, Way::Most(0), "paid purchases"),
+        "Only buy players <23" => (|r| r.over_23, Way::Most(0), "purchases of 23+"),
+        "No winter transfers" => (|r| r.winter_deals, Way::Most(0), "winter transfers"),
+        "No sales in winter" => (|r| r.winter_sales, Way::Most(0), "winter sales"),
+        "Release five players from your squad (no fee)" => (|r| r.released, Way::Least(5), "released"),
+        "Sell your best player (avg rating 1 January)" => (|r| r.best_sold, Way::Least(1), "sold"),
+        "Team gets no more than 3 red cards" => (|r| r.reds, Way::Most(3), "red cards"),
+        "Team gets no more than 5 red cards" => (|r| r.reds, Way::Most(5), "red cards"),
+        "At least 3 players with 10+ goals" => (|r| r.scorers_10, Way::Least(3), "players"),
+        "At least 3 players with 5+ assists" => (|r| r.assists_5, Way::Least(3), "players"),
+        "Player scores 20+ goals" => (|r| r.top_goals, Way::Least(20), "goals"),
+        "Player becomes top scorer OR top assists OR highest average rating" => (|r| r.leads, Way::EndLeast(1), "of 3"),
+        "Player gets two of three (top scorer/assists/average rating)" => (|r| r.leads, Way::EndLeast(2), "of 3"),
+        "No staff" => (|r| r.staff, Way::EndMost(0), "staff members"),
+        "Max 2 staff members in total" => (|r| r.staff, Way::EndMost(2), "staff members"),
+        "No physio and no scout" => (|r| r.scouts_physios, Way::EndMost(0), "physios and scouts"),
+        "Dutch staff only" => (|r| r.foreign_staff, Way::EndMost(0), "foreign staff"),
+        "All coaches with coaching attributes below 5" => (|r| r.coach_best, Way::EndMost(4), "highest attribute"),
+        "Assistant manager <10" => (|r| r.assistant_best, Way::EndMost(9), "highest attribute"),
         _ => return None,
     };
     Some(r)
 }
 
-/// The reading in words: "1 / 3 aankopen", "€1.5M / €2M".
+/// The reading in words: "1 / 3 purchases", "€1.5M / €2M".
 fn note(value: i32, way: Way, unit: &str) -> String {
     let limit = match way {
         Way::Most(n) | Way::Least(n) | Way::EndMost(n) | Way::EndLeast(n) => n,
@@ -169,7 +169,7 @@ unsafe fn read_deals(staff: usize, year: i32, best: Option<i32>, r: &mut Reading
 }
 
 /// A season stat of a player in a stats row (2 League, 6 Senior Club) as a number.
-unsafe fn stat(staff: usize, row: i32, field: i32) -> f32 {
+pub(super) unsafe fn stat(staff: usize, row: i32, field: i32) -> f32 {
     let stats = rd::<usize>(PLAYER_STATS);
     let player = ((staff + 0x61) as *const usize).read_unaligned();
     if !readable(stats, 0x34) || !readable(player, 70) {
@@ -180,7 +180,7 @@ unsafe fn stat(staff: usize, row: i32, field: i32) -> f32 {
     buffer_text(&buf).parse().unwrap_or(0.0)
 }
 
-unsafe fn squad(club: usize) -> Vec<usize> {
+pub(super) unsafe fn squad(club: usize) -> Vec<usize> {
     (0..50).map(|k| rd::<usize>(club + 0xd7 + k * 4)).filter(|&s| valid_staff(s)).collect()
 }
 
@@ -282,7 +282,7 @@ pub unsafe fn update() {
         if rows.is_empty() {
             continue;
         }
-        let leads = l.rads.iter().filter(open).any(|r| r.text.starts_with("Speler wordt") || r.text.starts_with("Speler haalt"));
+        let leads = l.rads.iter().filter(open).any(|r| r.text.starts_with("Player becomes") || r.text.starts_with("Player gets"));
         let best = l.best.iter().find(|b| b.1 == now && same_manager(&b.0, &name)).map(|b| b.2);
         let readings = read(staff, club, now, leads, best);
         if trace() {
@@ -313,7 +313,7 @@ pub unsafe fn update() {
 pub unsafe fn tick() {
     static mut DAY: (i16, i16) = (0, 0);
     let today = (rd::<i16>(TODAY), rd::<i16>(TODAY + 2));
-    if today == DAY || today.1 < 1900 || rd::<i32>(STAFF_COUNT) <= 0 || !network_game() {
+    if today == DAY || today.1 < 1900 || rd::<i32>(STAFF_COUNT) <= 0 || !game_on() {
         return;
     }
     DAY = today;
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(fee_of("  Bought A from B for \u{80}1,200,000"), Some(1200));
         assert_eq!(fee_of("  Bought A from B (part exchange)"), None);
         assert_eq!(note(1500, Way::Most(2000), "k"), "\u{80}1.5M / \u{80}2M");
-        assert_eq!(note(1, Way::Most(3), "aankopen"), "1 / 3 aankopen");
+        assert_eq!(note(1, Way::Most(3), "purchases"), "1 / 3 purchases");
     }
 
     /// Every challenge of a kind the game can read has its rule: a word changed in the rules file

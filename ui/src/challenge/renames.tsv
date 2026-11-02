@@ -1,0 +1,134 @@
+# old<TAB>new: the Dutch names of the first version, read in league files (mod.rs League::parse)
+Europa	Europe
+Supercup	Supercups
+Nationaal	National
+Teamwissel	Club changes
+Landenteams	National teams
+Wereld (Clubs)	World (clubs)
+CL Winnaar	CL Winner
+CL Kwartfinale	CL Quarter final
+CL Halve finale	CL Semi final
+UEFA Cup Winnaar	UEFA Cup Winner
+UEFA Cup Kwartfinale	UEFA Cup Quarter final
+UEFA Cup Halve finale	UEFA Cup Semi final
+Nat. Supercup	National Supercup
+Europese Supercup Winnaar	European Supercup Winner
+Kampioen	Champion
+2e plaats	2nd place
+3e plaats	3rd place
+Kampioen LL	Lower league champion
+Promotie LL	Lower league promotion
+Bekerwinnaar	Cup winner
+Finalist beker	Cup finalist
+Europees voetbal	European football
+3+ seizoenen	3+ seasons
+Vertrek na 1 seizoen	Left after 1 season
+Vertrek na 2 seizoenen	Left after 2 seasons
+5+ seizoenen (loyaliteit)	5+ seasons (loyalty)
+WK Landenteams Winnaar	World Cup Winner
+WK Landenteams Finalist	World Cup Finalist
+WK Landenteams Kwartfinale	World Cup Quarter final
+WK Landenteams Halve finale	World Cup Semi final
+Continentaal landentoernooi Winnaar	Continental tournament Winner
+Continentaal landentoernooi Finalist	Continental tournament Finalist
+Continentaal landentoernooi Halve finale	Continental tournament Semi final
+Eerste prijs 10+ jaar	First prize in 10+ years
+Eerste prijs 20+ jaar	First prize in 20+ years
+Eerste prijs 30+ jaar	First prize in 30+ years
+WK Clubteams Winnaar	Club World Cup Winner
+WK Clubteams Finalist	Club World Cup Finalist
+WK Clubteams Halve finalist	Club World Cup Semi final
+Spelers	Players
+Tactiek	Tactics
+Leeftijd	Age
+Selectie	Squad
+Nationaliteit	Nationality
+Geen staf	No staff
+Assistent manager <10	Assistant manager <10
+Max 2 stafleden totaal	Max 2 staff members in total
+Alleen Nederlandse staf	Dutch staff only
+Geen fysio én geen scout	No physio and no scout
+Alle coaches met coaching attributes onder de 5	All coaches with coaching attributes below 5
+Speler scoort 20+ goals	Player scores 20+ goals
+Minstens 3 spelers met 10+ goals	At least 3 players with 10+ goals
+Minstens 3 spelers met 5+ assists	At least 3 players with 5+ assists
+Haal als team niet meer dan 3 rode kaarten	Team gets no more than 3 red cards
+Haal als team niet meer dan 5 rode kaarten	Team gets no more than 5 red cards
+Speler haalt twee van de drie (topscorer/assists/HG)	Player gets two of three (top scorer/assists/average rating)
+Speler wordt topscorer OF top assists OF hoogste gemiddelde	Player becomes top scorer OR top assists OR highest average rating
+Speel met sweeper in basiself	Play with a sweeper in the starting XI
+Speel zonder vleugelverdedigers	Play without wing backs
+Speel met minstens drie aanvallers	Play with at least three attackers
+Altijd 4-4-2 (geen andere formatie)	Always 4-4-2 (no other formation)
+Speel met minstens vijf verdedigers	Play with at least five defenders
+Speel met minstens vijf middenvelders	Play with at least five midfielders
+Speel zonder aanvallende vleugelspelers	Play without attacking wingers
+Speel zonder spits (min. 15 comp-wedstrijden)	Play without a striker (min. 15 competitive matches)
+Speel park the bus, defensive, long ball, counter	Play park the bus, defensive, long ball, counter
+3 spelers 35+ in basiself	3 players 35+ in the starting XI
+5 spelers 30+ in basiself	5 players 30+ in the starting XI
+5 spelers 32+ in basiself	5 players 32+ in the starting XI
+5 spelers onder 21 in basiself	5 players under 21 in the starting XI
+5 spelers onder 23 in basiself	5 players under 23 in the starting XI
+Gemiddelde leeftijd basiself <=23	Average age starting XI <=23
+Gemiddelde leeftijd basiself >=30	Average age starting XI >=30
+Geen speler jonger dan 18 in basiself	No player younger than 18 in the starting XI
+5 spelers linksbenig in basiself	5 left-footed players in the starting XI
+5 spelers rechtsbenig in basiself	5 right-footed players in the starting XI
+Keeper + 4 verdedigers allemaal 28+	Keeper + 4 defenders all 28+
+Minstens 3 homegrown spelers in basiself	At least 3 homegrown players in the starting XI
+Geen speler met waarde > €10M in basiself	No player worth more than €10M in the starting XI
+Minstens 2 jeugdspelers gepromoveerd naar basiself	At least 2 youth players promoted to the starting XI
+Minstens 3 spelers met internationale caps dit seizoen	At least 3 players with international caps this season
+Max 1 aankoop	Max 1 purchase
+Max 3 aankopen	Max 3 purchases
+Geen wintertransfers	No winter transfers
+Geen aankopen > €2M	No purchases > €2M
+Geen verkopen in winter	No sales in winter
+Alleen spelers <23 kopen	Only buy players <23
+Grootste aankoop < €5M	Biggest purchase < €5M
+Alleen Bosman/vrije transfers	Only Bosman/free transfers
+Verkoop je beste speler (avg rating 1 januari)	Sell your best player (avg rating 1 January)
+Ontsla vijf spelers uit je team (zonder vergoeding)	Release five players from your squad (no fee)
+5 spelers uit Afrika	5 players from Africa
+5 spelers uit Z-Amerika	5 players from South America
+5 spelers uit Oost-Europa	5 players from Eastern Europe
+5 spelers uit Scandinavië	5 players from Scandinavia
+5 buitenlanders in basiself	5 foreigners in the starting XI
+5 spelers uit NED/BEL/POR/TUR	5 players from NED/BEL/POR/TUR
+5 spelers uit ENG/SPA/GER/ITA/FRA	5 players from ENG/SPA/GER/ITA/FRA
+3 spelers uit hetzelfde land (niet eigen land)	3 players from the same country (not your own)
+Geen speler uit eigen land in basiself (min. 15x)	No player from your own country in the starting XI (min. 15 times)
+Minstens 5 verschillende nationaliteiten in basiself	At least 5 different nationalities in the starting XI
+aankopen	purchases
+betaalde aankopen	paid purchases
+aankopen van 23+	purchases of 23+
+wintertransfers	winter transfers
+winterverkopen	winter sales
+ontslagen	released
+verkocht	sold
+rode kaarten	red cards
+spelers	players
+van 3	of 3
+stafleden	staff members
+fysio's en scouts	physios and scouts
+buitenlandse stafleden	foreign staff
+hoogste attribuut	highest attribute
+Down Under challenge (alleen Oceaniërs)	Down Under challenge (Oceanian players only)
+Eerste selectie gemiddeld <=23 jaar	First team average age <=23
+Eerste selectie gemiddeld =<20 jaar	First team average age <=20
+Eerste selectie gemiddeld =>30 jaar	First team average age >=30
+Eerste selectie gemiddeld =>32 jaar	First team average age >=32
+Fatbike jongeren challenge (alleen Afrikanen)	Fatbike kids challenge (African players only)
+Favela challenge (alleen Z-Amerikanen)	Favela challenge (South American players only)
+Geen spelers uit eigen land (comp)	No players from your own country (competition)
+Haal als team niet meer dan 1 rode kaart	Team gets no more than 1 red card
+Kroepoek challenge (alleen Aziaten)	Prawn cracker challenge (Asian players only)
+Murica challenge (alleen N-Amerikanen)	Murica challenge (North American players only)
+Speel met 1 verdediger (Kamikaze)	Play with 1 defender (Kamikaze)
+Speel zonder spits (Catenaccio)	Play without a striker (Catenaccio)
+Speler wordt of topscorer of top assists of hoogste gemiddelde	Player becomes top scorer OR top assists OR highest average rating
+Speler wordt topscorer, top assist gever en hoogste gemiddelde	Player becomes top scorer, top assists and highest average rating
+Team met 1 nationaliteit uit ENG/SPA/GER/ITA/FRA	Team of 1 nationality from ENG/SPA/GER/ITA/FRA
+Team met 1 nationaliteit uit NED/BEL/POR/TUR	Team of 1 nationality from NED/BEL/POR/TUR
+Team met 1 nationaliteit uit Overige	Team of 1 nationality from the other countries
