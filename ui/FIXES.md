@@ -96,6 +96,8 @@ Ajax host + PSV client; tes2 = 9.9.25 before Real Madrid v Ajax).
 | Seen | Cause | Where | Check | Status |
 |---|---|---|---|---|
 | `cmui_config.bat`: no box for Modern Buttons and CM Challenge | 14 boxes a column at 300 px: the 29th and 30th stood at x 624 in a window 640 wide | `cmui_config.ps1`: three columns of 11 at 205 px | `cmui_config.ps1 -Ini <file> -Test`, the PNG | checked 2026-11-03 (picture: 31 boxes) |
+| CM Challenge Dashboard: extra ranks "<manager> 2001 pnt" after Legend | the career goals' readings were written as `G` lines, the ranks' letter; the parse matched the rank arm first, so readings became ranks and never came back as readings | `challenge\mod.rs`: readings written as `V`; a `G` line of five fields read as a reading | test `goals_are_picked_once`; test.sav Dashboard | checked 2026-11-03 (seven ranks) |
+| CM Challenge country list: every nation of the database, also those not loaded | `nations()` took every competition's nation | `nations()` keeps nations with a League object (`track::league_object`) | test.sav (only Holland loaded) | checked 2026-11-03 (only Holland) |
 | Many "Could not find club" errors on Restructured (from NickDLL), wrong database | exe not portable: it moved to the registry's install path (CM0102Orign) and loaded that data | `lib.rs` `warn_not_portable` warns at start, `install.py` `other_install` before an install; the F exes got the patcher's three portable patches; both warnings also say to switch off Windows 95 mode (with it a portable exe crashes about a second after graphics start-up) | test `other_install_ignores_case_and_closing_slash`; install.py check on a non-portable backup exe; message box and log line seen on that exe run from a scratch folder | checked 2026-10-30 |
 
 ## Crest pack

@@ -232,19 +232,25 @@ pub(super) struct Standing {
     pub beaten: Vec<(usize, i32)>,
 }
 
+/// A competition's League object, 0 for none: only a league the game plays (loaded at the start)
+/// has one, `[LEAGUES][id]` with its +4 the competition.
+pub(super) unsafe fn league_object(comp: usize) -> usize {
+    let leagues = rd::<usize>(LEAGUES);
+    if !readable(comp, 4) || !readable(leagues, 4) || rd::<i32>(comp) < 0 {
+        return 0;
+    }
+    let at = leagues + rd::<i32>(comp) as usize * 4;
+    let league = if readable(at, 4) { rd::<usize>(at) } else { 0 };
+    if readable(league, 0xc9) && rd::<usize>(league + 4) == comp { league } else { 0 }
+}
+
 /// The table of the club's league: League object `[LEAGUES][id]` (its +4 the competition), +0x3e
 /// the teams, +0xb1 the rows of 0x3b bytes: +0 club, +5 head-to-head (14 bytes an opponent: +0
 /// club, +5 won), +0x11 played, +0x14 lost, +0x19 points.
 pub(super) unsafe fn standing(club: usize) -> Option<Standing> {
     let comp = rd::<usize>(club + 0x57);
-    let leagues = rd::<usize>(LEAGUES);
-    if !readable(comp, 4) || !readable(leagues, 4) {
-        return None;
-    }
-    let id = rd::<i32>(comp);
-    let at = leagues + id.max(0) as usize * 4;
-    let league = if id >= 0 && readable(at, 4) { rd::<usize>(at) } else { 0 };
-    if !readable(league, 0xb5) || rd::<usize>(league + 4) != comp {
+    let league = league_object(comp);
+    if league == 0 {
         return None;
     }
     let (teams, rows) = (rd::<i16>(league + 0x3e).max(0) as usize, rd::<usize>(league + 0xb1));
@@ -488,12 +494,11 @@ pub unsafe fn tick() {
     static mut LISTED: bool = false;
     if trace() && !LISTED {
         LISTED = true;
-        let (comps, count, leagues) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT), rd::<usize>(LEAGUES));
+        let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
         for k in 0..count.max(0) as usize {
             let comp = comps + k * COMP_SIZE;
-            let at = leagues + rd::<i32>(comp).max(0) as usize * 4;
-            let league = if readable(at, 4) { rd::<usize>(at) } else { 0 };
-            if first_division(comp) && readable(league, 0xc9) && rd::<usize>(league + 4) == comp {
+            let league = league_object(comp);
+            if first_division(comp) && league != 0 {
                 let rules: Vec<u8> = (0..4).map(|r| rd::<u8>(league + 0xc5 + r)).collect();
                 log(&format!("challenge league {}: rules {rules:?} head-to-head {}", latin1(&game_text(comp + 4, 51)), rules.contains(&4)));
             }

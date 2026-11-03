@@ -285,12 +285,13 @@ impl League {
                     l.points.push((text(2), number(3), number(4) != 0));
                     l.prizes.push((text(1), text(2), number(3), number(4) != 0));
                 }
-                "G" => l.ranks.push((text(1), number(2))),
+                // (a reading was written as G at first, the rank's letter: five fields tell it apart)
+                "G" if c.len() < 5 => l.ranks.push((text(1), number(2))),
                 "C" => l.tasks.push((text(1), text(2), number(3))),
                 "Q" => l.goals.push((text(1), text(2), number(3))),
                 "W" => l.marks.push(Mark { name: text(1), goal: text(2), picked: number(3), country: text(4), done: number(5) }),
                 "E" => l.leaders.push((text(1), number(2), [number(3) != 0, number(4) != 0, number(5) != 0])),
-                "G" => l.stats.push((text(1), number(2), text(3), number(4))),
+                "V" | "G" => l.stats.push((text(1), number(2), text(3), number(4))),
                 "S" => l.seasons.push(Season {
                     name: text(1),
                     year: number(2),
@@ -345,7 +346,7 @@ impl League {
             out += &format!("E\t{name}\t{year}\t{}\t{}\t{}\n", held[0] as i32, held[1] as i32, held[2] as i32);
         }
         for (name, year, key, value) in &self.stats {
-            out += &format!("G\t{name}\t{year}\t{key}\t{value}\n");
+            out += &format!("V\t{name}\t{year}\t{key}\t{value}\n");
         }
         out
     }
@@ -649,13 +650,15 @@ unsafe fn biggest_win(club: usize) -> Option<(i32, usize, i32)> {
     Some((season_from(day, year, SEASON_FROM), club, goals))
 }
 
-/// The nations a country can be chosen from: those with a competition of their own, by name.
+/// The nations a country can be chosen from: those with a league the game plays (one chosen at
+/// the start), by name; a nation with its league not loaded could never be won.
 unsafe fn nations() -> Vec<String> {
     let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
     if count <= 0 || !readable(comps, count as usize * COMP_SIZE) {
         return Vec::new();
     }
-    let mut all: Vec<String> = (0..count as usize).map(|k| nation_name(rd::<usize>(comps + k * COMP_SIZE + COMP_NATION))).filter(|n| !n.is_empty()).collect();
+    let mut all: Vec<String> = (0..count as usize).map(|k| comps + k * COMP_SIZE).filter(|&c| track::league_object(c) != 0)
+        .map(|c| nation_name(rd::<usize>(c + COMP_NATION))).filter(|n| !n.is_empty()).collect();
     all.sort();
     all.dedup();
     all
@@ -1237,6 +1240,12 @@ mod tests {
         let back = League::parse("", &l.lines());
         assert_eq!(back.lines(), l.lines());
         assert!(!back.picking("Ann", 2032));
+        // readings come back as readings, not as ranks; a file of the first version (G) too
+        let ranks = l.ranks.len();
+        l.set_stat("Ann Smith", 2031, "lost", 2);
+        let back = League::parse(&latin1(RULES), &(l.lines() + "G\tAnn Smith\t2031\tplayed\t9\n"));
+        assert_eq!(back.ranks.len(), ranks);
+        assert_eq!((back.stat("Ann", 2031, "lost"), back.stat("Ann", 2031, "played")), (Some(2), Some(9)));
     }
 
     #[test]

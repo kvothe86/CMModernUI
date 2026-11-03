@@ -47,7 +47,8 @@ last reading of the season; "coaching attributes" are the four of `assistant::SP
 A Goals tab after RAD (`goals.rs`, the `Q` lines of `rules.tsv`): 48 goals for a whole career, worth
 10 to 150 points (weighed against a season: about 16 to 22 points on the friends' league). The host
 picks **ten** for each manager (a click picks or drops one), and a country for the three that ask
-"a country of your choice" (the chip opens the list of nations with a competition). Picks and
+"a country of your choice" (the chip opens the list of nations whose league the game plays: only the leagues loaded at the
+start, `track::league_object`). Picks and
 countries can change only in the season of the manager's first pick. A goal counts what happens
 from the season it was picked, once; its points go into the career total (Dashboard, rank, Stats'
 rank), not into a season's.
@@ -70,7 +71,7 @@ League+0xc5): in Restructured the Premier League, Ligue 1, Bundesliga, Eredivisi
 more; Serie A and Scotland not seen); in the CM25 data only Serie A, La Liga, Liga Portugal and the
 Super Lig. Elsewhere a derby stays the host's to tick. A trace lists them (`challenge league`).
 
-File: `W<TAB>manager<TAB>goal<TAB>season picked<TAB>country<TAB>season ticked (0)`, `E<TAB>manager<TAB>season<TAB>scorer<TAB>assists<TAB>rating` (0/1), `G<TAB>manager<TAB>season<TAB>key<TAB>value` (played, lost, full, gap, derby0..6, ballon, toty). Page: `Q` (the
+File: `W<TAB>manager<TAB>goal<TAB>season picked<TAB>country<TAB>season ticked (0)`, `E<TAB>manager<TAB>season<TAB>scorer<TAB>assists<TAB>rating` (0/1), `V<TAB>manager<TAB>season<TAB>key<TAB>value` (`G` in the first build, read as such by its five fields) (played, lost, full, gap, derby0..6, ballon, toty). Page: `Q` (the
 goals, with whether the game follows each), `M` (a manager: can his goals still change), `W` (his
 picks: the season reached, country, ticked), `N` (nations, host only). Off: no Goals tab, no goal
 points; the marks stay in the file.
