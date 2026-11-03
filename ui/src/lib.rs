@@ -2271,12 +2271,12 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 30] = [
+const FEATURES: [&str; 31] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
-    "squad_table", "table_icons", "background_show", "modern_buttons", "challenge",
+    "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
 ];
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
@@ -2294,6 +2294,7 @@ const TABLE_ICONS: usize = 26;
 const BACKGROUND_SHOW: usize = 27;
 const MODERN_BUTTONS: usize = 28;
 const CHALLENGE: usize = 29;
+const CAREER_GOALS: usize = 30; // career goals on the CM Challenge page (`challenge\goals.rs`; needs `challenge`)
 const THEME_ON: usize = 0;
 const TABS: usize = 1;
 const ATTRIBUTE_BARS: usize = 2;

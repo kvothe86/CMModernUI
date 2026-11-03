@@ -42,6 +42,39 @@ Choices: winter is 1 December to 1 March; fees are the sentence's number whateve
 age at the purchase; limits (Most, Least) settle once passed, staff and league leaders (End) on the
 last reading of the season; "coaching attributes" are the four of `assistant::SPECIALITIES`.
 
+## Career goals (switch 30 `career_goals`)
+
+A Goals tab after RAD (`goals.rs`, the `Q` lines of `rules.tsv`): 48 goals for a whole career, worth
+10 to 150 points (weighed against a season: about 16 to 22 points on the friends' league). The host
+picks **ten** for each manager (a click picks or drops one), and a country for the three that ask
+"a country of your choice" (the chip opens the list of nations with a competition). Picks and
+countries can change only in the season of the manager's first pick. A goal counts what happens
+from the season it was picked, once; its points go into the career total (Dashboard, rank, Stats'
+rank), not into a season's.
+
+The game follows 46 of the 48 (`goals::holds`); the host ticks the European Golden Boot and the
+Champions League top scorer (neither is an award in the databases, and the players' stats have one
+"Continental" row for all European cups). A tick also stands for a goal the game follows.
+
+| From | Goals | How |
+|---|---|---|
+| the history | titles, cups, supercups, promotions, European and world cups, countries and clubs worked at, trophies by country and club, lowest division up | by the competition's nation, the clubs by season (`career_of`, `club_in`), the club's nation for European cups (big five by the game's nation names), the Conference League by its name; "lowest playable division": the league of the lowest reputation in its nation, the "<nation> Lower Division" catch-all left out (`lowest_of`); "ten seasons": played out |
+| the league's leaders | top scorer, assists, average rating, top scorer three in a row | `track::league_leaders`, the stats' league row (2), average from 10 matches, only in the nation's first division (`first_division`); a season's last reading stands (`E` lines) |
+| the league table | unbeaten, 10+ points behind at halfway, derbies | `track::standing`: League object `[0xadadfc][competition id]` (+0x3e teams, +0xb1 rows of 0x3b: +0x11 played, +0x14 lost, +0x19 points, +5 head-to-head); unbeaten: lost 0 with every match of a double round (2 x (teams - 1)) played; halfway: the gap to the leader at the first reading with half played; derbies: wins over the rival in the head-to-head entries (+5 won), added up over seasons |
+| awards | Ballon d'Or, three in the Team of the Year | the squad's staff history, kinds 0x34 (+0xd the award's row in 0xae23e0, +8 the club then, +0x19 the place: 1 winner, 2 runner up, 3 third) and 0x32; the Ballon d'Or of the running season at the club, Team of the Year lines of the last 30 days |
+| club records | a 10+ goal win | the club's all-time biggest win (`biggest_win`, Club_Records 0xad9dac: set +0x7d), the winner's goals, at a season the manager was there |
+
+Read from the moment the switch is on: seasons before that have no table, leader or award readings.
+Head-to-head records exist only in a league whose rules use them as a tie-break (rule 4 of
+League+0xc5): in Restructured the Premier League, Ligue 1, Bundesliga, Eredivisie, La Liga (and
+more; Serie A and Scotland not seen); in the CM25 data only Serie A, La Liga, Liga Portugal and the
+Super Lig. Elsewhere a derby stays the host's to tick. A trace lists them (`challenge league`).
+
+File: `W<TAB>manager<TAB>goal<TAB>season picked<TAB>country<TAB>season ticked (0)`, `E<TAB>manager<TAB>season<TAB>scorer<TAB>assists<TAB>rating` (0/1), `G<TAB>manager<TAB>season<TAB>key<TAB>value` (played, lost, full, gap, derby0..6, ballon, toty). Page: `Q` (the
+goals, with whether the game follows each), `M` (a manager: can his goals still change), `W` (his
+picks: the season reached, country, ticked), `N` (nations, host only). Off: no Goals tab, no goal
+points; the marks stay in the file.
+
 ## The league file
 
 `cmchallenge_<number>.tsv` next to the host's exe, tab-separated, rewritten on every change. It is
@@ -96,7 +129,7 @@ Remove it: delete `src\challenge\`, `challenge_import.py` and `comp_names.py`, t
 
 | File | What |
 |---|---|
-| `src\lib.rs` | `mod challenge;`, `"challenge"` in `FEATURES` (size back to 29), `const CHALLENGE`, the `has("challenge")` icon line, the `challenge::bar_item` block in `sidebar_item`, the block in `poll_input`, the block in the flip pass, the `b'E'` line in `host_answer` |
+| `src\lib.rs` | `mod challenge;`, `"challenge"` and `"career_goals"` in `FEATURES` (size back to 29), `const CHALLENGE`, `const CAREER_GOALS`, the `has("challenge")` icon line, the `challenge::bar_item` block in `sidebar_item`, the block in `poll_input`, the block in the flip pass, the `b'E'` line in `host_answer` |
 | `make_exe.py`, `make_patches.py`, `install.py`, `cmui_config.ps1` | the switch |
 | `docs\` | this file, its row in `INDEX.md` and `switches.md`, key `E` in `network.md` |
 

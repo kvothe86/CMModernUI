@@ -10,6 +10,7 @@
 use crate::*;
 
 mod draw;
+mod goals;
 mod track;
 pub use draw::{bar_item, flip, input, overlay};
 
@@ -60,6 +61,9 @@ struct Fact {
     table: usize, // the competition's row
     year: i32, // the calendar year, as the competitions' result rows have it
     text: String, // the game's sentence, lower case
+    nation: String, // the competition's nation as the game names it, empty for an international one
+    lowest: bool,   // a league of the nation's lowest reputation (career goals)
+    family: Option<usize>, // `family` of the competition, filled for the career goals
 }
 
 /// A cup's prizes by how far a club got: won, lost the final, semi final, quarter final, phase 2.
@@ -240,10 +244,25 @@ struct Rad {
     closed: bool, // the season is over and `done` is settled
 }
 
+/// A career goal a manager picked: the season he picked it, its country (the three that ask one),
+/// the season the host ticked it off (0: not).
+#[derive(Clone, Default)]
+struct Mark {
+    name: String,
+    goal: String,
+    picked: i32,
+    country: String,
+    done: i32,
+}
+
 #[derive(Default)]
 struct League {
     seasons: Vec<Season>,
     rads: Vec<Rad>,
+    goals: Vec<(String, String, i32)>, // the career goals: category, text, points
+    marks: Vec<Mark>,
+    leaders: Vec<(String, i32, [bool; 3])>, // a manager's season: first division top scorer, assists, average in his squad (last reading)
+    stats: Vec<(String, i32, String, i32)>, // a manager's season: a career goal's reading by name (`track::read_career`)
     points: Vec<(String, i32, bool)>, // item, points, a trophy
     prizes: Vec<(String, String, i32, bool)>, // the same with their category, for the Regels page
     ranks: Vec<(String, i32)>,
@@ -268,6 +287,10 @@ impl League {
                 }
                 "G" => l.ranks.push((text(1), number(2))),
                 "C" => l.tasks.push((text(1), text(2), number(3))),
+                "Q" => l.goals.push((text(1), text(2), number(3))),
+                "W" => l.marks.push(Mark { name: text(1), goal: text(2), picked: number(3), country: text(4), done: number(5) }),
+                "E" => l.leaders.push((text(1), number(2), [number(3) != 0, number(4) != 0, number(5) != 0])),
+                "G" => l.stats.push((text(1), number(2), text(3), number(4))),
                 "S" => l.seasons.push(Season {
                     name: text(1),
                     year: number(2),
@@ -315,7 +338,54 @@ impl League {
         for b in &self.best {
             out += &format!("B\t{}\t{}\t{}\n", b.0, b.1, b.2);
         }
+        for m in &self.marks {
+            out += &format!("W\t{}\t{}\t{}\t{}\t{}\n", m.name, m.goal, m.picked, m.country, m.done);
+        }
+        for (name, year, held) in &self.leaders {
+            out += &format!("E\t{name}\t{year}\t{}\t{}\t{}\n", held[0] as i32, held[1] as i32, held[2] as i32);
+        }
+        for (name, year, key, value) in &self.stats {
+            out += &format!("G\t{name}\t{year}\t{key}\t{value}\n");
+        }
         out
+    }
+
+    /// A career goal's reading of a manager's season.
+    fn stat(&self, name: &str, year: i32, key: &str) -> Option<i32> {
+        self.stats.iter().find(|s| s.1 == year && s.2 == key && same_manager(&s.0, name)).map(|s| s.3)
+    }
+
+    /// Sets it; whether it changed.
+    fn set_stat(&mut self, name: &str, year: i32, key: &str, value: i32) -> bool {
+        match self.stats.iter_mut().find(|s| s.1 == year && s.2 == key && same_manager(&s.0, name)) {
+            Some(s) if s.3 == value => false,
+            Some(s) => {
+                s.3 = value;
+                true
+            }
+            None => {
+                self.stats.push((name.to_string(), year, key.to_string(), value));
+                true
+            }
+        }
+    }
+
+    /// Whether a manager's goals can still change: before his first pick and in its season.
+    fn picking(&self, name: &str, now: i32) -> bool {
+        self.marks.iter().filter(|m| same_manager(&m.name, name)).map(|m| m.picked).min().is_none_or(|y| y == now)
+    }
+
+    /// The host picks a goal for a manager, or drops it, while his goals can change: ten at most.
+    fn pick(&mut self, name: &str, goal: &str, now: i32) -> bool {
+        if !self.picking(name, now) {
+            return false;
+        }
+        let before = self.marks.len();
+        self.marks.retain(|m| !(same_manager(&m.name, name) && m.goal == goal));
+        if self.marks.len() == before && self.marks.iter().filter(|m| same_manager(&m.name, name)).count() < goals::PICKS {
+            self.marks.push(Mark { name: name.to_string(), goal: goal.to_string(), picked: now, ..Default::default() });
+        }
+        true
     }
 
     fn item_points(&self, items: &[String]) -> i32 {
@@ -456,11 +526,16 @@ unsafe fn facts_of(staff: usize) -> (Vec<Fact>, Vec<Job>) {
     let (comps, comp_count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
     // (the highest reputation of a nation's competitions is its first division's; of its cups,
     // by name, the main cup's)
-    let cup = |c: usize| {
-        let name = latin1(&game_text(c + 4, 51)).to_lowercase();
-        [" cup", "kupa", "beker", "pokal", "coppa", "copa", "coupe", "taca"].iter().any(|w| name.contains(w))
-    };
+    let cup = |c: usize| is_cup(c);
     let top_of = |comp: usize| (0..comp_count as usize).map(|k| comps + k * COMP_SIZE).filter(|&c| rd::<usize>(c + COMP_NATION) == rd::<usize>(comp + COMP_NATION) && (!cup(comp) || cup(c))).all(|c| rd::<i16>(c + COMP_REPUTATION) <= rd::<i16>(comp + COMP_REPUTATION));
+    // ponytail: the lowest playable division is the league of the lowest reputation; a database with reserve leagues would need a list
+    // ("Turkish Lower Division": every nation's catch-all for clubs outside its leagues, played by no one)
+    let league = |c: usize| {
+        let name = latin1(&game_text(c + 4, 51)).to_lowercase();
+        !cup(c) && !name.contains("lower division") && family(&name, true, false) != Some(7)
+    };
+    let below = |comp: usize| (0..comp_count as usize).map(|k| comps + k * COMP_SIZE).find(|&c| rd::<usize>(c + COMP_NATION) == rd::<usize>(comp + COMP_NATION) && league(c) && rd::<i16>(c + COMP_REPUTATION) < rd::<i16>(comp + COMP_REPUTATION));
+    let lowest_of = |comp: usize| league(comp) && below(comp).is_none();
     let list = game::<extern "thiscall" fn(usize, usize, u32) -> usize>(history::STAFF_LIST)(records, staff, 0);
     for item in history::newest(list).into_iter().rev() {
         let (day, year, kind) = (rd::<i16>(item), rd::<i16>(item + 2) as i32, rd::<u8>(item + 0xc));
@@ -488,7 +563,8 @@ unsafe fn facts_of(staff: usize) -> (Vec<Fact>, Vec<Job>) {
         let comp = comps + index as usize * COMP_SIZE;
         let nation = rd::<usize>(comp + COMP_NATION);
         if trace() {
-            log(&format!("challenge fact {staff:#x} day {day} {year} kind {kind} comp {comp:#x} {} nation {nation:#x}: {}", latin1(&game_text(comp + 4, 51)), latin1(&history::sentence(records, item))));
+            let under = below(comp).map_or(String::new(), |c| format!(" below {} ({})", latin1(&game_text(c + 4, 51)), rd::<i16>(c + COMP_REPUTATION)));
+            log(&format!("challenge fact {staff:#x} day {day} {year} kind {kind} comp {comp:#x} {} rep {} nation {nation:#x}{under}: {}", latin1(&game_text(comp + 4, 51)), rd::<i16>(comp + COMP_REPUTATION), latin1(&history::sentence(records, item))));
         }
         facts.push(Fact {
             season,
@@ -499,10 +575,90 @@ unsafe fn facts_of(staff: usize) -> (Vec<Fact>, Vec<Job>) {
             table: comp,
             year,
             text: latin1(&history::sentence(records, item)).to_lowercase(),
+            nation: nation_name(nation),
+            lowest: lowest_of(comp),
+            family: None,
         });
     }
     history::free(list);
     (facts, jobs)
+}
+
+/// A cup of a nation, by the words of its name.
+unsafe fn is_cup(comp: usize) -> bool {
+    let name = latin1(&game_text(comp + 4, 51)).to_lowercase();
+    [" cup", "kupa", "beker", "pokal", "coppa", "copa", "coupe", "taca"].iter().any(|w| name.contains(w))
+}
+
+/// A league that is its nation's first: no league of the nation has a higher reputation.
+unsafe fn first_division(comp: usize) -> bool {
+    let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if count <= 0 || !readable(comp, COMP_SIZE) || !readable(comps, count as usize * COMP_SIZE) || is_cup(comp) {
+        return false;
+    }
+    let same = |c: usize| rd::<usize>(c + COMP_NATION) == rd::<usize>(comp + COMP_NATION) && !is_cup(c);
+    (0..count as usize).map(|k| comps + k * COMP_SIZE).filter(|&c| same(c)).all(|c| rd::<i16>(c + COMP_REPUTATION) <= rd::<i16>(comp + COMP_REPUTATION))
+}
+
+/// A nation's name as the game has it ("Netherlands"); empty for none.
+unsafe fn nation_name(nation: usize) -> String {
+    if nation != 0 && readable(nation, 55) { latin1(&game_text(nation + 4, 51)).to_string() } else { String::new() }
+}
+
+/// What the career goals read of a manager: his history with each competition's family, his club
+/// and its nation every season to `now`, the clubs he was hired at.
+unsafe fn career_of(staff: usize, now: i32) -> goals::Career {
+    let (mut facts, jobs) = facts_of(staff);
+    for f in &mut facts {
+        f.family = family(&f.comp, f.domestic, f.top);
+    }
+    let current = rd::<usize>(staff + 0x39);
+    let first = facts.iter().map(|f| f.season).chain(jobs.iter().map(|j| j.year)).min().unwrap_or(now).min(now);
+    let nation_of = |club: usize| if readable(club, 0x5b) { nation_name(rd::<usize>(club + 0x53)) } else { String::new() };
+    let seasons = (first..=now).map(|y| club_in(y, &jobs, current)).enumerate().map(|(k, c)| (first + k as i32, c, nation_of(c))).collect();
+    let hired: Vec<(i32, usize, String)> = jobs.iter().filter(|j| j.hired).map(|j| (if j.day >= HIRED_FROM { j.year } else { j.year - 1 }, j.club, nation_of(j.club))).collect();
+    let mut clubs: Vec<usize> = hired.iter().map(|j| j.1).collect();
+    clubs.dedup();
+    let big_wins = clubs.into_iter().filter_map(|c| biggest_win(c)).collect();
+    goals::Career { facts, seasons, jobs: hired, now, big_wins, ..Default::default() }
+}
+
+const CLUB_RECORDS: usize = 0xad9dac; // Club_Records*: +4 the record sets (0x38b bytes), +0x1c a club's entry (0x6a bytes, +0 its all-time set)
+const RECORD_BIGGEST_WIN: usize = 0x7d; // in a set: +0 day, +2 year, +8 competition (-1 none), +0x15 opponent, +0x19 / +0x1a the goals
+
+/// A club's all-time biggest win: the season it was won in, the club, the winner's goals.
+unsafe fn biggest_win(club: usize) -> Option<(i32, usize, i32)> {
+    let records = rd::<usize>(CLUB_RECORDS);
+    if !readable(club, 4) || !readable(records, 0x20) {
+        return None;
+    }
+    let at = rd::<usize>(records + 0x1c) + rd::<i32>(club).max(0) as usize * 0x6a;
+    let set = if readable(at, 4) { rd::<i32>(at) } else { -1 };
+    if set < 0 {
+        return None;
+    }
+    let win = rd::<usize>(records + 4) + set as usize * 0x38b + RECORD_BIGGEST_WIN;
+    if !readable(win, 0x1f) || rd::<i32>(win + 8) < 0 {
+        return None;
+    }
+    let (day, year) = (rd::<i16>(win), rd::<i16>(win + 2) as i32);
+    let goals = (rd::<i8>(win + 0x19) as i32).max(rd::<i8>(win + 0x1a) as i32);
+    if trace() {
+        log(&format!("challenge biggest win {}: day {day} {year} comp {} goals {} {} opponent {}", latin1(&game_text(club + 4, 51)), rd::<i32>(win + 8), rd::<i8>(win + 0x19), rd::<i8>(win + 0x1a), rd::<i32>(win + 0x15)));
+    }
+    Some((season_from(day, year, SEASON_FROM), club, goals))
+}
+
+/// The nations a country can be chosen from: those with a competition of their own, by name.
+unsafe fn nations() -> Vec<String> {
+    let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if count <= 0 || !readable(comps, count as usize * COMP_SIZE) {
+        return Vec::new();
+    }
+    let mut all: Vec<String> = (0..count as usize).map(|k| nation_name(rd::<usize>(comps + k * COMP_SIZE + COMP_NATION))).filter(|n| !n.is_empty()).collect();
+    all.sort();
+    all.dedup();
+    all
 }
 
 /// The club a manager ended a season with: the last hired by then, else the club he left first,
@@ -626,7 +782,29 @@ unsafe fn page(me: &str, all: bool) -> String {
         }
     }
     let mine = |s: &Season, n: &str| same_manager(&s.name, n);
-    let total_of = |n: &String| rows.iter().filter(|s| mine(s, n)).map(|s| l.item_points(&s.items)).sum::<i32>() + l.rad_points(n, None);
+    // the career goals each manager picked: (goal, the season reached or 0, its country, ticked by the host)
+    let goals_on = on(CAREER_GOALS);
+    let careers: Vec<(String, goals::Career)> = if goals_on {
+        humans().into_iter().map(|(s, n)| {
+            let mut c = career_of(s, now);
+            c.leads = l.leaders.iter().filter(|e| same_manager(&e.0, &n)).map(|e| (e.1, e.2)).collect();
+            c.stats = l.stats.iter().filter(|e| same_manager(&e.0, &n)).map(|e| (e.1, e.2.clone(), e.3)).collect();
+            (n, c)
+        }).collect()
+    } else {
+        Vec::new()
+    };
+    let picked: Vec<(String, Vec<(usize, i32, String, bool)>)> = names.iter().map(|n| {
+        let own = l.marks.iter().filter(|m| goals_on && same_manager(&m.name, n)).filter_map(|m| {
+            let k = l.goals.iter().position(|g| g.1 == m.goal)?;
+            let career = careers.iter().find(|c| same_manager(&c.0, n));
+            let auto = career.and_then(|c| goals::reached(&m.goal, &c.1, m.picked, &m.country).0);
+            Some((k, if m.done > 0 { m.done } else { auto.unwrap_or(0) }, m.country.clone(), m.done > 0))
+        });
+        (n.clone(), own.collect())
+    }).collect();
+    let goal_points = |n: &String| picked.iter().filter(|p| same_manager(&p.0, n)).flat_map(|p| &p.1).filter(|g| g.1 > 0).map(|g| l.goals[g.0].2).sum::<i32>();
+    let total_of = |n: &String| rows.iter().filter(|s| mine(s, n)).map(|s| l.item_points(&s.items)).sum::<i32>() + l.rad_points(n, None) + goal_points(n);
     names.sort_by_key(|n| -total_of(n));
     let mut out = format!("C\t{}/{}\t{}\t{}\t{now}\n", now, now + 1, me, all as i32);
     for n in &names {
@@ -681,18 +859,35 @@ unsafe fn page(me: &str, all: bool) -> String {
         let points = l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
         out += &format!("H\t{}/{}\t{}\t{}\t{}\t{}\t{}\t{points}\t{}\n", s.year, s.year + 1, s.name, s.club, scorer_name(&s.scorer), s.goals, s.rating, s.items.join(", "));
     }
-    out += &stats_lines(&rows, &names);
+    out += &stats_lines(&rows, &names, &goal_points);
     for (category, item, points, trophy) in &l.prizes {
         out += &format!("P\t{category}\t{item}\t{points}\t{}\n", *trophy as i32);
     }
     for t in &l.tasks {
         out += &format!("A\t{}\t{}\t{}\t{}\n", t.0, t.1, t.2, track::rule(&t.1).is_some() as i32);
     }
+    if goals_on {
+        for (k, g) in l.goals.iter().enumerate() {
+            out += &format!("Q\t{k}\t{}\t{}\t{}\t{}\n", g.0, g.1, g.2, goals::followed(&g.1) as i32);
+        }
+        for (n, own) in &picked {
+            out += &format!("M\t{n}\t{}\n", l.picking(n, now) as i32);
+            for (k, year, country, ticked) in own {
+                out += &format!("W\t{n}\t{k}\t{year}\t{country}\t{}\n", *ticked as i32);
+            }
+        }
+        // (the picker of a country: the host's alone, it never goes to a client)
+        if all {
+            for n in nations() {
+                out += &format!("N\t{n}\n");
+            }
+        }
+    }
     out
 }
 
 /// The Stats page: the three records, then a manager's card.
-fn stats_lines(rows: &[Season], names: &[String]) -> String {
+fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) -> i32) -> String {
     let l = league();
     let total = |s: &Season| l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
     let mut out = String::new();
@@ -711,7 +906,7 @@ fn stats_lines(rows: &[Season], names: &[String]) -> String {
         let own: Vec<&Season> = rows.iter().filter(|s| same_manager(&s.name, n)).collect();
         let items: i32 = own.iter().map(|s| l.item_points(&s.items)).sum();
         let rads = l.rad_points(n, None);
-        let (rank, _, _) = l.rank(items + rads);
+        let (rank, _, _) = l.rank(items + rads + goal_points(n));
         let season = |s: &Season| format!("{} ({}/{})", total(s), s.year, s.year + 1);
         let (best, worst) = (own.iter().copied().max_by_key(|s| total(s)), own.iter().copied().min_by_key(|s| total(s)));
         let avg = if own.is_empty() { 0 } else { (items + rads) / own.len() as i32 };
@@ -753,6 +948,9 @@ const ACT_NONE: u32 = 0;
 const ACT_ROLL: u32 = 1;
 const ACT_TICK: u32 = 2;
 const ACT_DELETE: u32 = 3;
+const ACT_PICK: u32 = 4;
+const ACT_GOAL_TICK: u32 = 5;
+const ACT_COUNTRY: u32 = 6;
 
 /// The host does a click: a new RAD row for a manager, a row ticked (his word then stands over the
 /// game's) or a row taken away.
@@ -779,6 +977,37 @@ unsafe fn act(action: u32, arg: u32, name: &[u8]) {
         ACT_DELETE => {
             l.rads.retain(|r| r.id != arg);
             save();
+        }
+        // a career goal (`arg` its row): picked or dropped, ticked off, or its country (`name`: the
+        // manager, a tab, the nation)
+        ACT_PICK | ACT_GOAL_TICK | ACT_COUNTRY => {
+            let text = latin1(name).to_string();
+            let (who, country) = text.split_once('\t').unwrap_or((&text, ""));
+            let who = l.marks.iter().find(|m| same_manager(&m.name, who)).map_or(who.to_string(), |m| m.name.clone());
+            let Some(goal) = l.goals.get(arg as usize).map(|g| g.1.clone()) else { return };
+            let now = this_season();
+            let open = l.picking(&who, now);
+            if action == ACT_PICK {
+                if l.pick(&who, &goal, now) {
+                    save();
+                }
+                return;
+            }
+            let mark = l.marks.iter_mut().find(|m| same_manager(&m.name, &who) && m.goal == goal);
+            let changed = match (action, mark) {
+                (ACT_GOAL_TICK, Some(m)) => {
+                    m.done = if m.done > 0 { 0 } else { now };
+                    true
+                }
+                (ACT_COUNTRY, Some(m)) if open => {
+                    m.country = country.to_string();
+                    true
+                }
+                _ => false,
+            };
+            if changed {
+                save();
+            }
         }
         _ => {}
     }
@@ -807,7 +1036,7 @@ mod tests {
     use super::*;
 
     fn fact(kind: u8, comp: &str, domestic: bool, top: bool, text: &str) -> Fact {
-        Fact { season: 2032, kind, comp: comp.to_string(), domestic, top, table: 0, year: 2033, text: text.to_string() }
+        Fact { season: 2032, kind, comp: comp.to_string(), domestic, top, year: 2033, text: text.to_string(), ..Default::default() }
     }
 
     /// A season as on the old site, from what the game writes.
@@ -990,6 +1219,24 @@ mod tests {
         let names: Vec<(String, String)> = latin1(RENAMES).lines().filter_map(|l| l.split_once('\t')).map(|p| (p.0.to_string(), p.1.to_string())).collect();
         assert!(names.iter().all(|n| !b.points.iter().any(|p| p.0 == n.0) && !b.tasks.iter().any(|t| t.1 == n.0 || t.0 == n.0)));
         assert!(names.iter().filter(|n| b.points.iter().any(|p| p.0 == n.1) || b.tasks.iter().any(|t| t.1 == n.1)).count() >= 90);
+    }
+
+    /// Ten goals at most, changed only in the season of the first pick, and kept in the file.
+    #[test]
+    fn goals_are_picked_once() {
+        let mut l = League::parse(&latin1(RULES), "");
+        let goals: Vec<String> = l.goals.iter().map(|g| g.1.clone()).collect();
+        for g in &goals[..12] {
+            assert!(l.pick("Ann Smith", g, 2031));
+        }
+        assert_eq!(l.marks.len(), goals::PICKS);
+        assert!(l.pick("Ann", &goals[0], 2031)); // (dropped again in the same season)
+        assert_eq!(l.marks.len(), goals::PICKS - 1);
+        assert!(!l.pick("Ann", &goals[0], 2032)); // a season on: fixed
+        assert!(l.picking("Bob", 2032));
+        let back = League::parse("", &l.lines());
+        assert_eq!(back.lines(), l.lines());
+        assert!(!back.picking("Ann", 2032));
     }
 
     #[test]

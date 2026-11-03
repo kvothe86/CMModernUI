@@ -1,0 +1,2 @@
+Needs CM Challenge. A Goals tab: the host picks ten goals for a whole career per manager, from 48 worth 10 to 150 points; the game ticks off the 46 it can read (history, league tables, awards, club records), the host the rest.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: career_goals=0 switches it off again.

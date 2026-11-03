@@ -30,6 +30,7 @@ const ICON_CLOCK: u32 = 0xE823;
 
 const TABS: [&[u8]; 6] = [b"Dashboard", b"Season", b"RAD", b"Stats", b"History", b"Rules"];
 const TAB_RAD: usize = 2;
+const TAB_GOALS: usize = 6; // shown after RAD when the host has career goals on
 const SPIN_MS: u128 = 4000;
 
 /// The game's menu bar seen this frame: its lowest button's box, font and colour, and whether it
@@ -60,6 +61,7 @@ static mut SPIN_DRAWN: Option<std::time::Instant> = None;
 static mut NEW_FROM: Option<i32> = None; // the highest RAD row when the wheel started
 static mut NEW_ROW: Option<i32> = None; // the row the wheel gave, marked in the list
 static mut NOTHING_LEFT: bool = false; // the wheel found no challenge left
+static mut PICKING: Option<usize> = None; // Goals: the goal whose country the host is choosing
 
 type Rect = (i32, i32, i32, i32);
 type Lines<'a> = [&'a Vec<&'a [u8]>];
@@ -77,6 +79,15 @@ enum Spot {
     Later,
     Up,
     Down,
+    Goal(usize),
+    Country(usize),
+    Nation(usize),
+    Cancel,
+}
+
+/// A name's first word, as the page's lines match managers.
+fn first_word(s: &[u8]) -> Vec<u8> {
+    s.split(|&c| c == b' ').next().unwrap_or(b"").to_ascii_lowercase()
 }
 
 /// A menu bar button drawn (`sidebar_item`).
@@ -129,7 +140,7 @@ unsafe fn open() {
     OPEN = true;
     PAGE.clear();
     (TAB, PICK, FILTER, SCROLL, BACK_YEARS, HOVER, SPIN) = (0, 0, 0, 0, 0, None, None);
-    (NEW_FROM, NEW_ROW, NOTHING_LEFT) = (None, None, false);
+    (NEW_FROM, NEW_ROW, NOTHING_LEFT, PICKING) = (None, None, false, None);
     request(ACT_NONE, 0, &[]);
 }
 
@@ -198,10 +209,34 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         match SPOTS[k].1.clone() {
             Spot::Back => OPEN = false,
             Spot::Tab(t) => {
-                (TAB, SCROLL, BACK_YEARS) = (t, 0, 0);
+                (TAB, SCROLL, BACK_YEARS, PICKING) = (t, 0, 0, None);
                 request(ACT_NONE, 0, &[]);
             }
-            Spot::Manager(m) => PICK = m,
+            Spot::Manager(m) => (PICK, PICKING, SCROLL) = (m, None, 0),
+            // a career goal: picked or dropped while the manager's goals can change, else ticked off
+            Spot::Goal(k) => {
+                let (name, picking) = {
+                    let lines: Vec<Vec<&[u8]>> = PAGE.split(|&c| c == b'\n').map(fields).collect();
+                    let name = lines.iter().filter(|l| l[0] == b"K").nth(PICK).map_or(Vec::new(), |l| l[1].to_vec());
+                    let picking = lines.iter().find(|l| l[0] == b"M" && first_word(l[1]) == first_word(&name)).is_none_or(|l| field(l, 2) == b"1");
+                    (name, picking)
+                };
+                request(if picking { ACT_PICK } else { ACT_GOAL_TICK }, k as u32, &name);
+            }
+            Spot::Country(k) => (PICKING, SCROLL) = (Some(k), 0),
+            Spot::Nation(i) => {
+                let said = {
+                    let lines: Vec<Vec<&[u8]>> = PAGE.split(|&c| c == b'\n').map(fields).collect();
+                    let name = lines.iter().filter(|l| l[0] == b"K").nth(PICK).map_or(&b""[..], |l| l[1]);
+                    let nation = lines.iter().filter(|l| l[0] == b"N").nth(i).map_or(&b""[..], |l| field(l, 1));
+                    [name, b"\t", nation].concat()
+                };
+                if let Some(k) = PICKING.take() {
+                    request(ACT_COUNTRY, k as u32, &said);
+                }
+                SCROLL = 0;
+            }
+            Spot::Cancel => (PICKING, SCROLL) = (None, 0),
             Spot::Filter(f) => (FILTER, SCROLL) = (f, 0),
             Spot::Spin => {
                 let lines: Vec<Vec<&[u8]>> = PAGE.split(|&c| c == b'\n').map(fields).collect();
@@ -364,9 +399,12 @@ pub unsafe fn overlay() {
         text_at((x1 + x2) / 2, band.1 + h * 54 / 100, band.3 - 6, f(4), INK, &line, 1);
         // the tabs
         let (tabs, tab_h) = (band.3 + sh * 17 / 1000, sh * 59 / 1000);
-        let tw = (x2 - x1) / TABS.len() as i32;
-        for (k, label) in TABS.iter().enumerate() {
-            let r = (x1 + k as i32 * tw, tabs, x1 + (k as i32 + 1) * tw - 2, tabs + tab_h);
+        let with_goals = !of(b"Q").is_empty();
+        let order: &[usize] = if with_goals { &[0, 1, TAB_RAD, TAB_GOALS, 3, 4, 5] } else { &[0, 1, TAB_RAD, 3, 4, 5] };
+        let tw = (x2 - x1) / order.len() as i32;
+        for (slot, &k) in order.iter().enumerate() {
+            let (label, slot) = (if k == TAB_GOALS { &b"Goals"[..] } else { TABS[k] }, slot as i32);
+            let r = (x1 + slot * tw, tabs, x1 + (slot + 1) * tw - 2, tabs + tab_h);
             let s = Spot::Tab(k);
             fill(r.0, r.1, r.2, r.3, if lit(&s) && TAB != k { CARD } else { AREA });
             text_at((r.0 + r.2) / 2, r.1, r.3, f(4), if TAB == k { GOLD } else { INK }, label, 1);
@@ -391,6 +429,7 @@ pub unsafe fn overlay() {
                 TAB_RAD => rads(area, &of(b"R"), &of(b"A"), head, &names),
                 3 => stats(area, &of(b"T"), &of(b"Y"), &names),
                 4 => past(area, &of(b"H"), &names),
+                TAB_GOALS if with_goals => goals(area, &of(b"Q"), &of(b"W"), &of(b"M"), &of(b"N"), head, &names),
                 _ => rules(area, &of(b"P"), &of(b"G"), &of(b"A")),
             }
         }
@@ -932,4 +971,173 @@ unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &L
     }
     text_at(x2i - 2 * ch - 20, y1 + 8, y1 + 8 + ch, f(2), MUTED, b"Tick: the game follows it itself", 2);
     pager(x2i, y1 + 10, ch - 4, SCROLL > 0, SCROLL + per * columns < all.len());
+}
+
+/// Goals: each manager's ten career goals. At the left the managers with their goal points, at the
+/// right the chosen one's goals: while they can change, all of them to pick from (a click picks or
+/// drops one, the chip of the three that ask a country opens the country list); after that his
+/// ten, and the host's click ticks one off.
+#[allow(static_mut_refs)]
+unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Lines, nations: &Lines, head: &[&[u8]], names: &[&[u8]]) {
+    let host = field(head, 3) == b"1";
+    PICK = PICK.min(names.len().saturating_sub(1));
+    let chosen = names.get(PICK).copied().unwrap_or(b"");
+    let of = |n: &[u8]| marks.iter().filter(|m| first_word(m[1]) == first_word(n)).collect::<Vec<_>>();
+    let worth = |m: &[&[u8]]| defs.get(number(m[2]) as usize).map_or(0, |d| number(d[4]));
+    let reached = |m: &[&[u8]]| number(field(m, 3)) > 0;
+    let picking = open.iter().find(|o| first_word(o[1]) == first_word(chosen)).is_none_or(|o| field(o, 2) == b"1");
+    let mid = x1 + (x2 - x1) * 26 / 100;
+    let line = (y2 - y1) * 7 / 100;
+    // the managers
+    card((x1, y1, mid - 6, y2));
+    let (lx, lr) = (x1 + 12, mid - 18);
+    text_at(lx, y1 + 2, y1 + line, f(4), GOLD, b"Managers", 0);
+    let mut y = y1 + line;
+    for (k, n) in names.iter().enumerate() {
+        let r = (x1 + 4, y, mid - 10, y + line - 2);
+        let s = Spot::Manager(k);
+        fill(r.0, r.1, r.2, r.3, if PICK == k { SELECTED } else if lit(&s) { CARD } else { BG });
+        let mine = of(n);
+        let points: i32 = mine.iter().filter(|m| reached(m)).map(|m| worth(m)).sum();
+        let h = r.3 - r.1;
+        text_at(lx, r.1, r.1 + h * 58 / 100, f(3), if PICK == k { GOLD } else { INK }, &clip_text(f(3), n, lr - lx - 50), 0);
+        let done = mine.iter().filter(|m| reached(m)).count();
+        text_at(lx, r.1 + h * 50 / 100, r.3, f(2), MUTED, format!("{done} of {} reached", mine.len()).as_bytes(), 0);
+        text_at(lr, r.1, r.3, f(4), GOLD, format!("+{points}").as_bytes(), 2);
+        spot(r, s);
+        y += line;
+    }
+    let says: &[u8] = match (host, picking) {
+        (true, true) => b"Pick ten goals: a click picks or drops one. They are fixed when this season ends. Each counts from the season it is picked, once, for its points.",
+        (true, false) => b"The game ticks off what it follows. Click a goal to tick off the rest.",
+        (false, true) => b"The host picks the ten goals.",
+        (false, false) => b"The host ticks off what the game does not follow.",
+    };
+    assistant::report_text(lx, y + 10, lr, y2 - 6, f(2), line * 45 / 100, says);
+    // his goals
+    card((mid + 6, y1, x2, y2));
+    let (rx, rr) = (mid + 20, x2 - 14);
+    let mine = of(chosen);
+    let mark = |k: usize| mine.iter().find(|m| number(m[2]) == k as i32).copied();
+    let title = if picking { format!("{} of 10 picked", mine.len()) } else { format!("{} of {} reached", mine.iter().filter(|m| reached(m)).count(), mine.len()) };
+    text_at(rx, y1 + 2, y1 + line, f(4), GOLD, chosen, 0);
+    text_at(rx + text_width(f(4), chosen) + 16, y1 + 2, y1 + line, f(3), MUTED, title.as_bytes(), 0);
+    fill(rx, y1 + line + 2, rr, y1 + line + 3, BORDER);
+    let top = y1 + line + 10;
+    let step = line * 6 / 10;
+    // the country list of a goal that asks one
+    if let (Some(k), true) = (PICKING, host) {
+        let goal = defs.get(k).map_or(&b""[..], |d| d[3]);
+        text_at(rx, top, top + step, f(2), MUTED, &[b"Choose the country for: ", goal].concat(), 0);
+        let cancel = text_width(f(3), b"Cancel") + 28;
+        button((rr - cancel, y1 + 6, rr, y1 + 6 + step), b"Cancel", Spot::Cancel, false);
+        let cols = ((rr - rx) / 170).max(1);
+        let bw = (rr - rx - (cols - 1) * 8) / cols;
+        let grid = top + step + 8;
+        let fit = ((y2 - grid - 8) / (step + 6)).max(1) as usize;
+        let rows = nations.len().div_ceil(cols as usize);
+        SCROLL = SCROLL.min(rows.saturating_sub(fit));
+        let now = mark(k).map_or(&b""[..], |m| field(m, 4));
+        for (i, n) in nations.iter().enumerate().skip(SCROLL * cols as usize).take(fit * cols as usize) {
+            let at = (i / cols as usize - SCROLL) as i32;
+            let (bx, by) = (rx + (i as i32 % cols) * (bw + 8), grid + at * (step + 6));
+            button((bx, by, bx + bw, by + step), &clip_text(f(3), field(n, 1), bw - 12), Spot::Nation(i), field(n, 1) == now);
+        }
+        pager(rr - cancel - 12, y1 + 6, step, SCROLL > 0, SCROLL + fit < rows);
+        return;
+    }
+    // the rows: a category's head, a goal, or the rest of a goal's text
+    let shown: Vec<usize> = (0..defs.len()).filter(|&k| picking || mark(k).is_some()).collect();
+    if shown.is_empty() {
+        text_at(rx, top, top + line, f(3), MUTED, b"No goals picked", 0);
+        return;
+    }
+    let rh = text_width(f(2), b"Mg") * 2 / 3 + 10;
+    let per = ((y2 - top - 8) / rh).max(1) as usize;
+    let mut all: Vec<(Option<usize>, Vec<u8>, bool)> = Vec::new(); // goal, text, the first line of it
+    let mut last: &[u8] = b"";
+    for &k in &shown {
+        let d = defs[k];
+        if d[2] != last {
+            last = d[2];
+            all.push((None, last.to_vec(), true));
+        }
+        // (the three that ask a country: the country in their text once chosen)
+        let country = mark(k).map_or(&b""[..], |m| field(m, 4));
+        let country = if country.is_empty() { goals::CHOICE.to_string() } else { latin1(country).to_string() };
+        let text = latin1(d[3]).replace(goals::CHOICE, &country);
+        all.push((Some(k), to_latin1(&text), true));
+    }
+    let columns = if all.len() > per && rr - rx >= 900 { 2 } else { 1 };
+    let (gap, cw) = (16, (rr - rx - (columns - 1) * 16) / columns);
+    let (status, room) = (text_width(f(2), b"Choose a country") + 12, cw - 24 - text_width(f(2), b"Choose a country") - 70);
+    let mut k = 0;
+    while k < all.len() {
+        let fits = clip_text(f(2), &all[k].1, room).len();
+        if all[k].0.is_some() && fits < all[k].1.len() {
+            let cut = all[k].1[..fits].iter().rposition(|&b| b == b' ').map_or(fits.max(1), |s| s + 1);
+            let rest = all[k].1.split_off(cut);
+            all.insert(k + 1, (all[k].0, rest, false));
+        }
+        k += 1;
+    }
+    // (a goal is not cut by the foot of a column: an empty row pushes it to the next)
+    let mut k = 0;
+    while k + 1 < all.len() {
+        if k % per == per - 1 && all[k].0.is_some() && all[k].2 && !all[k + 1].2 {
+            all.insert(k, (None, Vec::new(), true));
+        }
+        k += 1;
+    }
+    SCROLL = SCROLL.min(all.len().saturating_sub(per * columns as usize));
+    for (n, (goal, text, first)) in all.iter().skip(SCROLL).take(per * columns as usize).enumerate() {
+        let (c, row) = ((n / per) as i32, (n % per) as i32);
+        let (x, y) = (rx + c * (cw + gap), top + row * rh);
+        let Some(g) = goal else {
+            text_at(x, y, y + rh, f(2), CYAN, text, 0);
+            continue;
+        };
+        let m = mark(*g);
+        let s = Spot::Goal(*g);
+        if !first {
+            text_at(x + 24, y - 4, y + rh - 4, f(2), if m.is_some() || !picking { INK } else { MUTED }, text, 0);
+            continue;
+        }
+        let r = (x, y, x + cw, y + rh - 2);
+        if host && (picking || m.is_some()) {
+            if lit(&s) {
+                fill(r.0, r.1, r.2, r.3, CARD);
+            }
+            // (left of the status column and the points: the country chip there has its own click)
+            spot((r.0, r.1, r.2 - status - 56, r.3), s);
+        }
+        let done = m.is_some_and(|m| reached(m));
+        let size = rh * 55 / 100;
+        let mark_at = (x + 2, y + (rh - size) / 2 - 1, x + 2 + size, y + (rh + size) / 2 - 1);
+        round(mark_at, 3, if done { SUCCESS } else if picking && m.is_some() { SELECTED } else { BORDER });
+        if done || picking && m.is_some() {
+            draw_icon(ICON_CHECK, (mark_at.0 + mark_at.2) / 2, mark_at.1 + size / 5, size * 6 / 10, if done { INK } else { GOLD });
+        }
+        text_at(x + 24, y, y + rh, f(2), if m.is_some() || !picking { INK } else { MUTED }, text, 0);
+        text_at(r.2, y, y + rh, f(2), PRIMARY, &[b"+", defs[*g][4]].concat(), 2);
+        // where it stands: the season reached, a country to choose, or the host's to tick
+        let asks = latin1(defs[*g][3]).contains(goals::CHOICE);
+        let at = r.2 - 44;
+        if let Some(m) = m.filter(|m| reached(m)) {
+            let y0 = number(field(m, 3));
+            text_at(at, y, y + rh, f(2), SUCCESS, format!("{y0}/{:02}", (y0 + 1) % 100).as_bytes(), 2);
+        } else if asks && m.is_some() && picking && host {
+            let label: &[u8] = if field(m.unwrap(), 4).is_empty() { b"Choose a country" } else { b"Change country" };
+            let chip = (at - text_width(f(2), label) - 12, y + 1, at, y + rh - 3);
+            let cs = Spot::Country(*g);
+            round(chip, 4, if lit(&cs) { SELECTED } else { CARD });
+            text_at((chip.0 + chip.2) / 2, chip.1, chip.3, f(2), CYAN, label, 1);
+            spot(chip, cs);
+        } else if asks && m.is_some_and(|m| field(m, 4).is_empty()) {
+            text_at(at, y, y + rh, f(2), MUTED, b"No country", 2);
+        } else if defs[*g][5] != b"1" {
+            text_at(at, y, y + rh, f(2), MUTED, b"Host ticks", 2);
+        }
+    }
+    pager(rr, y1 + 6, step, SCROLL > 0, SCROLL + per * (columns as usize) < all.len());
 }

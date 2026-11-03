@@ -85,7 +85,7 @@ Uninstall removes cm0102_ui.exe, cmui.dll, cmui.ini, cmui.log, Data\gcui.mbr, mc
 mcui_.mbr, cmui_crests.bin and cmui_logos. cm0102.exe and your saves are never touched.
 To update cmui: unzip the new version and run the installer again.
 
-THE MAIN FEATURE SWITCHES (30 in all, the rest in cmui.ini; 1 = on, 0 = off; restart the game;
+THE MAIN FEATURE SWITCHES (31 in all, the rest in cmui.ini; 1 = on, 0 = off; restart the game;
                          with the patcher, a feature is on only if its patch is applied too)
 -----------------------------------------------------------------------------------------
 theme            dark palette and flat background (0 keeps the game's own colours)
@@ -123,6 +123,8 @@ challenge        CM Challenge: a button that opens a league of the human manager
                  from the game's own history; in a network game the host keeps the league
                  file and a client only reads it (needs the same cmui); in single player a
                  tracker of your own career, with optional RAD challenges
+career_goals     needs challenge: a Goals tab, the host picks ten career goals per manager
+                 from 48 (10 to 150 points); the game ticks off the 46 it can read
 
 KNOWN LIMITS
 ------------

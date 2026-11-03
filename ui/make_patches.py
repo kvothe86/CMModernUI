@@ -48,6 +48,7 @@ FEATURES = [
     ('background_show', 'Background Show', 'With Background Changes on: the dark panels let the picture through.'),
     ('modern_buttons', 'Modern Buttons', "The game's grey buttons, dropdowns and list cells in steel blue, column headers flat, and no box around an empty stats cell."),
     ('challenge', 'CM Challenge', "In a network game: a button under the menu bar opens the managers' league, prizes and points from the game's own history, RAD challenges and the seasons so far."),
+    ('career_goals', 'Career Goals', 'Needs CM Challenge. A Goals tab: the host picks ten goals for a whole career per manager, from 48 worth 10 to 150 points; the game ticks off the 46 it can read (history, league tables, awards, club records), the host the rest.'),
 ]
 
 

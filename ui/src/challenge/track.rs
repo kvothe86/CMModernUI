@@ -187,6 +187,13 @@ pub(super) unsafe fn squad(club: usize) -> Vec<usize> {
 /// Of top scorer, top assists and best average (10 matches or more) in the club's league, how
 /// many one player of the club holds.
 unsafe fn league_leads(club: usize) -> i32 {
+    let best = league_leaders(club);
+    squad(club).iter().map(|s| best.iter().filter(|b| *b == s).count() as i32).max().unwrap_or(0)
+}
+
+/// The club's league's top scorer, top assists and best average (10 matches or more), by the
+/// league row (2) of the stats: a cup's goals or an earlier club's do not count. 0: nobody yet.
+pub(super) unsafe fn league_leaders(club: usize) -> [usize; 3] {
     let (table, count, league) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT), rd::<usize>(club + 0x57));
     let mut best = [(0.0f32, 0usize); 3];
     for k in 0..count as usize {
@@ -203,7 +210,144 @@ unsafe fn league_leads(club: usize) -> i32 {
             }
         }
     }
-    squad(club).iter().map(|s| best.iter().filter(|b| b.1 == *s).count() as i32).max().unwrap_or(0)
+    best.map(|b| b.1)
+}
+
+const LEAGUES: usize = 0xadadfc; // the League objects, by the competition's id (its first dword)
+const STAFF_COMPS: usize = 0xae23e0; // the awards: 101 bytes a row, +4 the name
+const STAFF_COMP_COUNT: usize = 0xae2388;
+const KIND_TEAM_OF_YEAR: u8 = 0x32; // a staff history line: +0xd the award's row, +0x11 the year
+const KIND_YEAR_AWARD: u8 = 0x34; // the same, +0x19 the place
+
+/// The club's league table as it stands: the club's matches, defeats and points, the leader's
+/// points, a season's matches (everyone twice), and the clubs played in the league this season with
+/// how often beaten (only a league whose rules keep head-to-head records has them).
+#[derive(Debug)]
+pub(super) struct Standing {
+    pub played: i32,
+    pub lost: i32,
+    pub points: i32,
+    pub leader: i32,
+    pub full: i32,
+    pub beaten: Vec<(usize, i32)>,
+}
+
+/// The table of the club's league: League object `[LEAGUES][id]` (its +4 the competition), +0x3e
+/// the teams, +0xb1 the rows of 0x3b bytes: +0 club, +5 head-to-head (14 bytes an opponent: +0
+/// club, +5 won), +0x11 played, +0x14 lost, +0x19 points.
+pub(super) unsafe fn standing(club: usize) -> Option<Standing> {
+    let comp = rd::<usize>(club + 0x57);
+    let leagues = rd::<usize>(LEAGUES);
+    if !readable(comp, 4) || !readable(leagues, 4) {
+        return None;
+    }
+    let id = rd::<i32>(comp);
+    let at = leagues + id.max(0) as usize * 4;
+    let league = if id >= 0 && readable(at, 4) { rd::<usize>(at) } else { 0 };
+    if !readable(league, 0xb5) || rd::<usize>(league + 4) != comp {
+        return None;
+    }
+    let (teams, rows) = (rd::<i16>(league + 0x3e).max(0) as usize, rd::<usize>(league + 0xb1));
+    if !(2..=64).contains(&teams) || !readable(rows, teams * 0x3b) {
+        return None;
+    }
+    let row = |k: usize| rows + k * 0x3b;
+    let own = (0..teams).map(row).find(|&r| rd::<usize>(r) == club)?;
+    let leader = (0..teams).map(|k| rd::<i16>(row(k) + 0x19) as i32).max().unwrap_or(0);
+    let h2h = rd::<usize>(own + 5);
+    let beaten = if h2h != 0 && readable(h2h, (teams - 1) * 14) { (0..teams - 1).map(|k| (rd::<usize>(h2h + k * 14), rd::<u8>(h2h + k * 14 + 5) as i32)).collect() } else { Vec::new() };
+    if trace() {
+        log(&format!("challenge table {}: teams {teams} rules {:?} h2h {h2h:#x}", latin1(&game_text(comp + 4, 51)), (0..4).map(|k| rd::<u8>(league + 0xc5 + k)).collect::<Vec<_>>()));
+    }
+    Some(Standing { played: rd::<u8>(own + 0x11) as i32, lost: rd::<u8>(own + 0x14) as i32, points: rd::<i16>(own + 0x19) as i32, leader, full: 2 * (teams as i32 - 1), beaten })
+}
+
+/// The awards of the squad's players: (award name in lower case, a team of the year, the place (1
+/// the winner, 2 "runner up", 3 "third placed"), the club's index then (+8, seen for the Ballon
+/// d'Or), the season of its date, its age in days).
+pub(super) unsafe fn new_awards(club: usize) -> Vec<(String, bool, i32, i32, i32, i32)> {
+    let records = rd::<usize>(history::STAFF_RECORDS);
+    let (comps, count) = (rd::<usize>(STAFF_COMPS), rd::<i32>(STAFF_COMP_COUNT));
+    if !mapped(records, 4) || count <= 0 || !readable(comps, count as usize * 0x65) {
+        return Vec::new();
+    }
+    let today = rd::<i16>(TODAY + 2) as i32 * 366 + rd::<i16>(TODAY) as i32;
+    let mut out = Vec::new();
+    for s in squad(club) {
+        let list = game::<extern "thiscall" fn(usize, usize, u32) -> usize>(history::STAFF_LIST)(records, s, 0);
+        for item in history::newest(list) {
+            let kind = rd::<u8>(item + 0xc);
+            let id = rd::<i32>(item + 0xd);
+            if ![KIND_TEAM_OF_YEAR, KIND_YEAR_AWARD].contains(&kind) || !(0..count).contains(&id) {
+                continue;
+            }
+            let name = latin1(&game_text(comps + id as usize * 0x65 + 4, 51)).to_lowercase();
+            let place = if kind == KIND_YEAR_AWARD { rd::<i8>(item + 0x19) as i32 } else { 1 };
+            let age = today - (rd::<i16>(item + 2) as i32 * 366 + rd::<i16>(item) as i32);
+            if trace() {
+                log(&format!("challenge award {}: {name} kind {kind:#x} place {place} {} days ago: {}", latin1(&staff_name(s)), age, latin1(&history::sentence(records, item))));
+            }
+            let season = season_from(rd::<i16>(item), rd::<i16>(item + 2) as i32, SEASON_FROM);
+            out.push((name, kind == KIND_TEAM_OF_YEAR, place, rd::<i32>(item + 8), season, age));
+        }
+        history::free(list);
+    }
+    out
+}
+
+/// A club's names in lower case, the long and the short, as the derbies go by.
+unsafe fn club_names(club: usize) -> String {
+    if !readable(club, 0x55) {
+        return String::new();
+    }
+    format!("{} {}", latin1(&game_text(club + 4, 51)), latin1(&game_text(club + 0x38, 26))).to_lowercase()
+}
+
+/// The career goals' readings of a manager's season, for the goals he picked: his league table
+/// (matches and defeats while they grow, the gap to the leader once half the matches are played,
+/// the wins over a derby's rival) and his squad's new awards.
+unsafe fn read_career(l: &mut League, name: &str, club: usize, now: i32) -> bool {
+    let picked = |goal: &str| l.marks.iter().any(|m| same_manager(&m.name, name) && m.goal == goal);
+    let table = picked(goals::UNBEATEN) || picked(goals::COMEBACK) || goals::DERBIES.iter().any(|d| picked(d.0));
+    let awards = picked(goals::BALLON) || picked(goals::TEAM_OF_YEAR);
+    let mut changed = false;
+    if let Some(s) = standing(club).filter(|_| table) {
+        if trace() {
+            log(&format!("challenge standing {name}: {s:?}"));
+        }
+        if s.played >= l.stat(name, now, "played").unwrap_or(0) {
+            changed |= l.set_stat(name, now, "played", s.played) | l.set_stat(name, now, "lost", s.lost) | l.set_stat(name, now, "full", s.full);
+        }
+        if l.stat(name, now, "gap").is_none() && s.played > 0 && s.played * 2 >= s.full {
+            changed |= l.set_stat(name, now, "gap", s.leader - s.points);
+        }
+        let own = club_names(club);
+        for (d, derby) in goals::DERBIES.iter().enumerate() {
+            let rival = if goals::is_side(&own, derby.1) { derby.2 } else if goals::is_side(&own, derby.2) { derby.1 } else { continue };
+            let wins = s.beaten.iter().filter(|b| goals::is_side(&club_names(b.0), rival)).map(|b| b.1).max().unwrap_or(0);
+            if trace() {
+                let found: Vec<String> = s.beaten.iter().filter(|b| goals::is_side(&club_names(b.0), rival)).map(|b| club_names(b.0)).collect();
+                log(&format!("challenge derby {name}: {} rival {found:?} won {wins}", derby.0));
+            }
+            let key = format!("derby{d}");
+            if wins > l.stat(name, now, &key).unwrap_or(0) {
+                changed |= l.set_stat(name, now, &key, wins);
+            }
+        }
+    }
+    if awards {
+        let new = new_awards(club);
+        // (the Ballon d'Or of this season, won at this club: "2028/29 Ballon d'Or", place 1)
+        let index = ((club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE) as i32;
+        if new.iter().any(|a| a.0 == "ballon d'or" && !a.1 && a.2 == 1 && a.3 == index && a.4 == now) {
+            changed |= l.set_stat(name, now, "ballon", 1);
+        }
+        let toty = new.iter().filter(|a| a.1 && a.0.contains("team of the year") && a.5 <= 30).count() as i32;
+        if toty > l.stat(name, now, "toty").unwrap_or(0) {
+            changed |= l.set_stat(name, now, "toty", toty);
+        }
+    }
+    changed
 }
 
 /// The club's staff: coaches, scouts, physios, the assistant, each once; a human manager not.
@@ -271,6 +415,28 @@ pub unsafe fn update() {
     for (staff, name) in humans() {
         let open = |r: &&Rad| r.year == now && same_manager(&r.name, &name) && !r.manual;
         let club = rd::<usize>(staff + 0x39);
+        // career goals: the first division's leaders in his squad, the last reading of a season stands
+        if on(CAREER_GOALS) && readable(club, 0xd7 + 200) && l.marks.iter().any(|m| same_manager(&m.name, &name) && goals::LEADS.contains(&m.goal.as_str())) {
+            let own = squad(club);
+            let top = first_division(rd::<usize>(club + 0x57));
+            let leaders = league_leaders(club);
+            let held = leaders.map(|s| top && s != 0 && own.contains(&s));
+            if trace() {
+                let who: Vec<String> = leaders.iter().map(|&s| if s == 0 { String::new() } else { format!("{} ({}, {}, {})", latin1(&staff_name(s)), stat(s, 2, 2), stat(s, 2, 5), stat(s, 2, 0x11)) }).collect();
+                log(&format!("challenge leaders {name}: first division {top}, {who:?}, in the squad {held:?}"));
+            }
+            match l.leaders.iter_mut().find(|e| e.1 == now && same_manager(&e.0, &name)) {
+                Some(e) if e.2 == held => {}
+                Some(e) => (e.2, changed) = (held, true),
+                None => {
+                    l.leaders.push((name.clone(), now, held));
+                    changed = true;
+                }
+            }
+        }
+        if on(CAREER_GOALS) && readable(club, 0xd7 + 200) && l.marks.iter().any(|m| same_manager(&m.name, &name)) {
+            changed |= read_career(l, &name, club, now);
+        }
         // the best player of the first turn of the year
         if (0..31).contains(&day) && readable(club, 0xd7 + 200) && !l.best.iter().any(|b| b.1 == now && same_manager(&b.0, &name)) {
             if let Some(player) = best_player(club) {
@@ -318,6 +484,21 @@ pub unsafe fn tick() {
     }
     DAY = today;
     use_game();
+    // (in a trace, once: which first divisions keep head-to-head records, the derbies' source)
+    static mut LISTED: bool = false;
+    if trace() && !LISTED {
+        LISTED = true;
+        let (comps, count, leagues) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT), rd::<usize>(LEAGUES));
+        for k in 0..count.max(0) as usize {
+            let comp = comps + k * COMP_SIZE;
+            let at = leagues + rd::<i32>(comp).max(0) as usize * 4;
+            let league = if readable(at, 4) { rd::<usize>(at) } else { 0 };
+            if first_division(comp) && readable(league, 0xc9) && rd::<usize>(league + 4) == comp {
+                let rules: Vec<u8> = (0..4).map(|r| rd::<u8>(league + 0xc5 + r)).collect();
+                log(&format!("challenge league {}: rules {rules:?} head-to-head {}", latin1(&game_text(comp + 4, 51)), rules.contains(&4)));
+            }
+        }
+    }
     let _ = seasons(); // (this season's top scorer goes in the file)
     update();
 }

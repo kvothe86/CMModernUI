@@ -95,6 +95,7 @@ Ajax host + PSV client; tes2 = 9.9.25 before Real Madrid v Ajax).
 
 | Seen | Cause | Where | Check | Status |
 |---|---|---|---|---|
+| `cmui_config.bat`: no box for Modern Buttons and CM Challenge | 14 boxes a column at 300 px: the 29th and 30th stood at x 624 in a window 640 wide | `cmui_config.ps1`: three columns of 11 at 205 px | `cmui_config.ps1 -Ini <file> -Test`, the PNG | checked 2026-11-03 (picture: 31 boxes) |
 | Many "Could not find club" errors on Restructured (from NickDLL), wrong database | exe not portable: it moved to the registry's install path (CM0102Orign) and loaded that data | `lib.rs` `warn_not_portable` warns at start, `install.py` `other_install` before an install; the F exes got the patcher's three portable patches; both warnings also say to switch off Windows 95 mode (with it a portable exe crashes about a second after graphics start-up) | test `other_install_ignores_case_and_closing_slash`; install.py check on a non-portable backup exe; message box and log line seen on that exe run from a scratch folder | checked 2026-10-30 |
 
 ## Crest pack

@@ -99,3 +99,51 @@ C	Nationality	5 players from ENG/SPA/GER/ITA/FRA	3
 C	Nationality	3 players from the same country (not your own)	3
 C	Nationality	No player from your own country in the starting XI (min. 15 times)	9
 C	Nationality	At least 5 different nationalities in the starting XI	6
+Q	National honours	Win the league title in a country of your choice	25
+Q	National honours	Win the national cup in a country of your choice	10
+Q	National honours	Win the national Super Cup in a country of your choice	10
+Q	National honours	Win the league title in three different countries	50
+Q	National honours	Win the national cup in three different countries	50
+Q	National honours	Win the league and the cup in the same season	25
+Q	National honours	Win the league, the cup and the Super Cup in one season	50
+Q	National honours	Win five league titles with the same club	50
+Q	National honours	Win promotion with three different clubs	25
+Q	National honours	Win the league title straight after promotion	50
+Q	European and international honours	Win the Champions League	50
+Q	European and international honours	Win the Champions League with two different clubs	100
+Q	European and international honours	Win the UEFA Cup / Europa League	25
+Q	European and international honours	Win the Conference League	10
+Q	European and international honours	Win the European Super Cup	25
+Q	European and international honours	Win the Club World Cup	25
+Q	European and international honours	Win the Champions League and the league title in the same season	50
+Q	European and international honours	Win the Champions League with a club outside the big five leagues	100
+Q	European and international honours	Win the World Cup as a national team manager	100
+Q	European and international honours	Win a continental tournament as a national team manager	50
+Q	Individual player achievements	Have the top flight's top scorer in your team	10
+Q	Individual player achievements	Have the top flight's top assist maker in your team	10
+Q	Individual player achievements	Have the top flight's highest average rating in your team	10
+Q	Individual player achievements	Have the Ballon d'Or winner of the year in your team	50
+Q	Individual player achievements	Have the Champions League top scorer in your team	25
+Q	Individual player achievements	Have the European Golden Boot winner in your team	25
+Q	Individual player achievements	Have three players in the league's Team of the Year	25
+Q	Individual player achievements	Have the top flight's top scorer three seasons in a row	50
+Q	Rivalries and derbies	Win the Revierderby (Dortmund v Schalke 04) ten times	50
+Q	Rivalries and derbies	Win the Old Firm (Celtic v Rangers) ten times	50
+Q	Rivalries and derbies	Win Le Classique (PSG v Marseille) ten times	50
+Q	Rivalries and derbies	Win the Derby della Madonnina (AC Milan v Inter) ten times	50
+Q	Rivalries and derbies	Win De Klassieker (Ajax v Feyenoord) ten times	50
+Q	Rivalries and derbies	Win El Clásico (Barcelona v Real Madrid) ten times	50
+Q	Rivalries and derbies	Win the North London Derby (Arsenal v Tottenham) ten times	50
+Q	Career and club building	Work in three different countries	25
+Q	Career and club building	Work in five different countries	50
+Q	Career and club building	Win a trophy in three different countries	50
+Q	Career and club building	Win the league title in all of the big five leagues	150
+Q	Career and club building	Manage ten different clubs	50
+Q	Career and club building	Stay ten seasons at the same club	50
+Q	Career and club building	Take a club from the lowest playable division to the top flight	50
+Q	Career and club building	Take a club from the lowest playable division to the Champions League	100
+Q	Career and club building	Win a trophy with five different clubs	50
+Q	Special achievements	Go a full league season unbeaten	50
+Q	Special achievements	Win a competitive match with double figures (10+ goals)	25
+Q	Special achievements	Win the league after trailing the leader by 10+ points at the halfway mark	50
+Q	Special achievements	Win the Champions League, the league and the cup in one season	100

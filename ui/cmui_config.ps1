@@ -35,11 +35,12 @@ $switches = @(
     @('table_icons', 'Table Icons', 'League table: a cup and arrows for C, P, Pl and R. Needs Stats Table.'),
     @('background_show', 'Background Show', 'With Background Changes on: the dark panels let the picture through.'),
     @('modern_buttons', 'Modern Buttons', 'Grey buttons, dropdowns and list cells in steel blue, column headers flat.'),
-    @('challenge', 'CM Challenge', 'Network game: a button under the menu bar opens the managers'' league.')
+    @('challenge', 'CM Challenge', 'Network game: a button under the menu bar opens the managers'' league.'),
+    @('career_goals', 'Career Goals', 'CM Challenge: ten goals for a whole career per manager, picked by the host. Needs CM Challenge.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),
-    @('profile_details', 'Profile details', 'Show the details overlay on profiles (also the button in the game).')
+    @('profile_details', 'Profile details', 'Start with a profile''s extra panels shown over the attributes; the More / Less button in the game switches the same.')
 )
 
 $lines = if (Test-Path -LiteralPath $Ini) { [IO.File]::ReadAllLines($Ini) } else { @() }
@@ -59,20 +60,32 @@ $form.Font = New-Object Drawing.Font('Segoe UI', 9.5)
 $tips = New-Object Windows.Forms.ToolTip
 $tips.AutoPopDelay = 20000
 
+# what the switch under the mouse does (the same text as its tooltip)
+$help = New-Object Windows.Forms.Label
+$help.Location = New-Object Drawing.Point(24, 296)
+$help.Size = New-Object Drawing.Size(592, 66)
+$help.BorderStyle = 'FixedSingle'
+$help.Padding = New-Object Windows.Forms.Padding(6)
+$help.Text = 'Point at a switch to see what it does.'
+$form.Controls.Add($help)
+
 $boxes = @{}
 function Add-Box($item, $x, $y, $on) {
     $b = New-Object Windows.Forms.CheckBox
     $b.Text = $item[1]
     $b.Location = New-Object Drawing.Point($x, $y)
-    $b.Size = New-Object Drawing.Size(290, 24)
+    $b.Size = New-Object Drawing.Size(200, 24)
     $b.Checked = $on
     $tips.SetToolTip($b, $item[2])
+    $b.Tag = "$($item[1]): $($item[2])"
+    $b.Add_MouseEnter({ $help.Text = $this.Tag })
     $form.Controls.Add($b)
     $boxes[$item[0]] = $b
 }
 for ($i = 0; $i -lt $switches.Count; $i++) {
     $name = $switches[$i][0]
-    Add-Box $switches[$i] (24 + 300 * [math]::Floor($i / 14)) (14 + 25 * ($i % 14)) ($values[$name] -ne '0')
+    # (three columns of eleven: the window is 640 wide)
+    Add-Box $switches[$i] (24 + 205 * [math]::Floor($i / 11)) (14 + 25 * ($i % 11)) ($values[$name] -ne '0')
 }
 for ($i = 0; $i -lt $extras.Count; $i++) {
     Add-Box $extras[$i] (24 + 300 * $i) 374 ($values[$extras[$i][0]] -eq '1')
@@ -133,6 +146,7 @@ $form.AcceptButton, $form.CancelButton = $save, $cancel
 
 if ($Test) {
     $boxes['tabs'].Checked = $false
+    $help.Text = $boxes['career_goals'].Tag
     $slider.Value = 45
     Save-Ini
     $form.StartPosition = 'Manual'

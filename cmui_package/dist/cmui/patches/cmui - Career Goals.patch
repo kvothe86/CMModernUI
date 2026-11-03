@@ -1,0 +1,3 @@
+# cmui feature switch career_goals (needs the cmui Loader patch)
+EXPANDEXE
+006E503E: 00 01
