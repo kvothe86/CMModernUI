@@ -9,6 +9,19 @@ own copy.
 | **cmui** | A modern dark look as a DLL for the original exe: attribute bars, club crests, new squad, tactics, match, news and competition screens, the Assistant's team picks and more. Every feature has its own switch. | [`cmui_package/dist/cmui`](cmui_package/dist/cmui) | [`ui/`](ui) |
 | **CM Network** | Network games over the internet, not only Hamachi or LAN. Listens on all addresses, opens the router's ports with UPnP, accepts names in the join screen and compresses the game's traffic. | [`net/package`](net/package) | [`net/`](net) |
 
+## Screenshots
+
+At 1680x1050, the recommended resolution (CM 2025/26 database, crests fetched with `--crests`).
+
+| | |
+|---|---|
+| ![Squad screen](ui/docs/screenshots/squad.png) Squad: CA stars, rating, condition, positions | ![Player profile](ui/docs/screenshots/profile.png) Player profile: attribute bars, CA/PA stars, reputation, form, positions |
+| ![Assistant's pick](ui/docs/screenshots/assistant-pick.png) The Assistant picks the team and says why | ![Team report](ui/docs/screenshots/team-report.png) Team report: the assistant's best and backup eleven |
+| ![Tactics](ui/docs/screenshots/tactics.png) Tactics pitch with shirts in the club's colours | ![Match screen](ui/docs/screenshots/match.png) Match screen: scores, events, key stats, last 5 minutes |
+| ![League table](ui/docs/screenshots/league-table.png) League table with crests and form | ![Player stats](ui/docs/screenshots/player-stats.png) Competition stats with medals and rating pills |
+| ![News](ui/docs/screenshots/news.png) News with icons, clickable names and a transfer card | ![CM Challenge goals](ui/docs/screenshots/challenge-goals.png) CM Challenge: ten career goals picked |
+| ![CM Challenge RAD](ui/docs/screenshots/challenge-rad.png) CM Challenge: RAD challenges of the season | |
+
 ## CM Challenge
 
 Part of cmui: a competition between the managers of one game, kept by the game itself. It was made
