@@ -1,0 +1,2 @@
+At 1680x1050 and up, with claude_api_key=<your Anthropic API key> in cmui.ini: a Coach button under the menu bar. Claude gives a pre-match briefing, a post-match analysis, an expanded team report and answers typed questions. Each answer is one paid API request.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: coach=0 switches it off again.

@@ -48,6 +48,21 @@ tracks your own career, with RAD as an optional way to set yourself challenges. 
 `cmui.ini` switches it off. How it works, and how to take it out of the code:
 [`ui/docs/challenge.md`](ui/docs/challenge.md).
 
+## Coach
+
+Part of cmui (switch `coach`, 1680x1050 and up): Claude as your first-team coach. A Coach button
+under the menu bar opens a page with four tabs: a **pre-match briefing** (how the opponent plays,
+who to stop, the XI, team and player instructions), a **post-match analysis** of your last match,
+an **expanded team report** (depth, form, who to sell, what to buy, who to develop) and **Ask the
+coach**, where you type questions and follow-ups.
+
+It needs your own Anthropic API key: put `claude_api_key=sk-ant-...` in `cmui.ini`, or paste it in
+`cmui_config.bat`, which also picks the model (Claude Haiku 5.5 by default, Sonnet 5.5 for deeper
+answers). Without a key the button is not there. Each answer is one request billed to your key
+(with Haiku about 0.1 to 0.2 cent). What is sent: your squad as your assistant sees it, the next
+opponent as your scout sees them, the texts of your last match screen and of the screen you came
+from. Single player and network hosts; not yet on a network client.
+
 ## Patch your game
 
 Nothing here needs building: both add-ons are ready to use from the folders above.

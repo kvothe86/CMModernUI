@@ -30,6 +30,7 @@ extern "system" {
 mod remote;
 mod assistant;
 mod challenge;
+mod coach;
 mod comp;
 mod history;
 mod news;
@@ -276,6 +277,9 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // the game's boxes); an open or pressed one (0x1061) gets a lighter band with a gold edge
         let (sw, sh) = screen();
         if theme && on(MENU_FIXES) && x2 <= bar_end(sw) && (flags == 0x1021 || flags == 0x1061) {
+            // (Game Options' box where its button is drawn, while only its drawing moves)
+            let s = if OPTIONS_HOME == Some((x1, y1, x2, y2)) { options_shift() } else { 0 };
+            let (y1, y2) = (y1 + s, y2 + s);
             // (a closed one the bar's own colour: what the open state or a dropdown left is cleared)
             if flags == 0x1061 && y1 > sh * 15 / 100 {
                 fill(x1, y1, x2 + 1, y2 + 1, [0x2c, 0x31, 0x38]);
@@ -1288,6 +1292,9 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             if on(ASSISTANT_PICK) {
                 assistant::note_text(x1, y1, x2, y2, font, flags, t);
             }
+            if on(COACH) {
+                coach::note_text(x1, y1, t);
+            }
             if on(NEWS) && is_news_date(t) {
                 let small = smaller(font, 2); // (also on a first draw, before any stats table)
                 NEWS_DATE = Some((x1, y1, x2, y2, t.to_vec(), small));
@@ -2064,6 +2071,108 @@ const GOLD: [u8; 3] = [0xe0, 0xb8, 0x50];
 /// needs it, the bar drawn again).
 static mut SIDEBAR_ITEM_FONT: Option<u32> = None;
 
+// Game Options goes last in the menu bar: cmui's own buttons (CM Challenge, Coach) take its place.
+// Its widget (the screen's widget table, as assistant::flip reads it: +0x10 the box) is moved
+// down, so the game draws it, takes its clicks and opens its menu there. Where no widget has its
+// box, only its drawing moves and a pointer over it is put on its own box for the game (as
+// news::pointer does).
+type Rect = (i32, i32, i32, i32);
+/// Game Options' box as the game built it: seen this frame, in force; the widget moved and where
+/// to; whether it was drawn this frame.
+static mut OPTIONS_SEEN: Option<Rect> = None;
+static mut OPTIONS_HOME: Option<Rect> = None;
+static mut OPTIONS_MOVED: Option<(usize, Rect)> = None;
+static mut OPTIONS_DRAWN: bool = false;
+/// cmui's buttons above it (from the last full frame).
+static mut EXTRA_BUTTONS: i32 = 0;
+/// The colour of the bar's plain buttons (the brightest seen: Game Options is the game's gold),
+/// which cmui's own are drawn in.
+pub(crate) static mut BAR_WHITE: u32 = 0;
+
+/// How far Game Options is drawn under its own box (none once its widget is moved).
+unsafe fn options_shift() -> i32 {
+    match (OPTIONS_HOME, OPTIONS_MOVED) {
+        (Some(o), None) => EXTRA_BUTTONS * (o.3 - o.1 + 4),
+        _ => 0,
+    }
+}
+
+/// The first place for a cmui button under the bar, `lowest` the lowest button seen: Game
+/// Options' own box when it is that one (it moves down), else under it; and the room Game
+/// Options then needs under cmui's buttons.
+pub(crate) unsafe fn bar_slot(lowest: Rect) -> (i32, i32) {
+    match OPTIONS_HOME {
+        Some(home) if home == lowest || OPTIONS_MOVED.is_some_and(|m| m.1 == lowest) => (home.1, home.3 - home.1 + 4),
+        _ => (lowest.3 + 4, 0),
+    }
+}
+
+/// A menu bar button open or pressed, as the game's are drawn (`panel`): a lighter band with a
+/// gold edge at the left; the label keeps its colour.
+pub(crate) fn bar_lit((x1, y1, x2, y2): Rect) {
+    fill(x1, y1, x2 + 1, y2 + 1, [0x2c, 0x31, 0x38]);
+    fill(x1, y1 + 6, x1 + 3, y2 - 5, GOLD);
+}
+
+/// The pointer over the moved Game Options: on its own box for the game.
+unsafe fn options_pointer(mx: i32, my: i32) -> Option<(i32, i32)> {
+    let (o, s) = (OPTIONS_HOME?, options_shift());
+    (s > 0 && (o.0..=o.2).contains(&mx) && (o.1 + s..=o.3 + s).contains(&my)).then_some((mx, my - s))
+}
+
+/// The widget of the screen with box `r`.
+unsafe fn widget_at(r: Rect) -> Option<usize> {
+    let display = rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel());
+    let count = if mapped(display + 0x12e9a0, 2) { rd::<i16>(display + 0x12e9a0).clamp(0, 1200) as usize } else { 0 };
+    if !mapped(display + 0xba95e, count * 0x18c) {
+        return None;
+    }
+    (0..count).map(|k| display + 0xba95e + k * 0x18c).find(|&w| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i)) == [r.0, r.1, r.2, r.3])
+}
+
+/// The flip pass: Game Options' box from this frame; after cmui's buttons are placed (full frame),
+/// its widget moved under them, the screen again when that changed.
+#[allow(static_mut_refs)]
+unsafe fn options_flip(full_frame: bool, placed: bool) {
+    if !placed {
+        // (a box other than the one it was moved to: the screen built its bar again)
+        if let Some(o) = OPTIONS_SEEN.take() {
+            (OPTIONS_HOME, OPTIONS_MOVED) = (Some(o), None);
+        }
+        if full_frame && !std::mem::take(&mut OPTIONS_DRAWN) {
+            (OPTIONS_HOME, OPTIONS_MOVED) = (None, None);
+        }
+        return;
+    }
+    if !full_frame {
+        return;
+    }
+    let extra = (on(CHALLENGE) && challenge::button_shown()) as i32 + (on(COACH) && coach::button_shown()) as i32;
+    if extra != EXTRA_BUTTONS {
+        EXTRA_BUTTONS = extra;
+        REDRAW = true;
+    }
+    let Some(home) = OPTIONS_HOME else { return };
+    let s = extra * (home.3 - home.1 + 4);
+    let target = (home.0, home.1 + s, home.2, home.3 + s);
+    let now = OPTIONS_MOVED.map_or(home, |m| m.1);
+    if now != target {
+        if let Some(w) = OPTIONS_MOVED.map(|m| m.0).filter(|&w| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i)) == [now.0, now.1, now.2, now.3]).or_else(|| widget_at(now)) {
+            for (i, v) in [target.0, target.1, target.2, target.3].into_iter().enumerate() {
+                *((w + 0x10 + 4 * i) as *mut i32) = v;
+            }
+            OPTIONS_MOVED = (s != 0).then_some((w, target));
+            REDRAW = true;
+            log(&format!("menu bar: Game Options' widget moved {s} down"));
+        } else if s != 0 {
+            static mut SAID: bool = false;
+            if !std::mem::replace(&mut SAID, true) {
+                log("menu bar: no widget with Game Options' box, only its drawing moves");
+            }
+        }
+    }
+}
+
 /// A menu bar button without its box: an icon (Windows' own icon font) over its label in one
 /// font for the bar, a little larger than the game's, using the bar's width up to the screen's
 /// content. The click area stays the game's box.
@@ -2087,9 +2196,42 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     let rgb = [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8];
     let h = y2 - y1;
     let label = latin1(t).replace('\n', " ").to_lowercase();
-    if on(CHALLENGE) {
+    // (the coach's own button is no bar item for either: it would walk down the bar)
+    if on(CHALLENGE) && label != "coach" {
         challenge::bar_item(x1, y1, x2, y2, font, colour, &label);
     }
+    if on(COACH) {
+        coach::bar_item(x1, y1, x2, y2, font, colour, &label);
+    }
+    let options = label.contains("options");
+    let own = label == "coach" || label.contains("challenge");
+    if !options && !own && !label.contains("have news") && !label.contains("waiting") {
+        let bright = |c: u32| (c >> 11 & 31) * 2 + (c >> 5 & 63) + (c & 31) * 2;
+        if bright(c) > bright(BAR_WHITE) {
+            BAR_WHITE = c;
+        }
+    }
+    // (Game Options drawn under cmui's buttons, which take its place; the game lights it for a
+    // pointer on its own box, which is cmui's button now: then in the colour it had off it)
+    static mut OPTIONS_COLOUR: [u8; 3] = [0; 3];
+    let (y1, y2, rgb) = if options {
+        OPTIONS_DRAWN = true;
+        // (its widget moved: the game draws it there itself)
+        if OPTIONS_MOVED.is_some_and(|m| m.1 == (x1, y1, x2, y2)) {
+            (y1, y2, rgb)
+        } else {
+            OPTIONS_SEEN = Some((x1, y1, x2, y2));
+            let (mx, my) = (*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
+            let on_box = (x1..=x2).contains(&mx) && (y1..=y2).contains(&my);
+            if !on_box || OPTIONS_COLOUR == [0; 3] {
+                OPTIONS_COLOUR = rgb;
+            }
+            let s = options_shift();
+            (y1 + s, y2 + s, if s > 0 { OPTIONS_COLOUR } else { rgb })
+        }
+    } else {
+        (y1, y2, rgb)
+    };
     if let Some(code) = sidebar_icon(&label, t) {
         draw_icon(code, cx, y1 + h * 8 / 100, h * 32 / 100, rgb);
     }
@@ -2110,6 +2252,7 @@ unsafe fn sidebar_icon(label: &str, t: &[u8]) -> Option<u32> {
         _ if has("continue") || has("kick off") || has("re-start") || has("resume") => 0xE768,
         _ if has("competitions") => 0x1F3C6,
         _ if has("challenge") => 0xE734,
+        _ if label == "coach" => 0xE82F, // a light bulb: advice
         _ if has("nations") => 0xE774,
         _ if label == "find" => 0xE721,
         _ if has("options") => 0xE713,
@@ -2271,13 +2414,15 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 31] = [
+const FEATURES: [&str; 32] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
+    "coach",
 ];
+const COACH: usize = 31; // Claude as coach (`coach.rs`; 1680 wide and up, needs claude_api_key in cmui.ini)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -2428,6 +2573,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         let released = std::mem::replace(&mut WAS_HELD, held) && !held;
         let (mx, my) = (*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
         let over = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
+        // the coach's button and screen (first: its screen covers everything)
+        if on(COACH) {
+            if let Some(redraw) = coach::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
         // the CM Challenge button and page
         if on(CHALLENGE) {
             if let Some(redraw) = challenge::input(mx, my, released) {
@@ -2538,7 +2693,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // the story is laid out by cmui (news::story): over one of its links or chips the game
         // sees the pointer on its own box for it, elsewhere over the story on none (and back
         // after, unless the window procedure moved it meanwhile)
-        let target = news::pointer(mx, my).or_else(|| nation_link(display, mx, my));
+        let target = news::pointer(mx, my).or_else(|| nation_link(display, mx, my)).or_else(|| options_pointer(mx, my));
         if let Some((tx, ty)) = target {
             (*(MOUSE_X as *mut i32), *(MOUSE_Y as *mut i32)) = (tx, ty);
         }
@@ -3328,10 +3483,15 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             button_arrows();
         }
         assistant::report();
+        options_flip(full_frame, false);
         if on(CHALLENGE) {
             challenge::flip(full_frame);
             challenge::overlay();
         }
+        if on(COACH) {
+            coach::flip(full_frame);
+        }
+        options_flip(full_frame, true);
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
             static mut SAID: bool = false;

@@ -36,7 +36,8 @@ $switches = @(
     @('background_show', 'Background Show', 'With Background Changes on: the dark panels let the picture through.'),
     @('modern_buttons', 'Modern Buttons', 'Grey buttons, dropdowns and list cells in steel blue, column headers flat.'),
     @('challenge', 'CM Challenge', 'Network game: a button under the menu bar opens the managers'' league.'),
-    @('career_goals', 'Career Goals', 'CM Challenge: ten goals for a whole career per manager, picked by the host. Needs CM Challenge.')
+    @('career_goals', 'Career Goals', 'CM Challenge: ten goals for a whole career per manager, picked by the host. Needs CM Challenge.'),
+    @('coach', 'Coach', '1680x1050 and up: Claude as coach (briefing, match analysis, team report, questions). Needs claude_api_key in cmui.ini.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),
@@ -50,7 +51,7 @@ foreach ($l in $lines) { if ($l -match '^\s*([^=]+?)\s*=\s*(.*?)\s*$') { $values
 $dark, $light = [Drawing.Color]::FromArgb(0x1a, 0x1c, 0x20), [Drawing.Color]::FromArgb(0xd8, 0xdc, 0xe2)
 $form = New-Object Windows.Forms.Form
 $form.Text = "cmui settings - $Ini"
-$form.ClientSize = New-Object Drawing.Size(640, 560)
+$form.ClientSize = New-Object Drawing.Size(640, 596)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -106,18 +107,63 @@ $slider.Add_ValueChanged({ $label.Text = "Background opacity: $($slider.Value) %
 $tips.SetToolTip($slider, 'How much of the picture shows through the panels, with Background Changes on and Background Show ticked.')
 $form.Controls.Add($slider)
 
+# the coach: the Anthropic API key (never shown: its last four once saved) and the model
+$oldKey = [string]$values['claude_api_key']
+$script:dropKey = $false
+$keyLabel = New-Object Windows.Forms.Label
+$keyLabel.Location = New-Object Drawing.Point(24, 456)
+$keyLabel.Size = New-Object Drawing.Size(230, 24)
+function Set-KeyLabel { $keyLabel.Text = if ($oldKey -and -not $script:dropKey) { "Claude API key (saved ...$($oldKey.Substring([math]::Max(0, $oldKey.Length - 4))))" } else { 'Claude API key (none)' } }
+Set-KeyLabel
+$form.Controls.Add($keyLabel)
+$keyBox = New-Object Windows.Forms.TextBox
+$keyBox.Location = New-Object Drawing.Point(260, 454)
+$keyBox.Size = New-Object Drawing.Size(250, 24)
+$keyBox.UseSystemPasswordChar = $true
+$tips.SetToolTip($keyBox, 'Paste a new key here (sk-ant-...). Left empty, the saved key stays. The Coach needs it; it is read when the game starts.')
+$form.Controls.Add($keyBox)
+$clearKey = New-Object Windows.Forms.Button
+$clearKey.Text = 'Remove'
+$clearKey.Location = New-Object Drawing.Point(524, 452)
+$clearKey.Size = New-Object Drawing.Size(92, 28)
+$clearKey.Add_Click({ $script:dropKey = $true; $keyBox.Text = ''; Set-KeyLabel })
+$tips.SetToolTip($clearKey, 'Remove the saved key on Save: the Coach is off then.')
+$form.Controls.Add($clearKey)
+$modelLabel = New-Object Windows.Forms.Label
+$modelLabel.Location = New-Object Drawing.Point(24, 492)
+$modelLabel.Size = New-Object Drawing.Size(230, 24)
+$modelLabel.Text = 'Coach model'
+$form.Controls.Add($modelLabel)
+$model = New-Object Windows.Forms.ComboBox
+$model.DropDownStyle = 'DropDownList'
+$model.Location = New-Object Drawing.Point(260, 490)
+$model.Size = New-Object Drawing.Size(250, 24)
+$models = @('claude-haiku-5-5', 'claude-sonnet-5-5')
+$current = if ($values['claude_model']) { $values['claude_model'] } else { 'claude-haiku-5-5' }
+if ($models -notcontains $current) { $models += $current }
+[void]$model.Items.AddRange([object[]]$models)
+$model.SelectedItem = $current
+$tips.SetToolTip($model, 'Haiku 5.5: fast and cheapest (about 0.1-0.2 cent an answer). Sonnet 5.5: deeper answers, about 20 times the price.')
+$form.Controls.Add($model)
+
 $note = New-Object Windows.Forms.Label
-$note.Location = New-Object Drawing.Point(24, 458)
-$note.Size = New-Object Drawing.Size(592, 44)
-$note.Text = "Switches count from the next start of the game. Opacity counts from the next screen. A switch the game's exe has off stays off."
+$note.Location = New-Object Drawing.Point(24, 528)
+$note.Size = New-Object Drawing.Size(380, 52)
+$note.Text = "Switches, key and model count from the next start of the game. Opacity counts from the next screen. A switch the game's exe has off stays off."
 $form.Controls.Add($note)
 
 function Save-Ini {
     $new = [ordered]@{}
     foreach ($name in $boxes.Keys) { $new[$name] = [string][int]$boxes[$name].Checked }
     $new['background_opacity'] = [string]$slider.Value
+    $new['claude_model'] = [string]$model.SelectedItem
+    $typed = $keyBox.Text.Trim()
+    if ($typed) { $new['claude_api_key'] = $typed }
     $out = New-Object Collections.ArrayList
     foreach ($l in $lines) {
+        if ($script:dropKey -and -not $typed -and $l -match '^\s*claude_api_key\s*=') {
+            continue
+        }
         if ($l -match '^\s*([^=]+?)\s*=' -and $new.Contains($Matches[1])) {
             [void]$out.Add("$($Matches[1])=$($new[$Matches[1]])")
             $new.Remove($Matches[1])
@@ -131,14 +177,14 @@ function Save-Ini {
 
 $save = New-Object Windows.Forms.Button
 $save.Text = 'Save'
-$save.Location = New-Object Drawing.Point(420, 514)
+$save.Location = New-Object Drawing.Point(420, 548)
 $save.Size = New-Object Drawing.Size(92, 32)
 $save.BackColor = [Drawing.Color]::FromArgb(0x8a, 0x70, 0x34)
 $save.Add_Click({ Save-Ini; $form.Close() })
 $form.Controls.Add($save)
 $cancel = New-Object Windows.Forms.Button
 $cancel.Text = 'Cancel'
-$cancel.Location = New-Object Drawing.Point(524, 514)
+$cancel.Location = New-Object Drawing.Point(524, 548)
 $cancel.Size = New-Object Drawing.Size(92, 32)
 $cancel.Add_Click({ $form.Close() })
 $form.Controls.Add($cancel)
@@ -148,6 +194,8 @@ if ($Test) {
     $boxes['tabs'].Checked = $false
     $help.Text = $boxes['career_goals'].Tag
     $slider.Value = 45
+    $keyBox.Text = 'not-a-real-key-TEST'
+    $model.SelectedItem = 'claude-sonnet-5-5'
     Save-Ini
     $form.StartPosition = 'Manual'
     $form.Location = New-Object Drawing.Point(-3000, 0)

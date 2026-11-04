@@ -125,6 +125,11 @@ challenge        CM Challenge: a button that opens a league of the human manager
                  tracker of your own career, with optional RAD challenges
 career_goals     needs challenge: a Goals tab, the host picks ten career goals per manager
                  from 48 (10 to 150 points); the game ticks off the 46 it can read
+coach            1680x1050 and up, with claude_api_key=<your Anthropic API key> in
+                 cmui.ini: a Coach button under the menu bar; Claude gives a pre-match
+                 briefing, a post-match analysis, an expanded team report and answers
+                 typed questions (each answer is one request billed to your key);
+                 claude_model= picks the model (claude-haiku-5-5 by default)
 
 KNOWN LIMITS
 ------------

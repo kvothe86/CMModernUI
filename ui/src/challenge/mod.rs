@@ -12,7 +12,7 @@ use crate::*;
 mod draw;
 mod goals;
 mod track;
-pub use draw::{bar_item, flip, input, overlay};
+pub use draw::{bar_item, button_shown, flip, input, overlay};
 
 const RULES: &[u8] = include_bytes!("rules.tsv");
 /// The Dutch names of the first version: a league file that has them counts as with the new ones.

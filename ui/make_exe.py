@@ -13,7 +13,7 @@ import sys
 import pefile
 
 NICK_STUB = 0xdf0000
-FEATURES = 31
+FEATURES = 32
 
 
 def align(v, a):

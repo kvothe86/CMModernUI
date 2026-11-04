@@ -110,6 +110,11 @@ fn is_status(label: &str) -> bool {
     label.contains("have news") || label.contains("waiting")
 }
 
+/// The button stands under the bar (the coach's goes under it).
+pub unsafe fn button_shown() -> bool {
+    BUTTON.is_some()
+}
+
 /// The button under the bar (the flip pass).
 #[allow(static_mut_refs)]
 pub unsafe fn flip(full_frame: bool) {
@@ -119,16 +124,22 @@ pub unsafe fn flip(full_frame: bool) {
     if full_frame {
         BUTTON = seen.filter(|_| options && game_on()).and_then(|(x1, y1, x2, y2, font, colour)| {
             let (h, (_, sh)) = (y2 - y1, screen());
-            (y2 + h + 4 < status.unwrap_or(sh)).then(|| {
+            // (in Game Options' place, which goes under cmui's buttons; in the bar's plain white)
+            let (top, room) = bar_slot((x1, y1, x2, y2));
+            (top + h + room < status.unwrap_or(sh)).then(|| {
                 FONT = font;
-                COLOUR = colour;
-                (x1, y2 + 4, x2, y2 + 4 + h)
+                COLOUR = if BAR_WHITE != 0 { BAR_WHITE } else { colour };
+                (x1, top, x2, top + h)
             })
         });
     }
     // (the team and scout reports fill the whole screen, the menu bar too)
     if let Some(b) = BUTTON.filter(|_| !assistant::REPORT_OPEN) {
-        sidebar_item(b.0, b.1, b.2, b.3, FONT, if BUTTON_HOVER || OPEN { rgb(GOLD) as u32 } else { COLOUR }, b"CM\nChallenge");
+        // (as the game's own buttons: lit with a gold edge while open or pressed, the label white)
+        if OPEN || (BUTTON_HOVER && BUTTON_DOWN_NOW()) {
+            bar_lit(b);
+        }
+        sidebar_item(b.0, b.1, b.2, b.3, FONT, COLOUR, b"CM\nChallenge");
     }
 }
 
@@ -175,6 +186,8 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         let over = !assistant::REPORT_OPEN && BUTTON.is_some_and(inside);
         let changed = std::mem::replace(&mut BUTTON_HOVER, over) != over;
         if over && released {
+            // (the button stands on Game Options' box: its click must not reach the game)
+            *(LEFT_CLICK as *mut u32) = 0;
             open();
             return Some(true);
         }

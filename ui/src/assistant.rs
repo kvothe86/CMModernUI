@@ -16,7 +16,7 @@ const SET_CAPTAIN_FROM_SLOT: usize = 0x897760; // thiscall(club, slot, team)
 const SET_TAKER: usize = 0x897bb0; // thiscall(club, role 0..4, choice 0..1, Staff* or 0, team)
 pub const CLUB_ASSISTANT: usize = 0x53cb80; // cdecl(club) -> Staff*
 const JUDGE: usize = 0x6e86d0; // cdecl(judge, player, club, kind 2 current, reputation -1) -> short
-const INJURY_STATUS: usize = 0x62c400; // thiscall(Injury*, Staff*) -> 0 fit, 1 short of fitness, 2 injured
+pub(crate) const INJURY_STATUS: usize = 0x62c400; // thiscall(Injury*, Staff*) -> 0 fit, 1 short of fitness, 2 injured
 pub(crate) const INJURIES: usize = 0xb63d28;
 pub(crate) const DISCIPLINE: usize = 0xae28f0; // Discipline*
 const COMP_TABLE: usize = 0xadadfc; // competitions by id, as the ban check reads them
@@ -36,7 +36,7 @@ const ROLES: [(usize, bool); 4] = [(0x29, false), (0x29, false), (0x22, false), 
 /// Penalties (intrinsic) and the human's Penalty Takers list (places 0..49; the map calls it a
 /// squad number table, 0x601200 / 0x601560; human 0 = the one at the screen).
 const PENALTIES: (usize, bool) = (0x38, true);
-const HUMAN_MANAGER: usize = 0xb63c98;
+pub(crate) const HUMAN_MANAGER: usize = 0xb63c98;
 const SET_PENALTY_PLACE: usize = 0x601200; // thiscall(place, Staff*, human)
 const CLEAR_PENALTY_PLACE: usize = 0x601560; // thiscall(place, human)
 
@@ -179,14 +179,14 @@ pub unsafe fn remote_note(channel: i16, number: u32) -> Option<Vec<u8>> {
 }
 
 /// The eleven slots' labels of a formation, then nine bench slots.
-unsafe fn formation_slots(formation: usize) -> Vec<Vec<u8>> {
+pub(crate) unsafe fn formation_slots(formation: usize) -> Vec<Vec<u8>> {
     let mut slots: Vec<Vec<u8>> = (0..11).map(|k| label_of(game::<extern "thiscall" fn(usize, i32, i32) -> u32>(SLOT_POSITION)(formation, k, 0))).collect();
     slots.extend((1..=9).map(|n| format!("SB{n}").into_bytes()));
     slots
 }
 
 const SLOT_POSITION: usize = 0x5b2ae0; // Formation::get_slot_position(slot, attacking) -> u16 code
-const ACTIVE_TACTIC: usize = 0x5fbd00; // HUMAN_MANAGER::get_active_tactic(human or 0) -> Formation*
+pub(crate) const ACTIVE_TACTIC: usize = 0x5fbd00; // HUMAN_MANAGER::get_active_tactic(human or 0) -> Formation*
 
 /// A slot's label from its position code (checked against the squad screen's boxes): role bit
 /// 0x1 GK, 0x2 SW, 0x4 D, 0x8 DM (on a side a wing back), 0x10 M, 0x20 AM, 0x40 F; side 0x80
@@ -208,7 +208,7 @@ fn label_of(code: u32) -> Vec<u8> {
 }
 
 /// The tactics screen's own object, before a match only (screen parameter 0; +0 its club).
-unsafe fn tactics_screen() -> Option<usize> {
+pub(crate) unsafe fn tactics_screen() -> Option<usize> {
     if !crate::TACTICS || LIVE_TACTICS || SQUAD_CLUB == 0 {
         return None;
     }
@@ -606,7 +606,7 @@ fn scout_text(club: &[u8], manager: &[u8], form: &[u8], style: &str, level: &str
 /// manager prefers (the game's own report names the same one, 0x7be670: club +0xcf, else the
 /// assistant +0xd3, non-player +0x43), those banned from its league matches or injured left out,
 /// as `own`'s best judge rates them. Nothing is written to the selection or the tactic.
-unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
+pub(crate) unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
     if !readable(club, 0x1e0 + 80) || !readable(own, 0x1b3 + 28) {
         return b"\n".to_vec(); // (no club to read)
     }
@@ -754,7 +754,7 @@ fn formation_text(own: &[u8], chosen: &[u8], preferred: &str, strongest: &[u8]) 
 /// assistant rates them: "name \t short name \t positions \t role \t slot \t slot's label \t half
 /// stars", role 1 the best eleven, 2 the backup eleven, x not available. Nothing is written to
 /// the selection or the tactic.
-unsafe fn report_for(club: usize, slots: Vec<Vec<u8>>, unavailable: Vec<usize>) -> Vec<u8> {
+pub(crate) unsafe fn report_for(club: usize, slots: Vec<Vec<u8>>, unavailable: Vec<usize>) -> Vec<u8> {
     let Some(a) = assistant_of(club).filter(|_| slots.len() >= 11) else { return b"\n".to_vec() };
     let eye = Eye { mode: Mode::Best, id: rd::<i32>(a), reading: coaching(a, 0x21) };
     // (the ban check drops a banned player from the club's selection, 20 slots at +0x1e0: put
@@ -1159,7 +1159,7 @@ unsafe fn assistant() -> Option<usize> {
     assistant_of(human_club_ptr()?)
 }
 
-unsafe fn assistant_of(club: usize) -> Option<usize> {
+pub(crate) unsafe fn assistant_of(club: usize) -> Option<usize> {
     let a = game::<extern "C" fn(usize) -> usize>(CLUB_ASSISTANT)(club);
     (readable(a, 0x6e) && readable(rd::<usize>(a + 0x69), 68)).then_some(a)
 }
@@ -1264,7 +1264,7 @@ unsafe fn pick(mode: Mode) -> Option<Vec<u8>> {
 /// of its fixture, the next one or the live match's, at +0xd92, flagged by +0xde1
 /// (Tactics_Screen::Tactics_Screen 0x8a7440). Its +0x4d low nibble is the substitutes named, as
 /// the pre-match check 0x7260f0 counts them, its +0x14 the competition for bans. 0: none.
-unsafe fn next_fixture(ts: Option<usize>, club: usize) -> usize {
+pub(crate) unsafe fn next_fixture(ts: Option<usize>, club: usize) -> usize {
     let fixture = match ts {
         None => screen_param(3),
         Some(t) if readable(t + 0xd92, 0x53) && rd::<u32>(t + 0xde1) != 0 => t + 0xd92,

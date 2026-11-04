@@ -1,6 +1,6 @@
 # Feature switches, exe patches, dsound stand-in
 
-## The 31 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+## The 32 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
 
 | # | Name | Const | Covers |
 |---|---|---|---|
@@ -35,6 +35,7 @@
 | 29 | `challenge` | `CHALLENGE` | CM Challenge button and page in a network game ([challenge.md](challenge.md)) |
 | 28 | `modern_buttons` | `MODERN_BUTTONS` | grey buttons, dropdowns and list cells in steel blue, column heads flat, no box around an empty stats cell |
 | 30 | `career_goals` | `CAREER_GOALS` | the Goals tab of CM Challenge: ten career goals a manager (needs `challenge`; the host's switch decides, a client shows what the host sends). An exe from before has the byte 0: `set_switch.py <folder> 30` |
+| 31 | `coach` | `COACH` | Claude as coach (`src\coach.rs`): a Coach button under the menu bar (with CM Challenge's in Game Options' place; Game Options' widget moves under them, `options_flip`) opens a page right of the bar with Pre-match briefing, Post-match analysis, Team report (expanded) and Ask the coach (typed questions, a conversation). **Only at 1680 wide and up** (`small_screen()` false), single player or network host (off on a client), and **off when cmui.ini has no `claude_api_key=`** (read once at start; `claude_model=` overrides `claude-haiku-5-5`). One HTTPS request per tab per game day (WinHTTP, `anthropic-version: 2026-10-21`), on its own thread; Ask again repeats it. Sent along: the assistant's report and every player (age, positions, stars, condition, Av R, value, wage, contract), the next fixture as last seen on the squad / tactics screen with the scout's report on the opponent, our last match screen's texts (kept from the frames drawn) and the texts of the screen behind. Keys of the Ask tab go through a subclass of the game window (WM_KEYDOWN / WM_CHAR). The key never goes in the log; `cmui_package\make_zip.py` and `make_cm25_zip.py` drop the line and refuse any file with `sk-ant-`. An exe from before has the byte 0: `set_switch.py <folder> 31` |
 
 Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where
 the exe's byte is 0 (`exe_switches`), then reads `cmui.ini`: `name=0` off, missing names written
@@ -42,7 +43,7 @@ as `name=1`. So **the ini can only switch off what the exe allows**; read once a
 keeps the game's palette and picture. Settings that are not switches in the same file:
 `hide_ca_pa`, `profile_details`, `background_opacity` (0-100, % of the picture behind the panels, default 30; read every half second, in force from the next full frame) (`setting` / `set_setting`).
 
-**`cmui_config.bat`** (with `cmui_config.ps1`, copied next to the DLL by `install_all.ps1`): a window with a box per switch, Hide CA/PA, Profile details and the opacity slider, saved in the `cmui.ini` beside it; lines it does not know stay. A new switch goes in its `$switches` list too. `-Ini <file> -Test` unticks Tabs, saves to that file and writes `<file>.png` of the window.
+**`cmui_config.bat`** (with `cmui_config.ps1`, copied next to the DLL by `install_all.ps1`): a window with a box per switch, Hide CA/PA, Profile details, the opacity slider, the coach's Claude API key (a password box: empty keeps the saved key, only its last four shown; Remove drops it) and model (Haiku 5.5 / Sonnet 5.5, or what the ini has), saved in the `cmui.ini` beside it; lines it does not know stay. A new switch goes in its `$switches` list too. `-Ini <file> -Test` unticks Tabs, sets a test key and Sonnet, saves to that file and writes `<file>.png` of the window.
 
 ## The exe's switch bytes
 
