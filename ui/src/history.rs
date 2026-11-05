@@ -176,9 +176,9 @@ pub unsafe fn flip() {
     let x = x + 8; // (the game's labels stand that far inside their boxes)
     let font = if on(BIGGER_TEXT) { font_up(font, b"Ay\0".as_ptr() as *const i8, i32::MAX, rh, 1, 3) } else { font };
     let bottoms = std::mem::take(&mut BOTTOMS);
-    // (first: screen parameters asked during day processing crash the game; a menu open over the
-    // tab stays on top)
-    if tab == 0 || news::MENU_OPEN {
+    // (first: screen parameters asked during day processing crash the game. A menu open over the
+    // tab is put back over the lists by `flip_hooked`)
+    if tab == 0 {
         return;
     }
     let Some(staff) = profiled_staff().filter(|_| profiled_player().is_some()) else { return };

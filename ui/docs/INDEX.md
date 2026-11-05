@@ -41,6 +41,7 @@ changing code. Add a row in the same step as every fix.
 | `..\NETWORK_PLAN.md` | the cmui block idea for network clients; steps 1-3 (news) done, 4-6 open |
 | `..\NETWORK_NIGHT_PLAN.md`, `..\night2\REPORT.md` | the 2026-10-30 network night (prefetch, Assistant subs); roles and checklist in [testing.md](testing.md) |
 | `..\night4\REPORT.md` | the 2026-10-31 night: all new features single player and network, the host's match day hang |
+| `..\night6\PLAN.md` | the 2026-11-04 single player night: every menu and screen, coach off |
 | `..\scout_stars.md`, `..\assistant_pick.md` | design and facts for those two features |
 | `..\helper_*.md` | static exe findings (addresses, record offsets): `helper_search` (search View popup), `helper_squad` (squad View popup), `helper_match` (match stats, opening a club), `helper_live` (in-match player data), `helper_stats` (season stats Av R / Tck / Drb) |
 | `..\proof\INDEX.md` | proof shots per resolution |

@@ -488,7 +488,9 @@ unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: 
     for (label, p, align) in [(&b"#"[..], 3, 2), (b"MANAGER", 12, 0), (b"RANK", 45, 1), (b"PROGRESS", 52, 0), (b"POINTS", 100, 2)] {
         text_at(col(p), top, top + 24, f(2), MUTED, label, align);
     }
-    let rh = ((list_end - top - 30) / (rows.len() as i32).max(3)).min(h / 7);
+    // (by the rows there are: one manager's career row was a third of the room, his name and club
+    // on top of each other, night 6 E-1 / C-36 / G-11)
+    let rh = ((list_end - top - 30) / (rows.len() as i32).max(1)).min(if alone { h / 10 } else { h / 7 });
     for (k, r) in rows.iter().enumerate() {
         let y = top + 26 + k as i32 * rh;
         let (name, club, total, rank, next, percent, step) = (r[1], r[2], r[3], r[4], r[5], number(r[6]), number(field(r, 7)));
@@ -1094,10 +1096,12 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
         }
         k += 1;
     }
-    // (a goal is not cut by the foot of a column: an empty row pushes it to the next)
+    // (a goal is not cut by the foot of a column: an empty row pushes it to the next; a group's
+    // heading neither: "Special achievements" stood alone at the foot, night 6 E-3)
     let mut k = 0;
     while k + 1 < all.len() {
-        if k % per == per - 1 && all[k].0.is_some() && all[k].2 && !all[k + 1].2 {
+        let heading = all[k].0.is_none() && !all[k].1.is_empty();
+        if k % per == per - 1 && (heading || all[k].0.is_some() && all[k].2 && !all[k + 1].2) {
             all.insert(k, (None, Vec::new(), true));
         }
         k += 1;

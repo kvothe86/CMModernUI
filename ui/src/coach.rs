@@ -71,6 +71,13 @@ static mut BAR_STATUS: Option<i32> = None;
 /// The answers shown per tab (game text, *..* in gold, " | " a new paragraph) and the day they
 /// were asked; the conversation of the Ask tab (question, answer as Claude wrote it).
 static mut ANSWERS: [Vec<u8>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+/// What is drawn with each tab's answer (the structured part of it).
+static mut VISUALS: [Option<Visual>; 4] = [None, None, None, None];
+/// How far each tab's words are scrolled (pixels); the scroll bar as last drawn (its track, the
+/// thumb's top and height, the height in view) and the line height (the mouse wheel's step).
+static mut SCROLL: [i32; 4] = [0; 4];
+static mut SCROLL_BAR: Option<(Rect, i32, i32, i32)> = None;
+static mut TEXT_LINE: i32 = 20;
 static mut DAY: i32 = -1;
 static mut CHAT: Vec<(String, String)> = Vec::new();
 static mut QUESTION: String = String::new();
@@ -86,12 +93,56 @@ static ARRIVED: AtomicBool = AtomicBool::new(false);
 static mut FRAME_TEXTS: Vec<(i32, i32, Vec<u8>)> = Vec::new();
 static mut SCREEN: Vec<String> = Vec::new();
 static mut LAST_MATCH: (Vec<String>, i32, bool) = (Vec::new(), -1, false);
-/// Our next fixture as last seen on the squad or tactics screen.
+/// Our next fixture: of those seen on the squad and tactics screens, the first by date that is
+/// not played yet (a cup match before the league match the screen showed earlier).
 static mut NEXT_FIXTURE: usize = 0;
+/// That match in words, shown on the page (what the coach was told).
+static mut NEXT_LABEL: Vec<u8> = Vec::new();
 static mut OLD_PROC: isize = 0;
 
 unsafe fn today() -> i32 {
     rd::<i16>(TODAY + 2) as i32 * 366 + rd::<i16>(TODAY) as i32
+}
+
+/// A fixture's date, as today(): +0x28 the day of the year, +0x2a the year (the Next Match tab
+/// builds its Date from them, 0x45ccf0). None when they do not read as a date.
+unsafe fn fixture_day(f: usize) -> Option<i32> {
+    if !readable(f, 0x50) {
+        return None;
+    }
+    let (d, y) = (rd::<i16>(f + 0x28) as i32, rd::<i16>(f + 0x2a) as i32);
+    ((0..366).contains(&d) && (1900..2200).contains(&y)).then_some(y * 366 + d)
+}
+
+/// A fixture of `club` seen on a screen: the next one when it comes before the one kept, or that
+/// one is played.
+unsafe fn note_fixture(f: usize, club: usize) {
+    let ours = |f: usize| readable(f, 0x50) && (rd::<usize>(f + 0x1c) == club || rd::<usize>(f + 0x20) == club);
+    if f == 0 || !ours(f) {
+        return;
+    }
+    let kept = Some(NEXT_FIXTURE).filter(|&n| ours(n)).and_then(|n| fixture_day(n));
+    let take = match (fixture_day(f), kept) {
+        (Some(c), Some(n)) => c >= today() && (n < today() || c < n),
+        (Some(c), None) => c >= today(),
+        (None, _) => true, // (no date to go by)
+    };
+    if take {
+        NEXT_FIXTURE = f;
+    }
+}
+
+/// A game day as "12 Nov 2025".
+fn day_text(day: i32) -> String {
+    let (year, mut d) = (day / 366, day % 366);
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    for (m, len) in [31, 28 + leap as i32, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31].into_iter().enumerate() {
+        if d < len {
+            return format!("{} {} {year}", d + 1, MONTHS[m]);
+        }
+        d -= len;
+    }
+    format!("31 Dec {year}")
 }
 
 /// A text the game draws (the text hook).
@@ -164,11 +215,8 @@ pub unsafe fn flip(full_frame: bool) {
             }
         }
         if let Some(club) = human_club_ptr() {
-            let f = assistant::tactics_screen().map_or(0, |ts| assistant::next_fixture(Some(ts), club));
-            let f = if f != 0 { f } else { assistant::next_fixture(None, club) };
-            if f != 0 {
-                NEXT_FIXTURE = f;
-            }
+            note_fixture(assistant::tactics_screen().map_or(0, |ts| assistant::next_fixture(Some(ts), club)), club);
+            note_fixture(assistant::next_fixture(None, club), club);
         }
     }
     if full_frame {
@@ -183,6 +231,11 @@ pub unsafe fn flip(full_frame: bool) {
                 (x1, top, x2, top + h)
             })
         });
+        // (where it goes and from what, when that changes: the bar's order has gone wrong before)
+        static mut WAS: Option<Rect> = None;
+        if std::mem::replace(&mut WAS, BUTTON) != BUTTON {
+            log(&format!("menu bar: Coach button {BUTTON:?}, lowest seen {:?}", seen.map(|s| (s.0, s.1, s.2, s.3))));
+        }
     }
     if OPEN {
         overlay();
@@ -237,7 +290,13 @@ unsafe fn overlay() {
     let size = bar * 70 / 100;
     let tx = left + if draw_crest(&club, left + m * 2, (bar - size) / 2, size) { m * 4 + size } else { m * 2 };
     text_at(tx, 4, bar * 58 / 100, f(6), WHITE, &[&club[..], b" - Coach"].concat(), 0);
-    text_at(tx, bar * 54 / 100, bar - 6, f(3), LIGHT, &to_latin1(&format!("Claude ({}): sees your squad, the next opponent, your last match and the screen you came from", model())), 0);
+    // (the match the coach was told is next, so a wrong one shows)
+    let sub = if NEXT_LABEL.is_empty() {
+        to_latin1(&format!("Claude ({}): sees your squad, the next opponent, your last match and the screen you came from", model()))
+    } else {
+        [&NEXT_LABEL[..], &to_latin1(&format!("   -   Claude ({})", model()))].concat()
+    };
+    text_at(tx, bar * 54 / 100, bar - 6, f(3), LIGHT, &sub, 0);
     let spots = spots();
     let labels: Vec<&str> = TABS.iter().copied().chain(["Back", if TAB == ASK { "New conversation" } else { "Ask again" }]).collect();
     for (k, r) in spots.iter().enumerate() {
@@ -274,7 +333,212 @@ unsafe fn overlay() {
     } else {
         b"No answer yet: Ask again.".to_vec()
     };
-    assistant::report_text(x1 + 24, y1 + 20, x2 - 24, bottom, font, line, &body);
+    let visual = VISUALS[TAB].as_ref().filter(|_| WAITING != Some(TAB));
+    let Some(v) = visual else {
+        scroll_text(x1 + 24, y1 + 20, x2 - 16, bottom, font, line, &body);
+        return;
+    };
+    // the left column: the score, the coach's eleven on a pitch, the bars; the right one: the
+    // cards and his words (the cards go left when nothing else does)
+    let split = x1 + (x2 - x1) * 40 / 100;
+    let (lx1, lx2, rx1, rx2) = (x1 + 20, split, split + 28, x2 - 24);
+    let left_used = v.score.is_some() || !v.xi.is_empty() || !v.bars.is_empty();
+    let mut ly = y1 + 16;
+    if let Some((home, away, hg, ag)) = &v.score {
+        draw_score(lx1, ly, lx2, line * 2, home, away, *hg, *ag);
+        ly += line * 2 + 16;
+    }
+    let bars_h = v.bars.len() as i32 * (line + 6) + if v.bars.is_empty() { 0 } else { line + 8 };
+    if !v.xi.is_empty() {
+        let title = [&b"THE COACH'S XI"[..], if v.formation.is_empty() { b"" } else { b"  -  " }, &v.formation].concat();
+        text_at(lx1, ly, ly + line, f(2), GOLD, &title, 0);
+        let room = bottom - bars_h - (ly + line + 4);
+        // (a pitch is about two thirds as wide as long)
+        let (h, w) = (room.min((lx2 - lx1) * 3 / 2), (room.min((lx2 - lx1) * 3 / 2) * 2 / 3).min(lx2 - lx1));
+        let px = lx1 + (lx2 - lx1 - w) / 2;
+        draw_eleven(px, ly + line + 4, px + w, ly + line + 4 + h, &v.xi);
+        ly += line + 4 + h + 12;
+    }
+    if !v.bars.is_empty() {
+        text_at(lx1, ly, ly + line, f(2), GOLD, if v.bars.iter().all(|b| b.2 < 0.0) { b"SQUAD DEPTH" } else { b"THE MATCH" }, 0);
+        ly += line + 8;
+        for b in &v.bars {
+            draw_bar(lx1, ly, lx2, line, b);
+            ly += line + 6;
+        }
+    }
+    let (cx1, cx2, mut cy) = if left_used { (rx1, rx2, y1 + 16) } else { (lx1, lx2, y1 + 16) };
+    for card in &v.players {
+        if cy + line * 2 + 8 > bottom {
+            break;
+        }
+        draw_card(cx1, cy, cx2, line, card);
+        cy += line * 2 + 14;
+    }
+    let (tx1, ty) = if left_used { (rx1, cy + 8) } else { (rx1, y1 + 20) };
+    scroll_text(tx1, ty, rx2 + 8, bottom, font, line, &body);
+}
+
+/// The coach's words in a box, as `assistant::report_text` lays them out (*..* in gold, " | " a
+/// new paragraph), scrolled by this tab's SCROLL; with a scroll bar at the right when they do not
+/// fit (the mouse wheel and a click on its track move them).
+#[allow(static_mut_refs)]
+unsafe fn scroll_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, line: i32, text: &[u8]) {
+    let space = text_width(font, b"a a") - text_width(font, b"aa");
+    let bar_w = 10;
+    let right = x2 - bar_w - 12;
+    let mut words: Vec<(i32, i32, &[u8], bool)> = Vec::new();
+    let (mut x, mut y) = (x1, 0);
+    for (k, part) in text.split(|&c| c == b'*').enumerate() {
+        for word in part.split(|&c| c == b' ').filter(|w| !w.is_empty()) {
+            if word == b"|" {
+                (x, y) = (x1, y + line * 3 / 2);
+                continue;
+            }
+            let w = text_width(font, word);
+            // (punctuation stays on the word before it)
+            if b".,:)".contains(&word[0]) && x > x1 {
+                x -= space;
+            } else if x + w > right && x > x1 {
+                (x, y) = (x1, y + line);
+            }
+            words.push((x, y, word, k % 2 == 1));
+            x += w + space;
+        }
+    }
+    let (total, view) = (y + line, y2 - y1);
+    let max = (total - view).max(0);
+    SCROLL[TAB] = SCROLL[TAB].clamp(0, max);
+    TEXT_LINE = line;
+    let s = SCROLL[TAB];
+    for (x, y, word, gold) in words {
+        let top = y1 + y - s;
+        if top >= y1 && top + line <= y2 {
+            text_at(x, top, top + line, font, if gold { GOLD } else { LIGHT }, word, 0);
+        }
+    }
+    SCROLL_BAR = None;
+    if max > 0 {
+        let (bx1, bx2) = (x2 - bar_w, x2);
+        fill(bx1, y1, bx2, y2, [0x2a, 0x2e, 0x36]);
+        let thumb = (view * view / total).max(30);
+        let top = y1 + (view - thumb) * s / max;
+        fill(bx1, top, bx2, top + thumb, GOLD);
+        SCROLL_BAR = Some(((bx1 - 6, y1, bx2 + 4, y2), top, thumb, view));
+    }
+}
+
+/// A surname from a name as the coach writes it ("Wim Jacobs", "Jacobs, W").
+fn surname(name: &[u8]) -> &[u8] {
+    match name.iter().position(|&c| c == b',') {
+        Some(at) => name[..at].trim_ascii(),
+        None => name.rsplit(|&c| c == b' ').next().unwrap_or(name),
+    }
+}
+
+/// The coach's eleven on a pitch, as the team report draws one: shirts in the kit, numbers, names
+/// in pills, the slots in gold.
+unsafe fn draw_eleven(x1: i32, y1: i32, x2: i32, y2: i32, xi: &[(Vec<u8>, Vec<u8>)]) {
+    let f = |n: u32| FONT & !0xffff | n;
+    assistant::report_pitch(x1, y1, x2, y2);
+    let kit = KIT_BAND.map(px_rgb).unwrap_or([0xf4; 3]);
+    let number = if kit[0] as u32 * 3 + kit[1] as u32 * 6 + kit[2] as u32 > 1400 { [0x10, 0x12, 0x14] } else { WHITE };
+    let labels: Vec<&[u8]> = xi.iter().map(|p| p.1.as_slice()).collect();
+    let (s, name_h, label_h) = ((y2 - y1) / 30, (y2 - y1) / 28, (y2 - y1) / 36);
+    let room = (x2 - x1) * 30 / 100;
+    for (k, ((name, slot), (across, down))) in xi.iter().zip(assistant::places(&labels)).enumerate() {
+        let (cx, cy) = (x1 + ((x2 - x1) as f32 * across) as i32, y1 + ((y2 - y1) as f32 * down) as i32);
+        let keeper = slot == b"GK";
+        shirt_kit(cx - s, cy - s, cx + s, cy + s, keeper);
+        text_at(cx, cy - s, cy + s, f(3), if keeper { WHITE } else { number }, (k + 1).to_string().as_bytes(), 1);
+        let name_font = if text_width(f(2), surname(name)) > room { f(1) } else { f(2) };
+        let shown = clip_text(name_font, surname(name), room);
+        let half = text_width(name_font, &shown) / 2 + 8;
+        let nx = cx.clamp(x1 + half + 2, x2 - half - 2);
+        let (ny1, ny2) = (cy + s + 2, cy + s + 2 + name_h);
+        pill(nx - half, ny1, nx + half, ny2, [0x14, 0x18, 0x1c]);
+        text_at(nx, ny1, ny2, name_font, WHITE, &shown, 1);
+        text_at(nx, ny2, ny2 + label_h, f(1), GOLD, slot, 1);
+    }
+}
+
+/// A match's score: both crests and names, the goals between them.
+unsafe fn draw_score(x1: i32, y: i32, x2: i32, h: i32, home: &[u8], away: &[u8], hg: i64, ag: i64) {
+    let f = |n: u32| FONT & !0xffff | n;
+    fill(x1, y, x2, y + h, [0x22, 0x26, 0x2c]);
+    let mid = (x1 + x2) / 2;
+    let goals = to_latin1(&format!("{}  -  {}", hg.max(0), ag.max(0)));
+    let gw = text_width(f(5), &goals) / 2 + 16;
+    text_at(mid, y, y + h, f(5), GOLD, &goals, 1);
+    let size = h * 75 / 100;
+    let room = mid - gw - x1 - size - 24;
+    if draw_crest(home, x1 + 10, y + (h - size) / 2, size) {
+        text_at(mid - gw, y, y + h, f(3), WHITE, &clip_text(f(3), home, room), 2);
+    } else {
+        text_at(mid - gw, y, y + h, f(3), WHITE, &clip_text(f(3), home, room + size), 2);
+    }
+    draw_crest(away, x2 - 10 - size, y + (h - size) / 2, size);
+    text_at(mid + gw, y, y + h, f(3), WHITE, &clip_text(f(3), away, room), 0);
+}
+
+/// A bar: ours against theirs (a match: the share of each side, the numbers at the ends), or how
+/// well a line is covered (theirs below 0: 0 to 100, red to green).
+unsafe fn draw_bar(x1: i32, y: i32, x2: i32, h: i32, (label, ours, theirs): &(Vec<u8>, f64, f64)) {
+    let f = |n: u32| FONT & !0xffff | n;
+    let lw = (x2 - x1) * 34 / 100;
+    text_at(x1, y, y + h, f(2), LIGHT, &clip_text(f(2), label, lw - 8), 0);
+    let (bx1, bx2, by1, by2) = (x1 + lw, x2, y + h / 4, y + h * 3 / 4);
+    fill(bx1, by1, bx2, by2, [0x2a, 0x2e, 0x36]);
+    let num = |v: f64| to_latin1(&if v.fract().abs() < 0.05 { format!("{v:.0}") } else { format!("{v:.1}") });
+    if *theirs >= 0.0 {
+        let total = (ours.max(0.0) + theirs.max(0.0)).max(1.0);
+        let split = bx1 + ((bx2 - bx1) as f64 * ours.max(0.0) / total) as i32;
+        fill(bx1, by1, split, by2, GOLD);
+        fill(split, by1, bx2, by2, [0x6a, 0x72, 0x7e]);
+        text_at(bx1 + 6, by1, by2, f(1), [0x10, 0x12, 0x14], &num(*ours), 0);
+        text_at(bx2 - 6, by1, by2, f(1), WHITE, &num(*theirs), 2);
+    } else {
+        let v = ours.clamp(0.0, 100.0);
+        let colour = if v < 40.0 { [0xe0, 0x50, 0x48] } else if v < 70.0 { GOLD } else { [0x4c, 0xc0, 0x7a] };
+        fill(bx1, by1, bx1 + ((bx2 - bx1) as f64 * v / 100.0) as i32, by2, colour);
+        text_at(bx2 - 6, by1, by2, f(1), WHITE, &num(v), 2);
+    }
+}
+
+/// A player the coach singles out: a mark in the colour of his verdict, the crest, the name and
+/// stars, the verdict, his note under them.
+unsafe fn draw_card(x1: i32, y: i32, x2: i32, line: i32, c: &Card) {
+    let f = |n: u32| FONT & !0xffff | n;
+    let h = line * 2 + 4;
+    let (colour, word): ([u8; 3], &[u8]) = match c.verdict.as_str() {
+        "danger" => ([0xe0, 0x50, 0x48], b"DANGER"),
+        "poor" => ([0xe0, 0x50, 0x48], b"POOR"),
+        "sell" => ([0xe0, 0x50, 0x48], b"SELL"),
+        "good" => ([0x4c, 0xc0, 0x7a], b"GOOD"),
+        "develop" => ([0x4c, 0xc0, 0x7a], b"DEVELOP"),
+        "key" => ([0x4c, 0xc0, 0x7a], b"KEY MAN"),
+        "buy" => ([0x5a, 0x9c, 0xe8], b"BUY"),
+        _ => (GOLD, b"WEAK SPOT"),
+    };
+    fill(x1, y, x2, y + h, [0x22, 0x26, 0x2c]);
+    fill(x1, y, x1 + 4, y + h, colour);
+    let size = line * 3 / 2;
+    let mut x = x1 + 14;
+    if !c.club.is_empty() && draw_crest(&c.club, x, y + (h - size) / 2, size) {
+        x += size + 12;
+    }
+    let ww = text_width(f(1), word);
+    text_at(x2 - 10, y + 2, y + line, f(1), colour, word, 2);
+    let name = clip_text(f(3), &c.name, x2 - 30 - ww - x);
+    text_at(x, y + 2, y + line, f(3), WHITE, &name, 0);
+    if c.stars > 0.0 {
+        let star = line * 55 / 100;
+        let sx = x + text_width(f(3), &name) + 12;
+        if sx + 5 * star + 16 < x2 - 20 - ww {
+            stars(sx, y + 2 + (line - star) / 2, star, (c.stars * 40.0) as i32, GOLD);
+        }
+    }
+    text_at(x, y + line, y + h, f(2), GREY, &clip_text(f(2), &c.note, x2 - 10 - x), 0);
 }
 
 /// The mouse (poll_input): None when the coach has nothing to do with it.
@@ -322,6 +586,11 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         }
         redraw = true;
     }
+    // a click on the scroll bar's track: a page up or down
+    if let Some((_, top, thumb, view)) = SCROLL_BAR.filter(|b| released && inside(b.0)) {
+        SCROLL[TAB] += if my < top { -view * 8 / 10 } else if my > top + thumb { view * 8 / 10 } else { 0 };
+        return Some(true);
+    }
     if released {
         match hover {
             Some(k) if k < TABS.len() => {
@@ -335,6 +604,7 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             Some(5) if TAB == ASK => {
                 CHAT.clear();
                 ANSWERS[ASK].clear();
+                VISUALS[ASK] = None;
                 redraw = true;
             }
             Some(5) if WAITING.is_none() => {
@@ -355,6 +625,7 @@ unsafe fn open() {
     if DAY != today() {
         DAY = today();
         ANSWERS.iter_mut().for_each(Vec::clear);
+        VISUALS = [None, None, None, None];
         CHAT.clear();
     }
     OPEN = true;
@@ -368,6 +639,13 @@ unsafe fn open() {
 /// The game window's messages: keys go to the question box while the Ask tab is up.
 extern "system" fn window_proc(hwnd: usize, msg: u32, w: usize, l: isize) -> isize {
     unsafe {
+        // the mouse wheel scrolls the coach's words (three lines a notch)
+        if OPEN && msg == 0x20a {
+            let notches = (w >> 16) as u16 as i16 as i32 / 120;
+            SCROLL[TAB] -= notches * TEXT_LINE * 3;
+            DIRTY = true;
+            return 0;
+        }
         if OPEN && TAB == ASK {
             #[allow(static_mut_refs)]
             match msg {
@@ -406,10 +684,62 @@ unsafe fn hook_keys() {
 
 /// What the coach is told to do, per tab.
 const TASKS: [&str; 3] = [
-    "Brief me for our next match: how the opponent will play and who to stop, their weak spot and how to hurt it, the XI and shape you would pick, the team instructions to set, and individual instructions for two or three players.",
-    "Analyse our last match from its match screen texts in the game data: why the result went the way it did, who stood out for good or bad, and what to change for the next match. If there are no texts of our last match, tell me in one sentence to look at our last match's screen first.",
-    "Write an expanded team report: the best XI and system for this squad, the depth at each position and where we are thin, who is in form and who is not, who to sell or loan out, which positions to strengthen and the profile of player to look for, and which young players to develop.",
+    "Brief me for our next match: how the opponent will play and who to stop, their weak spot and how to hurt it, the XI and shape you would pick, the team instructions to set, and individual instructions for two or three players. \
+     Fill formation and xi with that eleven; players with two or three of their danger men (verdict danger, their club, stars from the scout's report) and their weak spot (verdict weakness); bars empty; score empty.",
+    "Analyse our last match from its match screen texts in the game data: why the result went the way it did, who stood out for good or bad, and what to change for the next match. If there are no texts of our last match, tell me in one sentence to look at our last match's screen first. \
+     Fill score with the two sides as the screen names them and their goals; players with our three or four who stood out (verdict good or poor, note with their match rating when the screen shows it); bars with two to four match stats of the screen (ours, theirs); formation and xi empty.",
+    "Write an expanded team report: the best XI and system for this squad, the depth at each position and where we are thin, who is in form and who is not, who to sell or loan out, which positions to strengthen and the profile of player to look for, and which young players to develop. \
+     Fill formation and xi with the best eleven; bars with Goalkeeper, Defence, Midfield and Attack, ours = how well covered from 0 to 100, theirs = -1; players with whom to sell (verdict sell), what to buy (verdict buy: name = the profile, e.g. a quick DR, club empty, stars 0) and whom to develop (verdict develop); score empty.",
 ];
+
+/// What every answer holds (output_config.format: the API keeps to it): the coach's words and
+/// what cmui draws with them.
+const SCHEMA: &str = r#"{"type":"object","properties":{"text":{"type":"string"},"formation":{"type":"string"},"xi":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"slot":{"type":"string","enum":["GK","SW","DL","DC","DR","WBL","WBR","DMC","ML","MC","MR","AML","AMC","AMR","FC"]}},"required":["name","slot"],"additionalProperties":false}},"players":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"club":{"type":"string"},"verdict":{"type":"string","enum":["danger","weakness","key","good","poor","sell","buy","develop"]},"stars":{"type":"number"},"note":{"type":"string"}},"required":["name","club","verdict","stars","note"],"additionalProperties":false}},"bars":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"ours":{"type":"number"},"theirs":{"type":"number"}},"required":["label","ours","theirs"],"additionalProperties":false}},"score":{"type":"object","properties":{"home":{"type":"string"},"away":{"type":"string"},"home_goals":{"type":"integer"},"away_goals":{"type":"integer"}},"required":["home","away","home_goals","away_goals"],"additionalProperties":false}},"required":["text","formation","xi","players","bars","score"],"additionalProperties":false}"#;
+
+/// What cmui draws with an answer: the coach's eleven on a pitch, player cards, bars, a score.
+#[derive(Default, Clone)]
+struct Visual {
+    formation: Vec<u8>,
+    xi: Vec<(Vec<u8>, Vec<u8>)>,
+    players: Vec<Card>,
+    bars: Vec<(Vec<u8>, f64, f64)>,
+    score: Option<(Vec<u8>, Vec<u8>, i64, i64)>,
+}
+
+#[derive(Clone)]
+struct Card {
+    name: Vec<u8>,
+    club: Vec<u8>,
+    verdict: String,
+    stars: f64,
+    note: Vec<u8>,
+}
+
+impl Visual {
+    fn is_empty(&self) -> bool {
+        self.xi.is_empty() && self.players.is_empty() && self.bars.is_empty() && self.score.is_none()
+    }
+}
+
+/// An answer in the schema: the coach's words, and what goes with them. Not JSON (a model
+/// without structured output): all of it is words.
+fn read_answer(reply: &str) -> (String, Visual) {
+    let Some(j) = parse_json(reply.trim()).filter(|j| matches!(j, Json::Obj(_))) else { return (reply.to_string(), Visual::default()) };
+    let text = |v: &Json| to_latin1(v.str().trim());
+    let mut v = Visual { formation: text(j.get("formation")), ..Default::default() };
+    let xi: Vec<(Vec<u8>, Vec<u8>)> = j.get("xi").arr().iter().map(|p| (text(p.get("name")), text(p.get("slot")))).filter(|p| !p.0.is_empty()).collect();
+    // (an eleven with its keeper, or none: a pitch with three men says nothing)
+    if (7..=11).contains(&xi.len()) && xi.iter().filter(|p| p.1 == b"GK").count() == 1 {
+        v.xi = xi;
+    }
+    v.players = j.get("players").arr().iter().take(6).map(|p| Card { name: text(p.get("name")), club: text(p.get("club")), verdict: p.get("verdict").str().to_string(), stars: p.get("stars").num().clamp(0.0, 5.0), note: game_words(p.get("note").str()).into_iter().filter(|&c| c != b'*').collect() }).filter(|c| !c.name.is_empty()).collect();
+    v.bars = j.get("bars").arr().iter().take(6).map(|b| (text(b.get("label")), b.get("ours").num(), b.get("theirs").num())).filter(|b| !b.0.is_empty()).collect();
+    let s = j.get("score");
+    if !s.get("home").str().is_empty() && !s.get("away").str().is_empty() {
+        v.score = Some((text(s.get("home")), text(s.get("away")), s.get("home_goals").num() as i64, s.get("away_goals").num() as i64));
+    }
+    (j.get("text").str().to_string(), v)
+}
 
 /// A request for a tab, on its own thread; `question` for the Ask tab.
 #[allow(static_mut_refs)]
@@ -422,7 +752,11 @@ unsafe fn ask(tab: usize, question: &str) {
          Put *asterisks* around player and club names. Separate paragraphs with a blank line; a list item starts with \"- \". \
          Give advice the manager can set in the game: formation and positions; team instructions (mentality, passing, tempo, width, closing down, tackling, marking, offside trap, counter attack, playmaker, target man); \
          player instructions (forward runs, run with ball, long shots, through balls, crossing, closing down, tight marking, free role). \
-         Stars are the assistant manager's rating out of 5. Keep the answer under 350 words.\n\nGAME DATA\n{}",
+         Stars are the assistant manager's rating out of 5. \
+         Answer in the JSON format given: text is what you say (under 250 words: the pitch, cards and bars beside it show the rest); \
+         formation and xi an eleven (one GK, a slot each, names exactly as in the game data) when you pick or suggest one, else empty; \
+         players the few you single out (club exactly as in the game data, stars from the data or 0, a short note); \
+         bars only comparisons the task asks for; score only for a match you analyse (else empty names and 0).\n\nGAME DATA\n{}",
         latin1(&game_text(club + 4, 51)),
         game_data(club)
     );
@@ -456,18 +790,23 @@ unsafe fn take_reply() -> bool {
     let Some((tab, reply)) = REPLY.lock().unwrap_or_else(|e| e.into_inner()).take() else { return false };
     WAITING = None;
     match reply {
-        Ok(text) => {
-            log(&format!("coach: answer for {} ({} chars)", TABS[tab], text.len()));
+        Ok(reply) => {
+            let (text, visual) = read_answer(&reply);
+            log(&format!("coach: answer for {} ({} chars, {} in the eleven, {} cards, {} bars)", TABS[tab], text.len(), visual.xi.len(), visual.players.len(), visual.bars.len()));
             ANSWERS[tab] = if tab == ASK {
-                CHAT.push((QUESTION.clone(), text.clone()));
+                // (the conversation keeps the answer as it came: the model goes on in its format)
+                CHAT.push((QUESTION.clone(), reply.clone()));
                 [b"*You:* ".as_slice(), &to_latin1(&QUESTION), b" | ", &game_words(&text)].concat()
             } else {
                 game_words(&text)
             };
+            VISUALS[tab] = Some(visual).filter(|v| !v.is_empty());
+            SCROLL[tab] = 0;
         }
         Err(e) => {
             log(&format!("coach: no answer for {}: {e}", TABS[tab]));
             ANSWERS[tab] = to_latin1(&format!("The coach could not answer: {e}"));
+            VISUALS[tab] = None;
         }
     }
     true
@@ -560,13 +899,20 @@ unsafe fn game_data(club: usize) -> String {
     }
     // the next match, the opponent as our scout sees them
     let fixture = NEXT_FIXTURE;
-    if readable(fixture, 0x50) && (rd::<usize>(fixture + 0x1c) == club || rd::<usize>(fixture + 0x20) == club) {
+    let upcoming = fixture_day(fixture).is_none_or(|d| d >= today());
+    NEXT_LABEL.clear();
+    if !(upcoming && readable(fixture, 0x50) && (rd::<usize>(fixture + 0x1c) == club || rd::<usize>(fixture + 0x20) == club)) {
+        out += "\nNEXT MATCH: not known yet (the manager has not opened the squad screen since the last match)\n";
+    } else {
         let home = rd::<usize>(fixture + 0x1c) == club;
         let opponent = rd::<usize>(fixture + if home { 0x20 } else { 0x1c });
         let comp = rd::<usize>(fixture + 0x14);
         let comp = if readable(comp, 0x55) { latin1(&game_text(comp + 4, 51)).into_owned() } else { String::new() };
         if readable(opponent, 0x1e0 + 80) {
-            out += &format!("\nNEXT MATCH (as last seen on the squad screen): {} {}, {comp}\n", latin1(&game_text(opponent + 4, 51)), if home { "at home" } else { "away" });
+            let when = fixture_day(fixture).map_or(String::new(), |d| format!(", {}", day_text(d)));
+            let name = latin1(&game_text(opponent + 4, 51)).into_owned();
+            NEXT_LABEL = to_latin1(&format!("Next match: {name} {}, {comp}{when}", if home { "at home" } else { "away" }));
+            out += &format!("\nNEXT MATCH: {name} {}, {comp}{when}\n", if home { "at home" } else { "away" });
             let scout = assistant::scout_for(opponent, club);
             let mut lines = scout.split(|&c| c == b'\n');
             let head: Vec<&[u8]> = lines.next().unwrap_or(b"").split(|&c| c == b'\t').collect();
@@ -617,9 +963,10 @@ fn json_string(s: &str) -> String {
 
 fn request_json(model: &str, system: &str, messages: &[(&str, String)]) -> String {
     let messages: Vec<String> = messages.iter().map(|(role, text)| format!("{{\"role\":\"{role}\",\"content\":{}}}", json_string(text))).collect();
-    // (low effort: little thinking before the answer, so it comes in seconds; the default is medium)
+    // (low effort: little thinking before the answer, so it comes in seconds; the default is
+    // medium. The format: the answer as JSON in SCHEMA)
     format!(
-        "{{\"model\":{},\"max_tokens\":8000,\"output_config\":{{\"effort\":\"low\"}},\"system\":{},\"messages\":[{}]}}",
+        "{{\"model\":{},\"max_tokens\":8000,\"output_config\":{{\"effort\":\"low\",\"format\":{{\"type\":\"json_schema\",\"schema\":{SCHEMA}}}}},\"system\":{},\"messages\":[{}]}}",
         json_string(model),
         json_string(system),
         messages.join(",")
@@ -687,6 +1034,112 @@ fn values_of(json: &str, name: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// A JSON value (an answer in SCHEMA).
+#[derive(Debug, Clone, PartialEq)]
+enum Json {
+    Null,
+    Bool(bool),
+    Num(f64),
+    Str(String),
+    Arr(Vec<Json>),
+    Obj(Vec<(String, Json)>),
+}
+
+impl Json {
+    fn get(&self, key: &str) -> &Json {
+        static NULL: Json = Json::Null;
+        match self {
+            Json::Obj(v) => v.iter().find(|e| e.0 == key).map_or(&NULL, |e| &e.1),
+            _ => &NULL,
+        }
+    }
+    fn str(&self) -> &str {
+        if let Json::Str(s) = self { s } else { "" }
+    }
+    fn num(&self) -> f64 {
+        if let Json::Num(n) = self { *n } else { 0.0 }
+    }
+    fn arr(&self) -> &[Json] {
+        if let Json::Arr(v) = self { v } else { &[] }
+    }
+}
+
+fn parse_json(s: &str) -> Option<Json> {
+    let mut i = 0;
+    let v = json_value(s, &mut i)?;
+    skip_space(s, &mut i);
+    (i == s.len()).then_some(v)
+}
+
+fn skip_space(s: &str, i: &mut usize) {
+    while s.as_bytes().get(*i).is_some_and(u8::is_ascii_whitespace) {
+        *i += 1;
+    }
+}
+
+fn json_value(s: &str, i: &mut usize) -> Option<Json> {
+    let b = s.as_bytes();
+    skip_space(s, i);
+    match *b.get(*i)? {
+        b'"' => {
+            let (t, end) = parse_string(s, *i);
+            *i = end;
+            Some(Json::Str(t))
+        }
+        open @ (b'{' | b'[') => {
+            let close = if open == b'{' { b'}' } else { b']' };
+            *i += 1;
+            let (mut obj, mut arr) = (Vec::new(), Vec::new());
+            skip_space(s, i);
+            if b.get(*i) == Some(&close) {
+                *i += 1;
+            } else {
+                loop {
+                    if open == b'{' {
+                        skip_space(s, i);
+                        if b.get(*i) != Some(&b'"') {
+                            return None;
+                        }
+                        let (k, end) = parse_string(s, *i);
+                        *i = end;
+                        skip_space(s, i);
+                        if b.get(*i) != Some(&b':') {
+                            return None;
+                        }
+                        *i += 1;
+                        obj.push((k, json_value(s, i)?));
+                    } else {
+                        arr.push(json_value(s, i)?);
+                    }
+                    skip_space(s, i);
+                    match *b.get(*i)? {
+                        b',' => *i += 1,
+                        c if c == close => {
+                            *i += 1;
+                            break;
+                        }
+                        _ => return None,
+                    }
+                }
+            }
+            Some(if open == b'{' { Json::Obj(obj) } else { Json::Arr(arr) })
+        }
+        _ => {
+            for (word, v) in [("true", Json::Bool(true)), ("false", Json::Bool(false)), ("null", Json::Null)] {
+                if s[*i..].starts_with(word) {
+                    *i += word.len();
+                    return Some(v);
+                }
+            }
+            let start = *i;
+            while b.get(*i).is_some_and(|c| b"+-0123456789.eE".contains(c)) {
+                *i += 1;
+            }
+            s[start..*i].parse().ok().map(Json::Num)
+        }
+    }
 }
 
 /// The text blocks of a Messages API answer.
@@ -783,6 +1236,44 @@ mod tests {
         let body = request_json("claude-haiku-5-5", "Say hi.", &[("user", "Hi".to_string())]);
         let e = post("sk-ant-not-a-key", &body).unwrap_err();
         assert!(e.starts_with("error 401"), "{e}");
+    }
+
+    #[test]
+    fn answers_with_visuals() {
+        let eleven: Vec<String> = ["GK", "DL", "DC", "DC", "DR", "ML", "MC", "MC", "MR", "FC", "FC"].iter().enumerate().map(|(k, s)| format!(r#"{{"name":"P{k}","slot":"{s}"}}"#)).collect();
+        let reply = format!(
+            r#"{{"text":"Start *Kok*.","formation":"4-4-2","xi":[{}],"players":[{{"name":"Bos","club":"Ajax","verdict":"danger","stars":3.5,"note":"quick"}}],"bars":[{{"label":"Shots","ours":12,"theirs":5}}],"score":{{"home":"VVV","away":"Ajax","home_goals":2,"away_goals":-1}}}}"#,
+            eleven.join(",")
+        );
+        let (text, v) = read_answer(&reply);
+        assert_eq!(text, "Start *Kok*.");
+        assert_eq!((v.formation.as_slice(), v.xi.len(), v.xi[0].1.as_slice()), (&b"4-4-2"[..], 11, &b"GK"[..]));
+        assert_eq!((v.players[0].verdict.as_str(), v.players[0].stars), ("danger", 3.5));
+        assert_eq!(v.bars, vec![(b"Shots".to_vec(), 12.0, 5.0)]);
+        assert_eq!(v.score, Some((b"VVV".to_vec(), b"Ajax".to_vec(), 2, -1)));
+        // (no keeper: no pitch; not JSON at all: all of it words)
+        let (_, v) = read_answer(r#"{"text":"x","formation":"","xi":[{"name":"A","slot":"DC"}],"players":[],"bars":[],"score":{"home":"","away":"","home_goals":0,"away_goals":0}}"#);
+        assert!(v.is_empty());
+        assert_eq!(read_answer("Just words.").0, "Just words.");
+        assert_eq!(parse_json(r#"[1, true, null, "a\"b", {}]"#), Some(Json::Arr(vec![Json::Num(1.0), Json::Bool(true), Json::Null, Json::Str("a\"b".into()), Json::Obj(vec![])])));
+        assert_eq!(parse_json("{\"a\":1,}"), None);
+    }
+
+    #[test]
+    fn request_is_json_with_the_format() {
+        let body = request_json("claude-haiku-5-5", "a \"system\"", &[("user", "Hi\n".to_string())]);
+        let j = parse_json(&body).expect("valid JSON");
+        let format = j.get("output_config").get("format");
+        assert_eq!((format.get("type").str(), format.get("schema").get("type").str()), ("json_schema", "object"));
+        assert_eq!(j.get("output_config").get("effort").str(), "low");
+        assert_eq!(j.get("messages").arr()[0].get("content").str(), "Hi\n");
+        assert_eq!(format.get("schema").get("required").arr().len(), 6);
+    }
+
+    #[test]
+    fn days_in_words() {
+        assert_eq!(day_text(2025 * 366 + 315), "12 Nov 2025");
+        assert_eq!(day_text(2024 * 366 + 59), "29 Feb 2024");
     }
 
     #[test]

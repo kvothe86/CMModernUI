@@ -765,13 +765,33 @@ pub static mut MENU_SEEN: bool = false;
 pub unsafe fn menu_check() {
     if MENU_OPEN && !crate::menu_still_shown() {
         MENU_OPEN = false;
+        // (the game closes a menu bar dropdown without drawing what was under it: its dark frame
+        // stayed over the screen, night 6 C-1. The screen drawn again; at most every 2 s, should
+        // the rows' pixel test miss an open menu)
+        redraw_after_menu();
+    }
+}
+
+/// The screen drawn again a moment after a menu closed (the game puts back what was under the
+/// menu after the next screen's first frame too: a menu entry left the old box over the new
+/// screen, night 6 C-1 / C-3). At most every 2 s, should the rows' pixel test miss an open menu.
+unsafe fn redraw_after_menu() {
+    static mut LAST: Option<std::time::Instant> = None;
+    if LAST.is_none_or(|t| t.elapsed().as_secs() >= 2) {
+        let now = std::time::Instant::now();
+        LAST = Some(now);
+        crate::REDRAW_AT = Some(now + std::time::Duration::from_millis(250));
     }
 }
 
 /// The end of a frame: a full frame without menu rows closes the menus.
 pub unsafe fn frame_end(full_frame: bool) {
     if full_frame {
+        let was = MENU_OPEN;
         MENU_OPEN = std::mem::take(&mut MENU_SEEN);
+        if was && !MENU_OPEN {
+            redraw_after_menu();
+        }
     }
 }
 
@@ -876,7 +896,20 @@ fn link_words(words: &mut [Word], links: &mut [Link], lines: &[((i32, i32, i32, 
         cost(p).total_cmp(&cost(q))
     }).unwrap_or(1.0);
     let picks: Vec<(usize, usize, usize)> = boxes.iter().filter_map(|&(l, li)| fit(k, l, li).map(|f| (l, f.1, f.2))).collect();
-    for (l, i, j) in picks {
+    for (l, i, mut j) in picks {
+        // (the fit can end a link a word early at a long line's end: "Newcastle's Josh Thomson."
+        // gave the player "Josh", the card "Josh praised", night 6 D-8 / E-2. The next words
+        // still in the link's own name go with it)
+        let lower = |t: &[u8]| {
+            let t = t.strip_suffix(b".").or(t.strip_suffix(b",")).or(t.strip_suffix(b":")).or(t.strip_suffix(b";")).unwrap_or(t);
+            t.strip_suffix(b"'s").unwrap_or(t).to_ascii_lowercase()
+        };
+        let name: Vec<Vec<u8>> = links[l].name.split(|&c| c == b' ' || c == b',').filter(|p| !p.is_empty()).map(|p| p.to_ascii_lowercase()).collect();
+        while j + 1 < words.len() && words[j + 1].link.is_none() && !words[j + 1].para && name.contains(&lower(&words[j + 1].text))
+            && !words[i..=j].iter().any(|w| lower(&w.text) == lower(&words[j + 1].text))
+        {
+            j += 1;
+        }
         for w in &mut words[i..=j] {
             w.link = Some(l);
         }
@@ -1000,7 +1033,8 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     let card_kinds = [Kind::Transfer, Kind::Record, Kind::MoodUp, Kind::MoodDown];
     let text_bottom = if card_kinds.contains(&what) { c1 - 8 } else { r1 - 8 };
 
-    let space = text_width(lf, b" ").max(4);
+    // (the font's own space is 3 px: "RafaelLosada", "2-1Dutch", night 6 F-4; a quarter line)
+    let space = text_width(lf, b" ").max(4).max(lh / 4);
     let (mut x, mut y) = (left, lines[0].0 .1 + shift);
     for (k, w) in words.iter().enumerate() {
         let ww = text_width(lf, &w.text);
@@ -1057,8 +1091,9 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     });
     match what {
         Kind::Transfer => {
-            // the club it goes to ("to X", else the one not selling) -> the club it leaves ("X's",
-            // "from X"); the player; the fee
+            // the club it leaves ("X's", "from X") -> the club it goes to ("to X", else the one not
+            // selling); the player; the fee (buyer first read "Twente -> VVV" for a move the other
+            // way, night 6 C-4)
             let clubs: Vec<&Link> = ordered.iter().filter(|l| l.club()).collect();
             let seller = clubs.iter().copied().find(|l| owner(l) || before(l).as_deref() == Some(&b"from"[..]));
             let buyer = clubs.iter().copied().find(|l| before(l).as_deref() == Some(&b"to"[..]) && seller.is_none_or(|s| s.object != l.object))
@@ -1067,16 +1102,16 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
             if let Some(b) = buyer {
                 card(label(what).1);
                 let mut cx = left + 6;
-                part(b, &mut cx, size, small, LIGHT);
                 if let Some(s) = seller {
+                    part(s, &mut cx, size, small, LIGHT);
                     let cy = (c1 + c2) / 2;
                     fill(cx, cy - 1, cx + 22, cy + 1, GREY);
                     for i in 0..6 {
                         fill(cx - i + 22, cy - i, cx - i + 23, cy + i + 1, GREY);
                     }
                     cx += 34;
-                    part(s, &mut cx, size, small, LIGHT);
                 }
+                part(b, &mut cx, size, small, LIGHT);
                 if let Some(p) = player {
                     cx += 12;
                     part(p, &mut cx, size / 2, small, WHITE);

@@ -32,6 +32,7 @@ mod assistant;
 mod challenge;
 mod coach;
 mod comp;
+mod report;
 mod history;
 mod news;
 mod prefetch;
@@ -304,7 +305,9 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // dropdown menus (any colour scheme: white and grey in the original, green in others):
         // a row is a short filled panel whose text starts with the five spaces left for the tick;
         // the text hook darkens it (`menu_row`). The frame is the last outline panel before it.
-        if theme && flags & !0x100_0000 == 0x10 && y2 - y1 < 30 {
+        // (the match screen's View menu on Action Zones draws its rows with 0x90: cyan, user
+        // 2026-11-04; trace)
+        if theme && flags & !0x100_0080 == 0x10 && y2 - y1 < 30 {
             ROW_PANEL = (x1, y1, x2, y2);
         } else if theme && flags & 0xff == 0x30 {
             LAST_FRAME = (x1, y1, x2, y2);
@@ -436,11 +439,71 @@ unsafe fn menu_row(x1: i32, y1: i32, x2: i32, y2: i32, colour: &mut u32) {
 }
 /// The newest dropdown row is still on the screen: its two shades (menu_row's fills) at its left
 /// edge. (A menu closes by restoring what was under it, without a full frame that would tell.)
+/// The box of the dropdown menu on screen this frame (its rows, as drawn), None when none is.
+#[allow(static_mut_refs)]
+unsafe fn menu_box() -> Option<(i32, i32, i32, i32)> {
+    let (mx1, _, mx2, _) = MENU_ROW;
+    // (a full frame draws an open menu again: none of its rows in it, no menu. The pixel test
+    // alone took the game's panels, the rows' colour in the theme, for a menu still open after a
+    // menu entry opened the news; its box was put back over the story every frame, night 6 C-1)
+    if FULL_FRAME && !news::MENU_SEEN {
+        return None;
+    }
+    if !news::MENU_OPEN || mx2 <= mx1 || !menu_still_shown() {
+        return None;
+    }
+    let row = MENU_ROW.3 - MENU_ROW.1;
+    let tops = MENU_ROWS.iter().filter(|r| r.0 == mx1).map(|r| r.1);
+    let (top, bottom) = tops.fold((MENU_ROW.1, MENU_ROW.3), |(t, b), y| (t.min(y), b.max(y + row)));
+    Some((mx1, top, mx2 + 1, bottom + 1))
+}
+
+/// The back buffer's pixels in a box: read (`back` None), or those read written back.
+unsafe fn buffer_box((x1, y1, x2, y2): (i32, i32, i32, i32), back: Option<&[u16]>) -> Vec<u16> {
+    let surface = *(BACK_BUFFER as *const *mut usize);
+    let mut out = Vec::new();
+    if surface.is_null() {
+        return out;
+    }
+    let vtable = *surface as *const usize;
+    let lock: extern "system" fn(*mut usize, usize, *mut u8, u32, usize) -> i32 = std::mem::transmute(*vtable.add(25));
+    let unlock: extern "system" fn(*mut usize, usize) -> i32 = std::mem::transmute(*vtable.add(32));
+    let mut desc = [0u8; 108]; // DDSURFACEDESC
+    desc[0] = 108;
+    if lock(surface, 0, desc.as_mut_ptr(), 1, 0) != 0 {
+        return out;
+    }
+    let field = |at: usize| i32::from_le_bytes(desc[at..at + 4].try_into().unwrap());
+    let (h, w, pitch, bits) = (field(8), field(0xc), field(0x10), field(0x24) as usize);
+    let mut k = 0;
+    for py in y1.max(0)..y2.min(h) {
+        for px in x1.max(0)..x2.min(w) {
+            let p = (bits + (py * pitch + px * 2) as usize) as *mut u16;
+            match back {
+                Some(v) => {
+                    if let Some(&c) = v.get(k) {
+                        *p = c;
+                    }
+                }
+                None => out.push(*p),
+            }
+            k += 1;
+        }
+    }
+    unlock(surface, 0);
+    out
+}
+
 pub(crate) unsafe fn menu_still_shown() -> bool {
     let (x1, y1, x2, y2) = MENU_ROW;
-    x2 > x1 && pixel_at(x1 + 2, (y1 + y2) / 2).is_some_and(|p| {
-        [[0x2a, 0x2e, 0x35], [0x30, 0x34, 0x3b]].iter().any(|c| (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 8))
-    })
+    // (both ends of the row: its left edge alone is the menu bar's own colour where a bar
+    // dropdown opens, a closed one was taken for open, night 6 C-1)
+    let row = |x: i32| {
+        pixel_at(x, (y1 + y2) / 2).is_some_and(|p| {
+            [[0x2a, 0x2e, 0x35], [0x30, 0x34, 0x3b]].iter().any(|c| (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 8))
+        })
+    };
+    x2 > x1 + 8 && row(x1 + 2) && row(x2 - 3)
 }
 
 /// The active tab drawn last (its label goes gold).
@@ -1278,6 +1341,17 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             let t = s.trim_ascii();
             // (a dropdown's rows start with five spaces: "Passing" or "Form" there is no profile's)
             let dropdown = s.starts_with(b"     ");
+            // the bar's date ("Wednesday\n1.8.01 EVE"): a line wider than its box makes the game
+            // put it all on one line, cut at both ends ("ednesday1.8", user 2026-11-04): the
+            // largest smaller font every line fits
+            let (sw, sh) = screen();
+            if x2 <= bar_end(sw) && y2 < sh * 15 / 100 && s.contains(&b'\n') {
+                let fits = |f: u32| s.split(|&c| c == b'\n').all(|l| text_width(f, l) <= x2 - x1 - 4);
+                if !fits(font) {
+                    let base = font & !0xffff;
+                    font = (1..font & 0xffff).rev().map(|n| base | n).find(|&f| fits(f)).unwrap_or(base | 1);
+                }
+            }
             #[allow(static_mut_refs)]
             // (real game fonts only: 0xffff0001 and up; empty texts come with font 0, which draws
             // nothing and must never be picked to fit a text)
@@ -1351,6 +1425,10 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             }
             if on(THEME_ON) && (x1, y1, x2, y2) == ROW_PANEL && s.starts_with(b"     ") {
                 menu_row(x1, y1, x2, y2, &mut colour);
+            }
+            // the Match Report's lines: an icon by a goal, a card, an injury, a substitution
+            if on(MATCH_SCREEN) && MATCH {
+                report::note_text(x1, y1, x2, y2, s);
             }
             // (an event line starts with two spaces; a dropdown menu's rows with five, and a menu
             // opened over a match result is no list of events)
@@ -1526,6 +1604,37 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             if on(MENU_FIXES) && [&b"("[..], b")", b"<<<", b">>>"].contains(&t) && x2 - x1 < 120 && y2 - y1 < 120 {
                 arrow(x1, y1, x2, y2, t == b"(" || t == b"<<<", colour);
                 return;
+            }
+            // the squad's Ability view is built on Selection's layout: its title too (night 6 C-12)
+            if on(SEARCH_ABILITY) && SQUAD_ABILITY && t.trim_ascii() == b"Selection Info" {
+                let c = colour & 0xffff;
+                let rgb = [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8];
+                put(x1, y1, x2, y2, 0xc, font, rgb, "Ability");
+                return;
+            }
+            // a list's pager ". - Pg 1/2 + /": the game's own font has first / previous / next /
+            // last arrows there, cmui's fonts the plain signs (night 6 A2). "." starts the row;
+            // "-", "+", "/" are the pager's only on that row (the search filter has "-" / "+")
+            // (previous is "*", which the stats table's rule below made "-"; Manager Stats' pager
+            // has no "." : its row is known by its "Pg x/y" too, from the frame before. Night 6 R6)
+            static mut PAGER_ROW: i32 = i32::MIN;
+            static mut PG_ROW: i32 = i32::MIN;
+            if t.starts_with(b"Pg ") {
+                PG_ROW = y1;
+            }
+            if on(MENU_FIXES) && x2 - x1 < 120 && y2 - y1 < 60 && [&b"."[..], b"*", b"-", b"+", b"/"].contains(&t) {
+                if t == b"." {
+                    PAGER_ROW = y1;
+                }
+                if y1 == PAGER_ROW || y1 == PG_ROW {
+                    let code = match t { b"." => 0xE892, b"*" | b"-" => 0xE76B, b"+" => 0xE76C, _ => 0xE893 };
+                    let size = (y2 - y1) * 55 / 100;
+                    // (the game's colour: grey on a page with no way further)
+                    let c = colour & 0xffff;
+                    let rgb = [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8];
+                    draw_icon(code, (x1 + x2) / 2, y1 + (y2 - y1 - size) / 2, size, rgb);
+                    return;
+                }
             }
             // the stats table's buttons: "*" back to the first columns, "+" the next ones ("<<" and
             // ">>" in the Traditional font)
@@ -1928,10 +2037,7 @@ fn appearances_add_up() {
 unsafe fn squad_table_heads() {
     const LINE: [u8; 3] = [0x34, 0x38, 0x40];
     let mut rows = std::mem::take(&mut TABLE_ROWS);
-    // (a full frame draws an open dropdown too, before this pass: not over it)
-    if news::MENU_SEEN {
-        return;
-    }
+    // (an open dropdown is put back over all of the flip pass: `flip_hooked`)
     rows.sort_by_key(|r| (r.0, r.2));
     for column in rows.chunk_by(|a, b| a.0 == b.0) {
         let (first, last) = (column[0], column[column.len() - 1]);
@@ -2078,23 +2184,21 @@ static mut SIDEBAR_ITEM_FONT: Option<u32> = None;
 // news::pointer does).
 type Rect = (i32, i32, i32, i32);
 /// Game Options' box as the game built it: seen this frame, in force; the widget moved and where
-/// to; whether it was drawn this frame.
+/// to.
 static mut OPTIONS_SEEN: Option<Rect> = None;
 static mut OPTIONS_HOME: Option<Rect> = None;
 static mut OPTIONS_MOVED: Option<(usize, Rect)> = None;
-static mut OPTIONS_DRAWN: bool = false;
 /// cmui's buttons above it (from the last full frame).
 static mut EXTRA_BUTTONS: i32 = 0;
 /// The colour of the bar's plain buttons (the brightest seen: Game Options is the game's gold),
 /// which cmui's own are drawn in.
 pub(crate) static mut BAR_WHITE: u32 = 0;
 
-/// How far Game Options is drawn under its own box (none once its widget is moved).
+/// How far Game Options is drawn under its own box. (The game draws the bar from its own layout,
+/// not from the widget: moving the widget moves its click area and menu, the drawing moves here.
+/// Seen 2026-11-04: widget moved, the button still drawn in its old place.)
 unsafe fn options_shift() -> i32 {
-    match (OPTIONS_HOME, OPTIONS_MOVED) {
-        (Some(o), None) => EXTRA_BUTTONS * (o.3 - o.1 + 4),
-        _ => 0,
-    }
+    OPTIONS_HOME.map_or(0, |o| EXTRA_BUTTONS * (o.3 - o.1 + 4))
 }
 
 /// The first place for a cmui button under the bar, `lowest` the lowest button seen: Game
@@ -2102,8 +2206,31 @@ unsafe fn options_shift() -> i32 {
 /// Options then needs under cmui's buttons.
 pub(crate) unsafe fn bar_slot(lowest: Rect) -> (i32, i32) {
     match OPTIONS_HOME {
-        Some(home) if home == lowest || OPTIONS_MOVED.is_some_and(|m| m.1 == lowest) => (home.1, home.3 - home.1 + 4),
+        Some(home) if home == lowest || options_lower(lowest) => (home.1, home.3 - home.1 + 4),
         _ => (lowest.3 + 4, 0),
+    }
+}
+
+/// Game Options' own box one or two buttons under its home: where it goes, also before cmui's
+/// buttons are counted (with its menu open the game draws it at its moved widget: taken for its
+/// home, cmui's buttons went under it until a click elsewhere, user 2026-11-04).
+/// (Any box in its column below its home: with its menu open the game's box is not exactly the
+/// moved one, an exact match let it slip, 5A9CD5. Another screen's bar with Game Options lower
+/// keeps the old home: it is drawn where the game has it then and cmui's buttons go under it.)
+unsafe fn options_lower(r: Rect) -> bool {
+    OPTIONS_HOME.is_some_and(|o| (r.0 - o.0).abs() <= 8 && r.1 > o.1 + (o.3 - o.1) / 2)
+}
+
+#[cfg(test)]
+#[test]
+fn game_options_moved_box() {
+    unsafe {
+        OPTIONS_HOME = Some((10, 585, 110, 663)); // (1680x1050: 78 high, a button 82 apart)
+        // (any box of its column below its home: also the open menu's box, not exactly the moved one)
+        assert!(options_lower((10, 667, 110, 745)) && options_lower((10, 749, 110, 827)) && options_lower((12, 751, 110, 830)));
+        assert!(!options_lower((10, 585, 110, 663)) && !options_lower((10, 500, 110, 578)) && !options_lower((200, 749, 300, 827)));
+        assert_eq!(bar_slot((10, 749, 110, 827)), (585, 82));
+        OPTIONS_HOME = None;
     }
 }
 
@@ -2114,8 +2241,12 @@ pub(crate) fn bar_lit((x1, y1, x2, y2): Rect) {
     fill(x1, y1 + 6, x1 + 3, y2 - 5, GOLD);
 }
 
-/// The pointer over the moved Game Options: on its own box for the game.
+/// The pointer over the moved Game Options: on its own box for the game (only while its widget
+/// could not be moved: a moved widget takes the click where it is).
 unsafe fn options_pointer(mx: i32, my: i32) -> Option<(i32, i32)> {
+    if OPTIONS_MOVED.is_some() {
+        return None;
+    }
     let (o, s) = (OPTIONS_HOME?, options_shift());
     (s > 0 && (o.0..=o.2).contains(&mx) && (o.1 + s..=o.3 + s).contains(&my)).then_some((mx, my - s))
 }
@@ -2135,13 +2266,14 @@ unsafe fn widget_at(r: Rect) -> Option<usize> {
 #[allow(static_mut_refs)]
 unsafe fn options_flip(full_frame: bool, placed: bool) {
     if !placed {
-        // (a box other than the one it was moved to: the screen built its bar again)
-        if let Some(o) = OPTIONS_SEEN.take() {
+        // (another box than its own: the screen built its bar again)
+        if let Some(o) = OPTIONS_SEEN.take().filter(|&o| OPTIONS_HOME != Some(o)) {
+            log(&format!("menu bar: Game Options' home {:?} -> {o:?}", OPTIONS_HOME));
             (OPTIONS_HOME, OPTIONS_MOVED) = (Some(o), None);
         }
-        if full_frame && !std::mem::take(&mut OPTIONS_DRAWN) {
-            (OPTIONS_HOME, OPTIONS_MOVED) = (None, None);
-        }
+        // (its home is kept through frames without it: one around opening its menu lost it, and
+        // the next took its moved box for its home, cmui's buttons under it from then on,
+        // 2026-11-04. Another screen's bar with it elsewhere sets a new home)
         return;
     }
     if !full_frame {
@@ -2155,15 +2287,25 @@ unsafe fn options_flip(full_frame: bool, placed: bool) {
     let Some(home) = OPTIONS_HOME else { return };
     let s = extra * (home.3 - home.1 + 4);
     let target = (home.0, home.1 + s, home.2, home.3 + s);
+    // (a widget table built again since: its widget back in its own box)
+    let box_of = |w: usize| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i));
+    if OPTIONS_MOVED.is_some_and(|(w, t)| box_of(w) != [t.0, t.1, t.2, t.3]) {
+        OPTIONS_MOVED = None;
+    }
     let now = OPTIONS_MOVED.map_or(home, |m| m.1);
     if now != target {
-        if let Some(w) = OPTIONS_MOVED.map(|m| m.0).filter(|&w| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i)) == [now.0, now.1, now.2, now.3]).or_else(|| widget_at(now)) {
+        if let Some(w) = OPTIONS_MOVED.map(|m| m.0).or_else(|| widget_at(now)) {
             for (i, v) in [target.0, target.1, target.2, target.3].into_iter().enumerate() {
                 *((w + 0x10 + 4 * i) as *mut i32) = v;
             }
             OPTIONS_MOVED = (s != 0).then_some((w, target));
-            REDRAW = true;
-            log(&format!("menu bar: Game Options' widget moved {s} down"));
+            // (no redraw: its drawing is moved already, only its click area moves here. Some
+            // screens build their widgets again on every redraw, the pre-match screen: a redraw
+            // here moved it again for ever, the bar and the pointer flickering, 2026-11-04)
+            static mut LOGGED: i32 = 0;
+            if std::mem::replace(&mut LOGGED, s) != s {
+                log(&format!("menu bar: Game Options' widget moved {s} down"));
+            }
         } else if s != 0 {
             static mut SAID: bool = false;
             if !std::mem::replace(&mut SAID, true) {
@@ -2205,6 +2347,14 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     }
     let options = label.contains("options");
     let own = label == "coach" || label.contains("challenge");
+    // (another of the game's buttons in Game Options' home: "Change Player" came into the bar,
+    // Game Options one lower. The old home kept, CM Challenge was drawn over Change Player and
+    // Game Options' click went to it, night 6 B1-02 / D-18. The home is found again)
+    if let Some(o) = OPTIONS_HOME.filter(|o| !options && !own && (x1 - o.0).abs() <= 8 && (y1 - o.1).abs() < (o.3 - o.1) / 2) {
+        log(&format!("menu bar: {label:?} in Game Options' home {o:?}, home dropped"));
+        (OPTIONS_HOME, OPTIONS_MOVED) = (None, None);
+        REDRAW = true;
+    }
     if !options && !own && !label.contains("have news") && !label.contains("waiting") {
         let bright = |c: u32| (c >> 11 & 31) * 2 + (c >> 5 & 63) + (c & 31) * 2;
         if bright(c) > bright(BAR_WHITE) {
@@ -2215,9 +2365,8 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     // pointer on its own box, which is cmui's button now: then in the colour it had off it)
     static mut OPTIONS_COLOUR: [u8; 3] = [0; 3];
     let (y1, y2, rgb) = if options {
-        OPTIONS_DRAWN = true;
         // (its widget moved: the game draws it there itself)
-        if OPTIONS_MOVED.is_some_and(|m| m.1 == (x1, y1, x2, y2)) {
+        if OPTIONS_MOVED.is_some_and(|m| m.1 == (x1, y1, x2, y2)) || options_lower((x1, y1, x2, y2)) {
             (y1, y2, rgb)
         } else {
             OPTIONS_SEEN = Some((x1, y1, x2, y2));
@@ -2682,6 +2831,9 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // over its lower rows, "Nort", "Ocea" cut off, 2026-10-30)
         news::menu_check();
         REDRAW |= std::mem::replace(&mut CLICK_CHECK, released) && !news::MENU_OPEN;
+        if REDRAW_AT.is_some_and(|t| std::time::Instant::now() >= t) {
+            (REDRAW_AT, REDRAW) = (None, true);
+        }
         if std::mem::take(&mut REDRAW) {
             if trace() {
                 log("cmui redraw (poll)");
@@ -3375,6 +3527,11 @@ extern "C" fn flip(left: i32, top: i32, right: i32, bottom: i32) {
 
 fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
     unsafe {
+        // an open dropdown menu, as the game drew it: put back over all cmui draws in this pass,
+        // before the frame is shown (the info strip over the Action menu, the news story over the
+        // manager's menu, user's shots 2026-11-04; skipping overlays instead left tables without
+        // their grid and lists)
+        let menu = menu_box().map(|b| (b, buffer_box(b, None)));
         #[allow(static_mut_refs)]
         if !std::mem::take(&mut STATS_SEEN) {
             STATS_COLS.clear();
@@ -3408,6 +3565,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         tactics_labels();
         let full_frame = FULL_FRAME; // (match_overlays takes it)
         match_overlays();
+        if on(MATCH_SCREEN) {
+            report::flip();
+        }
         if on(NEWS) {
             news::mark_button(FULL_FRAME);
         }
@@ -3509,6 +3669,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
                 fill(sw / 2 - 170, y1, sw / 2 + 170, y2, [0x26, 0x2a, 0x31]);
                 text_at(sw / 2, y1, y2, SMALL_FONT.unwrap_or(0xffff0001), GOLD, b"Waiting for the host ...", 1);
             }
+        }
+        if let Some((b, pixels)) = menu {
+            buffer_box(b, Some(&pixels));
         }
         let_picture_through(left, top, right, bottom);
         game::<extern "C" fn(i32, i32, i32, i32)>(FLIP_RECT)(left, top, right, bottom);
@@ -4016,7 +4179,9 @@ static mut OVERVIEW: bool = false;
 static mut OVERVIEW_SEEN: bool = false;
 /// The match screen's open tab ("Match Overview", "Latest Scores" ...), as last drawn.
 static mut MATCH_TAB: Vec<u8> = Vec::new();
-static mut REDRAW: bool = false;
+pub(crate) static mut REDRAW: bool = false;
+/// A redraw asked for later (`news::redraw_after_menu`).
+pub(crate) static mut REDRAW_AT: Option<std::time::Instant> = None;
 static mut MATCH_SIDES: Vec<(Vec<u8>, (i32, i32, i32, i32))> = Vec::new();
 static mut MATCH_SCORES: Vec<((i32, i32, i32, i32), Vec<u8>)> = Vec::new();
 /// The aggregate of a two-legged tie ("1-2", this match's home side first), taken from the title
@@ -6361,9 +6526,16 @@ unsafe fn no_club_tab_box() {
 
 /// A club's Landmarks: its rows a page come from the list's height, which a tall screen takes past
 /// the 30 an area may have ("Area.cpp 507", 0x403425). At most 30, where the pages are counted and
-/// where the list is made; the new code fits in the place of the old.
+/// where the list is made; the new code fits in the place of the old. The same on the Match
+/// Report's text (draw_match_report_panel 0x721000: rows = (height - 16) / line for
+/// gui_add_text_area; user 2026-11-04, the box and an empty Match Report). A scan of the exe for
+/// that pattern before gui_add_text_area / add_area finds only these two.
 unsafe fn landmarks_rows() {
-    const SITES: [(usize, &[u8], &[u8]); 2] = [
+    const SITES: [(usize, &[u8], &[u8]); 4] = [
+        // mov esi, eax; and esi, 0xff -> push 30; pop esi; cmp eax, esi; cmovl esi, eax
+        (0x72109f, &[0x8b, 0xf0, 0x81, 0xe6, 0xff, 0, 0, 0], &[0x6a, 0x1e, 0x5e, 0x3b, 0xc6, 0x0f, 0x4c, 0xf0]),
+        // mov edi, eax; and edi, 0xff -> push 30; pop edi; cmp eax, edi; cmovl edi, eax
+        (0x72122d, &[0x8b, 0xf8, 0x81, 0xe7, 0xff, 0, 0, 0], &[0x6a, 0x1e, 0x5f, 0x3b, 0xc7, 0x0f, 0x4c, 0xf8]),
         // mov ecx, eax; and ecx, 0xff -> push 30; pop ecx; cmp eax, ecx; cmovl ecx, eax
         (0x46a604, &[0x8b, 0xc8, 0x81, 0xe1, 0xff, 0, 0, 0], &[0x6a, 0x1e, 0x59, 0x3b, 0xc1, 0x0f, 0x4c, 0xc8]),
         // mov ebx, eax; movsx eax, [..]; and ebx, 0xff -> push 30; pop ebx; cmp eax, ebx; cmovl ebx, eax; movsx eax, [..]
@@ -6375,6 +6547,29 @@ unsafe fn landmarks_rows() {
             VirtualProtect(at as *mut u8, new.len(), 0x40, &mut protect);
             std::ptr::copy_nonoverlapping(new.as_ptr(), at as *mut u8, new.len());
             VirtualProtect(at as *mut u8, new.len(), protect, &mut protect);
+        }
+    }
+    // the Match Report's list itself: rows = (bottom - top) / the line of font 2, kept in a byte
+    // with no `and 0xff` (the scan above missed it; the box stayed, user 2026-11-04). No room for
+    // the cap in place: the four pushes and the store go to a stub that caps at 30 first.
+    const LIST: usize = 0x72146f + 3; // after cdq; idiv ecx
+    // push -1; push ebp; push 1; push ebp; mov [esp + 0x48], al
+    const LIST_OLD: [u8; 10] = [0x6a, 0xff, 0x55, 0x6a, 0x01, 0x55, 0x88, 0x44, 0x24, 0x48];
+    if std::slice::from_raw_parts(LIST as *const u8, 10) == LIST_OLD {
+        let stub = VirtualAlloc(0, 32, 0x3000, 0x40);
+        if !stub.is_null() {
+            // the pushes; cmp eax, 30; jle +5; mov eax, 30; the store; jmp back
+            let mut code = vec![0x6a, 0xff, 0x55, 0x6a, 0x01, 0x55, 0x83, 0xf8, 0x1e, 0x7e, 0x05, 0xb8, 0x1e, 0, 0, 0, 0x88, 0x44, 0x24, 0x48, 0xe9];
+            let back = (LIST + 10) as i32 - (stub as i32 + code.len() as i32 + 4);
+            code.extend_from_slice(&back.to_le_bytes());
+            std::ptr::copy_nonoverlapping(code.as_ptr(), stub, code.len());
+            let mut jump = vec![0xe9];
+            jump.extend_from_slice(&(stub as i32 - (LIST as i32 + 5)).to_le_bytes());
+            jump.extend_from_slice(&[0x90; 5]);
+            let mut protect = 0;
+            VirtualProtect(LIST as *mut u8, jump.len(), 0x40, &mut protect);
+            std::ptr::copy_nonoverlapping(jump.as_ptr(), LIST as *mut u8, jump.len());
+            VirtualProtect(LIST as *mut u8, jump.len(), protect, &mut protect);
         }
     }
 }
@@ -6482,6 +6677,9 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             }
             patch_call(DRAW_SCREEN, 800, BLIT_PICTURE, background as usize);
             patch_call(DRAW_SCREEN, 800, FLIP_RECT, flip as usize);
+            // (a scroll bar being dragged stays in the game's style: Area::draw_scrollbar draws
+            // it without the panels `news::scrollbars` restyles; sending Area::scroll_rows' flip
+            // through the flip pass did not change that, 2026-11-04, left so on the user's word)
             patch_calls(AREA_DRAW, 816, DRAW_LINE, no_grid_line as usize, 2);
             patch_calls(GUIO_DRAW, 1680, DRAW_GLYPH, glyph as usize, 5);
             patch_call(OTHER_ITEM_CALL, 5, ADD_ITEM, other_item as usize);

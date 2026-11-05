@@ -911,7 +911,7 @@ fn line_rank(positions: &[u8]) -> usize {
 
 /// Where each player of an eleven stands, from the slots' labels: parts of the pitch across and
 /// down, his own goal at the bottom. The game's spots (`SPOTS`), several on one spot side by side.
-fn places(labels: &[&[u8]]) -> Vec<(f32, f32)> {
+pub(crate) fn places(labels: &[&[u8]]) -> Vec<(f32, f32)> {
     let name = |l: &[u8]| -> Vec<u8> {
         match l {
             b"DM" => b"DMC".to_vec(),
@@ -932,7 +932,7 @@ fn places(labels: &[&[u8]]) -> Vec<(f32, f32)> {
 }
 
 /// A pitch as the tactics screen has it: dark stripes, thin lines, the goal at the bottom his own.
-unsafe fn report_pitch(x1: i32, y1: i32, x2: i32, y2: i32) {
+pub(crate) unsafe fn report_pitch(x1: i32, y1: i32, x2: i32, y2: i32) {
     let (w, h) = (x2 - x1, y2 - y1);
     for k in 0..10 {
         fill(x1, y1 + h * k / 10, x2, y1 + h * (k + 1) / 10, if k % 2 == 0 { PITCH_GRASS } else { PITCH_STRIPE });
@@ -1232,7 +1232,13 @@ impl Eye {
     /// How he reads a player's fit for a slot: off by up to (20 - Tactics) / 4, fixed.
     unsafe fn seen_fit(&self, c: &Candidate, label: &[u8]) -> i32 {
         let err = hash(self.id, rd::<i32>(c.staff), label) * (20.0 - self.reading).max(0.0) / 4.0;
-        ((fit(c.player, label) as f64 + err).round() as i32).clamp(1, 20)
+        let real = fit(c.player, label);
+        // (no misreading of a place he cannot play at all: the error lifted VVV's keeper Roox to
+        // DL, night 6 C-16)
+        if real <= 3 {
+            return real.max(1);
+        }
+        ((real as f64 + err).round() as i32).clamp(1, 20)
     }
 
     unsafe fn condition_factor(&self, c: &Candidate) -> f64 {
@@ -1249,7 +1255,11 @@ impl Eye {
     }
 
     unsafe fn score(&self, c: &Candidate, label: &[u8]) -> f64 {
-        c.judged * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c)
+        // (a keeper never plays outfield: with VVV's two full backs rested Roox, a keeper, went
+        // to DL on fit 1, night 6 C-16; an outfield player out of position is still the better
+        // choice, so the keeper's score is all but nothing there)
+        let keeper_out = label != b"GK" && rd::<i8>(c.player + GK) >= 15;
+        c.judged * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c) * if keeper_out { 0.001 } else { 1.0 }
     }
 }
 
