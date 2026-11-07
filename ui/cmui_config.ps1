@@ -37,7 +37,12 @@ $switches = @(
     @('modern_buttons', 'Modern Buttons', 'Grey buttons, dropdowns and list cells in steel blue, column headers flat.'),
     @('challenge', 'CM Challenge', 'Network game: a button under the menu bar opens the managers'' league.'),
     @('career_goals', 'Career Goals', 'CM Challenge: ten goals for a whole career per manager, picked by the host. Needs CM Challenge.'),
-    @('coach', 'Coach', '1680x1050 and up: Claude as coach (briefing, match analysis, team report, questions). Needs claude_api_key in cmui.ini.')
+    @('coach', 'Coach', '1680x1050 and up: Claude as coach (briefing, match analysis, team report, questions). Needs claude_api_key in cmui.ini.'),
+    @('weather_icons', 'Weather Icons', 'An icon for the match weather (sun, rain, snow, wind) where the game names it.'),
+    @('form_timeline', 'Form', 'The last five results as W, D and L pills in the club header.'),
+    @('match_card', 'Match Card', 'Before your match: both clubs, their places, last five and meetings this season.'),
+    @('season_review', 'Season Review', 'On 1 July a card on your season just over: place, record, stars, signings.'),
+    @('national_pool', 'National Pool', 'National team: every player of the country in the Assistant menu, + to the Short List. Needs Assistant Pick.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),
@@ -51,7 +56,7 @@ foreach ($l in $lines) { if ($l -match '^\s*([^=]+?)\s*=\s*(.*?)\s*$') { $values
 $dark, $light = [Drawing.Color]::FromArgb(0x1a, 0x1c, 0x20), [Drawing.Color]::FromArgb(0xd8, 0xdc, 0xe2)
 $form = New-Object Windows.Forms.Form
 $form.Text = "cmui settings - $Ini"
-$form.ClientSize = New-Object Drawing.Size(640, 596)
+$form.ClientSize = New-Object Drawing.Size(640, 647)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -63,7 +68,7 @@ $tips.AutoPopDelay = 20000
 
 # what the switch under the mouse does (the same text as its tooltip)
 $help = New-Object Windows.Forms.Label
-$help.Location = New-Object Drawing.Point(24, 296)
+$help.Location = New-Object Drawing.Point(24, 347)
 $help.Size = New-Object Drawing.Size(592, 66)
 $help.BorderStyle = 'FixedSingle'
 $help.Padding = New-Object Windows.Forms.Padding(6)
@@ -85,22 +90,22 @@ function Add-Box($item, $x, $y, $on) {
 }
 for ($i = 0; $i -lt $switches.Count; $i++) {
     $name = $switches[$i][0]
-    # (three columns of eleven: the window is 640 wide)
-    Add-Box $switches[$i] (24 + 205 * [math]::Floor($i / 11)) (14 + 25 * ($i % 11)) ($values[$name] -ne '0')
+    # (three columns of thirteen: the window is 640 wide; 37 switches since 2026-11-07)
+    Add-Box $switches[$i] (24 + 205 * [math]::Floor($i / 13)) (14 + 25 * ($i % 13)) ($values[$name] -ne '0')
 }
 for ($i = 0; $i -lt $extras.Count; $i++) {
-    Add-Box $extras[$i] (24 + 300 * $i) 374 ($values[$extras[$i][0]] -eq '1')
+    Add-Box $extras[$i] (24 + 300 * $i) 425 ($values[$extras[$i][0]] -eq '1')
 }
 
 $opacity = 30
 if ($values['background_opacity'] -match '^\d+$') { $opacity = [math]::Min([int]$values['background_opacity'], 100) }
 $label = New-Object Windows.Forms.Label
-$label.Location = New-Object Drawing.Point(24, 412)
+$label.Location = New-Object Drawing.Point(24, 463)
 $label.Size = New-Object Drawing.Size(230, 24)
 $label.Text = "Background opacity: $opacity %"
 $form.Controls.Add($label)
 $slider = New-Object Windows.Forms.TrackBar
-$slider.Location = New-Object Drawing.Point(260, 406)
+$slider.Location = New-Object Drawing.Point(260, 457)
 $slider.Size = New-Object Drawing.Size(350, 40)
 $slider.Minimum, $slider.Maximum, $slider.TickFrequency, $slider.Value = 0, 100, 10, $opacity
 $slider.Add_ValueChanged({ $label.Text = "Background opacity: $($slider.Value) %" })
@@ -111,32 +116,32 @@ $form.Controls.Add($slider)
 $oldKey = [string]$values['claude_api_key']
 $script:dropKey = $false
 $keyLabel = New-Object Windows.Forms.Label
-$keyLabel.Location = New-Object Drawing.Point(24, 456)
+$keyLabel.Location = New-Object Drawing.Point(24, 507)
 $keyLabel.Size = New-Object Drawing.Size(230, 24)
 function Set-KeyLabel { $keyLabel.Text = if ($oldKey -and -not $script:dropKey) { "Claude API key (saved ...$($oldKey.Substring([math]::Max(0, $oldKey.Length - 4))))" } else { 'Claude API key (none)' } }
 Set-KeyLabel
 $form.Controls.Add($keyLabel)
 $keyBox = New-Object Windows.Forms.TextBox
-$keyBox.Location = New-Object Drawing.Point(260, 454)
+$keyBox.Location = New-Object Drawing.Point(260, 505)
 $keyBox.Size = New-Object Drawing.Size(250, 24)
 $keyBox.UseSystemPasswordChar = $true
 $tips.SetToolTip($keyBox, 'Paste a new key here (sk-ant-...). Left empty, the saved key stays. The Coach needs it; it is read when the game starts.')
 $form.Controls.Add($keyBox)
 $clearKey = New-Object Windows.Forms.Button
 $clearKey.Text = 'Remove'
-$clearKey.Location = New-Object Drawing.Point(524, 452)
+$clearKey.Location = New-Object Drawing.Point(524, 503)
 $clearKey.Size = New-Object Drawing.Size(92, 28)
 $clearKey.Add_Click({ $script:dropKey = $true; $keyBox.Text = ''; Set-KeyLabel })
 $tips.SetToolTip($clearKey, 'Remove the saved key on Save: the Coach is off then.')
 $form.Controls.Add($clearKey)
 $modelLabel = New-Object Windows.Forms.Label
-$modelLabel.Location = New-Object Drawing.Point(24, 492)
+$modelLabel.Location = New-Object Drawing.Point(24, 543)
 $modelLabel.Size = New-Object Drawing.Size(230, 24)
 $modelLabel.Text = 'Coach model'
 $form.Controls.Add($modelLabel)
 $model = New-Object Windows.Forms.ComboBox
 $model.DropDownStyle = 'DropDownList'
-$model.Location = New-Object Drawing.Point(260, 490)
+$model.Location = New-Object Drawing.Point(260, 541)
 $model.Size = New-Object Drawing.Size(250, 24)
 $models = @('claude-haiku-5-5', 'claude-sonnet-5-5')
 $current = if ($values['claude_model']) { $values['claude_model'] } else { 'claude-haiku-5-5' }
@@ -147,7 +152,7 @@ $tips.SetToolTip($model, 'Haiku 5.5: fast and cheapest (about 0.1-0.2 cent an an
 $form.Controls.Add($model)
 
 $note = New-Object Windows.Forms.Label
-$note.Location = New-Object Drawing.Point(24, 528)
+$note.Location = New-Object Drawing.Point(24, 579)
 $note.Size = New-Object Drawing.Size(380, 52)
 $note.Text = "Switches, key and model count from the next start of the game. Opacity counts from the next screen. A switch the game's exe has off stays off."
 $form.Controls.Add($note)
@@ -177,14 +182,14 @@ function Save-Ini {
 
 $save = New-Object Windows.Forms.Button
 $save.Text = 'Save'
-$save.Location = New-Object Drawing.Point(420, 548)
+$save.Location = New-Object Drawing.Point(420, 599)
 $save.Size = New-Object Drawing.Size(92, 32)
 $save.BackColor = [Drawing.Color]::FromArgb(0x8a, 0x70, 0x34)
 $save.Add_Click({ Save-Ini; $form.Close() })
 $form.Controls.Add($save)
 $cancel = New-Object Windows.Forms.Button
 $cancel.Text = 'Cancel'
-$cancel.Location = New-Object Drawing.Point(524, 548)
+$cancel.Location = New-Object Drawing.Point(524, 599)
 $cancel.Size = New-Object Drawing.Size(92, 32)
 $cancel.Add_Click({ $form.Close() })
 $form.Controls.Add($cancel)

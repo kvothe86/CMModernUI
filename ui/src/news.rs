@@ -27,6 +27,9 @@ enum Kind {
     Sacked,
     Injury,
     Ban,
+    /// A fine (the FA's for a manager's outburst, a club's for a player): a banknote (user,
+    /// 2026-11-07: "like a euro bill").
+    Fine,
     Scout,
     Contract,
     Record,
@@ -86,26 +89,47 @@ fn kinds_of_headlines() {
     assert!(kind(b"Orsolo accepts reprimand") == Kind::Ban);
     assert!(kind(b"Dunmere sack Tamsen") == Kind::Sacked);
     assert!(kind(b"Brightwick manager sacked") == Kind::Sacked);
+    // the user's two from 2026-11-06
+    assert!(kind(b"Fitz-Jim unhappy with role") == Kind::MoodDown);
+    assert!(kind(b"Kolvar happy at Dunmere") == Kind::MoodUp);
+    assert!(kind(b"Training facility upgraded") == Kind::Club);
+    assert!(kind(b"Orsolo back in training") == Kind::Injury);
+    // the user's of 2026-11-07: a fine is money, a complaint discipline
+    assert!(kind(b"FA fine Dorking over Manager's outburst") == Kind::Fine);
+    assert!(kind(b"Kolvar fined two weeks' wages") == Kind::Fine);
+    assert!(kind(b"FA reaction to complaint about referee") == Kind::Ban);
+    assert!(kind(b"Finland call up Kolvar") != Kind::Fine);
+    assert!(kind(b"Dunmere reach cup final") != Kind::Fine);
+    assert!(kind(b"Kolvar in fine form") != Kind::Fine);
+    assert_eq!(short_date(b"31.12.28"), b"31 Dec");
+    assert_eq!(short_date(b"Mon 1 Jan AM"), b"Mon 1 Jan");
 }
 
 /// What a story is about, by its headline's words.
 fn kind(head: &[u8]) -> Kind {
     let h = latin1(head).to_lowercase();
     let any = |ws: &[&str]| ws.iter().any(|w| h.contains(w));
-    if any(&["banned", "suspen", "sent off", "fined", "disciplin", "warning", "reprimand"]) {
+    // (whole words: "fine" is no "Finland", "finest" or "final")
+    let word = |ws: &[&str]| h.split(|c: char| !c.is_alphanumeric()).any(|x| ws.contains(&x));
+    // ("fine" also an adjective: "Kolvar in fine form"; a fine has the FA, "over", wages with it)
+    if word(&["fined"]) || (word(&["fine", "fines"]) && word(&["fa", "over", "wages", "for", "club"])) {
+        Kind::Fine
+    } else if any(&["banned", "suspen", "sent off", "disciplin", "warning", "reprimand", "outburst", "complaint", "referee", "touchline"]) {
         Kind::Ban
     } else if any(&["sacked", "sacks", " sack ", "dismiss", "fired", "relieved of"]) {
         Kind::Sacked
-    } else if any(&["injur", "training", "fitness", "out for", "resumes", "surgery", "knock", "returns to"]) {
+    } else if any(&["facilit"]) {
+        Kind::Club // (the board's training facilities: no injury)
+    } else if any(&["injur", "back in training", "fitness", "out for", "resumes", "surgery", "knock", "returns to"]) {
         Kind::Injury
     } else if any(&["scout"]) {
         Kind::Scout
     } else if any(&["record"]) {
         Kind::Record
+    } else if any(&["disheartened", "unhappy", "angry", "upset", "frustrated", "disappointed", "criticis", "furious", "unsettled"]) {
+        Kind::MoodDown // (before the happy words: "unhappy" holds "happy")
     } else if any(&["praised", "delighted", "happy", "pleased", "impressed", "thrilled"]) {
         Kind::MoodUp
-    } else if any(&["disheartened", "unhappy", "angry", "upset", "frustrated", "disappointed", "criticis", "furious", "unsettled"]) {
-        Kind::MoodDown
     } else if any(&["contract", "renew", "extension", "new deal", "retire"]) {
         Kind::Contract
     } else if finished_transfer(head) {
@@ -132,6 +156,7 @@ fn label(k: Kind) -> (&'static [u8], [u8; 3]) {
         Kind::Sacked => (b"CLUB", [0xe0, 0x50, 0x50]),
         Kind::Injury => (b"INJURY", [0xe0, 0x60, 0x58]),
         Kind::Ban => (b"DISCIPLINE", [0xd8, 0x30, 0x30]),
+        Kind::Fine => (b"FINE", [0x4c, 0xb0, 0x6a]),
         Kind::Scout => (b"SCOUTING", [0x3e, 0xb0, 0xa8]),
         Kind::Contract => (b"CONTRACT", [0x9a, 0x7c, 0xe0]),
         Kind::Record => (b"RECORD", [0xd0, 0xa0, 0x40]),
@@ -173,6 +198,15 @@ unsafe fn icon(k: Kind, cx: i32, cy: i32, r: i32) {
             fill(cx - a, cy - r, cx + a + 1, cy + r + 1, c);
         }
         Kind::Ban => fill(cx - r * 7 / 10, cy - r, cx + r * 7 / 10, cy + r + 1, c),
+        Kind::Fine => {
+            // a banknote: a green note, a dark inner frame, a ring in the middle
+            let (w, h) = (r + r / 3, r * 3 / 4);
+            fill(cx - w, cy - h, cx + w + 1, cy + h + 1, c);
+            let f = (r / 5).max(1);
+            fill(cx - w + f, cy - h + f, cx + w + 1 - f, cy - h + 2 * f, darker(c));
+            fill(cx - w + f, cy + h + 1 - 2 * f, cx + w + 1 - f, cy + h + 1 - f, darker(c));
+            circle(cx, cy, (h * 6 / 10).max(2), 1.5, darker(c));
+        }
         Kind::Transfer => {
             // two arrows: right over left
             let h = (r / 2).max(2);
@@ -243,6 +277,15 @@ unsafe fn icon(k: Kind, cx: i32, cy: i32, r: i32) {
 
 /// "Fri 17th Oct EVE" -> "Fri 17 Oct".
 pub fn short_date(t: &[u8]) -> Vec<u8> {
+    // (an earlier year's item: "31.12.28" -> "31 Dec")
+    let parts: Vec<&[u8]> = t.trim_ascii().split(|&c| c == b'.').collect();
+    if parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.iter().all(u8::is_ascii_digit)) {
+        const MONTHS: [&[u8]; 12] = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"];
+        let month = std::str::from_utf8(parts[1]).ok().and_then(|m| m.parse::<usize>().ok()).filter(|m| (1..=12).contains(m));
+        if let Some(m) = month {
+            return [parts[0], b" ", MONTHS[m - 1]].concat();
+        }
+    }
     let words: Vec<Vec<u8>> = t.split(|&c| c == b' ').filter(|w| !w.is_empty()).take(3).map(|w| {
         let digits = w.iter().take_while(|c| c.is_ascii_digit()).count();
         if digits > 0 { w[..digits].to_vec() } else { w.to_vec() }
@@ -1195,46 +1238,12 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     }
 }
 
-/// The parts of the scrollbars drawn this frame (narrow panels), and the tabs (wide buttons of a
-/// tab's height): restyled in the flip pass.
-static mut SCROLL: Vec<((i32, i32, i32, i32), u32)> = Vec::new();
-
+/// The tabs (wide buttons of a tab's height): restyled in the flip pass. (Scroll bars stay the
+/// game's own since 2026-11-06.)
 #[allow(static_mut_refs)]
 pub unsafe fn note_panel(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32) {
-    if x2 > x1 && x2 - x1 <= 24 && y2 > y1 && SCROLL.len() < 64 && (flags == 0x2 || flags & 0x30 == 0x30) {
-        SCROLL.push(((x1, y1, x2, y2), flags));
-    }
     if flags & 0xff == 0x30 && (40..=90).contains(&(y2 - y1)) && x2 - x1 > 150 && TABS.len() < 16 {
         TABS.push(((x1, y1, x2, y2), flags & 0x800 != 0, Vec::new(), 0));
     }
 }
 
-/// Flat scrollbars: a dark track, a slim thumb, chevrons for the buttons.
-#[allow(static_mut_refs)]
-pub unsafe fn scrollbars() {
-    let parts = std::mem::take(&mut SCROLL);
-    for &((x1, y1, x2, y2), _) in parts.iter().filter(|p| p.1 == 0x2 && p.0 .3 - p.0 .1 > 3 * (p.0 .2 - p.0 .0)) {
-        let w = x2 - x1;
-        let near = |r: &(i32, i32, i32, i32)| r.0 == x1 && r.2 == x2;
-        let up = parts.iter().find(|p| near(&p.0) && p.1 != 0x2 && (y1 - p.0 .3).abs() <= 2);
-        let down = parts.iter().find(|p| near(&p.0) && p.1 != 0x2 && (p.0 .1 - y2).abs() <= 2);
-        let thumb = parts.iter().find(|p| near(&p.0) && p.1 != 0x2 && p.0 .1 >= y1 && p.0 .3 <= y2);
-        let (top, bottom) = (up.map_or(y1, |p| p.0 .1), down.map_or(y2, |p| p.0 .3));
-        fill(x1, top, x2 + 1, bottom + 1, [0x1a, 0x1c, 0x20]);
-        let cx = (x1 + x2) / 2;
-        fill(cx - 1, y1 + 2, cx + 1, y2 - 1, [0x2c, 0x30, 0x36]);
-        if let Some(t) = thumb {
-            pill(cx - 3, t.0 .1 + 1, cx + 4, t.0 .3, [0x7a, 0x80, 0x8a]);
-        }
-        for (b, dir) in [(up, -1), (down, 1)] {
-            if let Some(b) = b {
-                let cy = (b.0 .1 + b.0 .3) / 2;
-                for i in 0..w / 4 + 1 {
-                    let y = cy - dir * (w / 8) + dir * i;
-                    fill(cx - w / 4 + i, y, cx - w / 4 + i + 2, y + 2, GREY);
-                    fill(cx + w / 4 - i - 1, y, cx + w / 4 - i + 1, y + 2, GREY);
-                }
-            }
-        }
-    }
-}

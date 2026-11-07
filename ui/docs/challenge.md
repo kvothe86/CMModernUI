@@ -21,9 +21,9 @@ The host's game works everything out; a client asks for the page (key `E`) and o
 |---|---|
 | Results and points | from each manager's history in the save (`facts_of`, `prizes`, `moves`); nothing is typed |
 | RAD spin | the host (a single player too), **Spin for ...** |
-| 23 RAD challenges | the game reads them on every human turn (`track.rs`) and settles them when the season turns |
-| The other 35 | the host clicks the mark (all "in the starting XI" ones and Keeper 10+ clean sheets: no such stat) |
-| A wrong verdict | the host clicks the mark: his word stands, the game leaves that row alone. The cross removes a row. |
+| RAD challenges | since 2026-11-07: 70 to draw, all read by the game (`track.rs`, squad readings, the match-day tactics tracker), 4 archived (rules.tsv C lines, flag 1); settled when the season turns; an "at least" one reached shows its box ticked and counts in "points in" at once |
+| Releases | "Release five players": from the transfer manager's past transfers (`releases`: kind 3, the club left, no club joined, not on 1 July / 1 January, when contracts run out); a release never reaches the manager's history |
+| A wrong verdict | the host clicks the row: done, then failed, then the game's again; his word stands. The cross removes a row. |
 
 The RAD tab: at the left every manager with his Active / Done / Failed counts for the season
 shown (a click shows his), the wheel always for the running season and the chosen manager; at the

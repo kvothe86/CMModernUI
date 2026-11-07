@@ -12,6 +12,26 @@ use crate::*;
 mod draw;
 mod goals;
 mod track;
+
+/// A club's league place and the number of teams (for the match card).
+pub(crate) unsafe fn league_place(club: usize) -> Option<(i32, i32)> {
+    track::league_place(club)
+}
+
+/// A club's league row (played, won, drawn, lost, for, against, points) and league name (the
+/// season review).
+pub(crate) unsafe fn league_row(club: usize) -> Option<([i32; 7], Vec<u8>)> {
+    track::league_row(club)
+}
+
+/// A club's squad (staff), and a season stat of a player (row 6 all senior club games: field 2
+/// goals, 5 assists, 1 appearances, 0x11 average rating).
+pub(crate) unsafe fn squad_of(club: usize) -> Vec<usize> {
+    track::squad(club)
+}
+pub(crate) unsafe fn season_stat(staff: usize, row: i32, field: i32) -> f32 {
+    track::stat(staff, row, field)
+}
 pub use draw::{bar_item, button_shown, flip, input, overlay};
 
 const RULES: &[u8] = include_bytes!("rules.tsv");
@@ -64,6 +84,8 @@ struct Fact {
     nation: String, // the competition's nation as the game names it, empty for an international one
     lowest: bool,   // a league of the nation's lowest reputation (career goals)
     family: Option<usize>, // `family` of the competition, filled for the career goals
+    day: i16,       // the day of `year` (0 = 1 January), for the Season tab's dates
+    name: String,   // the competition's name as the game writes it
 }
 
 /// A cup's prizes by how far a club got: won, lost the final, semi final, quarter final, phase 2.
@@ -145,36 +167,53 @@ fn stage(f: &Fact) -> Option<usize> {
 /// A season's prizes from a manager's history lines of that season: of a cup only the furthest
 /// round, of a league the title or the place, promotion only without the title.
 fn prizes(facts: &[Fact]) -> Vec<String> {
-    let mut best = [None::<usize>; FAMILIES.len()];
-    let mut out = Vec::new();
-    for f in facts {
+    prizes_with(facts).into_iter().map(|p| p.0).collect()
+}
+
+/// `prizes`, each with the line it came from (an index of `facts`), for the Season tab's
+/// competition, team and date.
+fn prizes_with(facts: &[Fact]) -> Vec<(String, Option<usize>)> {
+    let mut best = [None::<(usize, usize)>; FAMILIES.len()];
+    let mut out: Vec<(String, Option<usize>)> = Vec::new();
+    let has = |out: &Vec<(String, Option<usize>)>, item: &str| out.iter().any(|i| i.0 == item);
+    for (k, f) in facts.iter().enumerate() {
         if let (Some(fam), Some(s)) = (family(&f.comp, f.domestic, f.top), stage(f)) {
-            best[fam] = Some(best[fam].map_or(s, |b: usize| b.min(s)));
+            best[fam] = Some(best[fam].map_or((s, k), |b| if s < b.0 { (s, k) } else { b }));
         }
         if f.kind == KIND_CHAMPIONS {
-            out.push(if f.top { "Champion" } else { "Lower league champion" }.to_string());
+            out.push((if f.top { "Champion" } else { "Lower league champion" }.to_string(), Some(k)));
         }
         // (a lower league won by a group or a play-off has no champions line)
-        if f.kind == KIND_FINISHED && !f.top && f.text.contains("finished 1st") && !out.iter().any(|i| i == "Lower league champion") {
-            out.push("Lower league champion".to_string());
+        if f.kind == KIND_FINISHED && !f.top && f.text.contains("finished 1st") && !has(&out, "Lower league champion") {
+            out.push(("Lower league champion".to_string(), Some(k)));
         }
         if f.kind == KIND_FINISHED && f.top {
             for (place, item) in [("finished 2nd", "2nd place"), ("finished 3rd", "3rd place")] {
                 if f.text.contains(place) {
-                    out.push(item.to_string());
+                    out.push((item.to_string(), Some(k)));
                 }
             }
         }
     }
-    if facts.iter().any(|f| f.kind == KIND_PROMOTED) && !out.iter().any(|i| i == "Lower league champion") {
-        out.push("Lower league promotion".to_string());
+    if let Some(k) = facts.iter().position(|f| f.kind == KIND_PROMOTED).filter(|_| !has(&out, "Lower league champion")) {
+        out.push(("Lower league promotion".to_string(), Some(k)));
     }
     for (fam, s) in best.iter().enumerate() {
-        if let Some(item) = s.map(|s| FAMILIES[fam][s]).filter(|i| !i.is_empty()) {
-            out.push(item.to_string());
+        if let Some((item, k)) = s.map(|s| (FAMILIES[fam][s.0], s.1)).filter(|i| !i.0.is_empty()) {
+            out.push((item.to_string(), Some(k)));
         }
     }
     out
+}
+
+/// What the Season tab shows under a prize: the competition, the team that won it and the day
+/// ("Africa Cup of Nations - Ghana - 11 Feb 2034"). A World Cup or continental tournament is the
+/// national team's, the rest the club's. No ';', '|' or tab: the page's separators.
+fn prize_detail(f: &Fact, club: &str, nation_team: &str) -> String {
+    let national = matches!(family(&f.comp, f.domestic, f.top), Some(4 | 5)) && !nation_team.is_empty();
+    let team = if national { nation_team } else { club };
+    let date = crate::coach::day_text(f.year * 366 + f.day as i32);
+    [f.name.as_str(), team, date.as_str()].iter().filter(|s| !s.is_empty()).map(|s| s.replace([';', '|', '\t'], " ")).collect::<Vec<_>>().join(" - ")
 }
 
 /// Two spellings of a club: the old site's "AC Milan" and the game's "Milan".
@@ -182,6 +221,125 @@ fn same_club(a: &str, b: &str) -> bool {
     let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric() && c.is_ascii()).collect::<String>().to_lowercase();
     let (a, b) = (plain(a), plain(b));
     !a.is_empty() && !b.is_empty() && (a.contains(&b) || b.contains(&a))
+}
+
+/// A club name's words, accents dropped and the club-kind words left out ("FC Twente": twente).
+fn club_words(s: &str) -> Vec<String> {
+    const KINDS: [&str; 16] = ["fc", "ac", "sc", "cf", "sk", "fk", "cd", "sv", "afc", "as", "ss", "us", "bk", "club", "de", "the"];
+    let fold = |c: char| match c {
+        'à'..='å' | 'À'..='Å' => 'a',
+        'ç' | 'Ç' | 'ć' | 'č' => 'c',
+        'è'..='ë' | 'È'..='Ë' => 'e',
+        'ì'..='ï' | 'Ì'..='Ï' | 'ı' => 'i',
+        'ñ' | 'Ñ' => 'n',
+        'ò'..='ö' | 'ø' | 'Ò'..='Ö' | 'Ø' => 'o',
+        'ù'..='ü' | 'Ù'..='Ü' => 'u',
+        'ş' | 'š' => 's',
+        'ğ' => 'g',
+        c => c.to_ascii_lowercase(),
+    };
+    s.chars().map(fold).collect::<String>().split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty() && !KINDS.contains(w)).map(str::to_string).collect()
+}
+
+/// What a season typed on the site won, from the game's competitions' winners (comp::HISTORY rows:
+/// +4 the competition, +8 the year, +0xa the winner): a line under each trophy, "UEFA Champions
+/// League - Fenerbahçe SK - 2031", empty where no row fits (finals lost, places: the game keeps
+/// only winners there). The user's wish of 2026-11-06. `club` the club, `nation` the national team
+/// he manages (a World Cup or continental tournament is its), `year` the season's first year.
+unsafe fn won_details(items: &[String], club: usize, nation: usize, year: i32) -> Vec<String> {
+    let (base, count) = (rd::<usize>(comp::HISTORY), rd::<i32>(comp::HISTORY_COUNT));
+    let rows: Vec<(usize, i32, usize)> = if count > 0 && readable(base, count as usize * 26) {
+        (0..count as usize).map(|k| base + k * 26).map(|r| (rd::<usize>(r + 4), rd::<i16>(r + 8) as i32, rd::<usize>(r + 0xa))).filter(|r| r.0 != 0 && (r.1 == year || r.1 == year + 1)).collect()
+    } else {
+        Vec::new()
+    };
+    let name = |c: usize| latin1(&game_text(c + 4, 51)).to_string();
+    items.iter().map(|item| {
+        let kind = |comp: usize| -> bool {
+            let comp_name = name(comp).to_lowercase();
+            let nation = rd::<usize>(comp + COMP_NATION);
+            let domestic = nation != 0 && nation != usize::MAX - 1;
+            match item.as_str() {
+                "Champion" => !is_cup(comp) && first_division(comp) && family(&comp_name, true, false) != Some(7),
+                "Lower league champion" => !is_cup(comp) && !first_division(comp) && family(&comp_name, true, false) != Some(7),
+                _ => FAMILIES.iter().position(|f| f[0] == item).is_some_and(|fam| family(&comp_name, domestic, is_cup(comp) && first_division_cup(comp)) == Some(fam)),
+            }
+        };
+        let team = if matches!(item.as_str(), "World Cup Winner" | "Continental tournament Winner") { nation } else { club };
+        // (a supercup is played at the season's start, the rest end it: the later year first)
+        let order = if item == "National Supercup" || item == "European Supercup Winner" { [year, year + 1] } else { [year + 1, year] };
+        order.iter().find_map(|&y| rows.iter().find(|r| r.1 == y && r.2 == team && team != 0 && kind(r.0))).map_or(String::new(), |r| format!("{} - {} - {}", name(r.0), name(team), r.1).replace([';', '|', '\t'], " "))
+    }).collect()
+}
+
+/// A nation's main cup: no cup of the nation has a higher reputation (as `facts_of` decides `top`).
+unsafe fn first_division_cup(comp: usize) -> bool {
+    let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    count > 0 && readable(comps, count as usize * COMP_SIZE) && (0..count as usize).map(|k| comps + k * COMP_SIZE).filter(|&c| rd::<usize>(c + COMP_NATION) == rd::<usize>(comp + COMP_NATION) && is_cup(c)).all(|c| rd::<i16>(c + COMP_REPUTATION) <= rd::<i16>(comp + COMP_REPUTATION))
+}
+
+/// The game's club record of that exact name, 0 none (asked once a name).
+unsafe fn club_by_name(name: &str) -> usize {
+    static mut KNOWN: Option<std::collections::HashMap<String, usize>> = None;
+    #[allow(static_mut_refs)]
+    let known = KNOWN.get_or_insert_with(Default::default);
+    if let Some(&c) = known.get(name) {
+        return c;
+    }
+    let (table, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT));
+    let found = if count > 0 && readable(table, count as usize * CLUB_SIZE) {
+        (0..count as usize).map(|k| table + k * CLUB_SIZE).find(|&c| latin1(&game_text(c + 4, 51)) == name).unwrap_or(0)
+    } else {
+        0
+    };
+    known.insert(name.to_string(), found);
+    found
+}
+
+/// One club by two spellings: every word of the shorter name is a word of the other ("FC Twente",
+/// "Twente Enschede FC"; "AC Milan", "Milan").
+fn same_team(a: &str, b: &str) -> bool {
+    let (a, b) = (club_words(a), club_words(b));
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    !short.is_empty() && short.iter().all(|w| long.contains(w))
+}
+
+/// The game's own name for a club the site spells its own way, so the page shows the game's name
+/// and its crest (user, 2026-11-06: a friend's "FC Twente" had none). The name itself when the crests
+/// know it or no club of the game matches; asked once a name.
+unsafe fn game_club(name: &str) -> String {
+    static mut KNOWN: Option<std::collections::HashMap<String, String>> = None;
+    #[allow(static_mut_refs)]
+    let known = KNOWN.get_or_insert_with(Default::default);
+    if let Some(n) = known.get(name) {
+        return n.clone();
+    }
+    let found = if name.is_empty() || crest_pixels(name.as_bytes()).is_some() {
+        name.to_string()
+    } else {
+        let (table, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT));
+        let names: Vec<String> = if count > 0 && readable(table, count as usize * CLUB_SIZE) {
+            (0..count as usize).map(|k| latin1(&game_text(table + k * CLUB_SIZE + 4, 51)).to_string()).filter(|n| same_team(name, n)).collect()
+        } else {
+            Vec::new()
+        };
+        // (fewest words beyond the site's first, so "Fenerbahce" is the club and not its U19; then a
+        // crest, then the shortest name)
+        let extra = |n: &String| club_words(n).len().abs_diff(club_words(name).len());
+        names.iter().min_by_key(|n| (extra(n), crest_pixels(n.as_bytes()).is_none(), n.len())).cloned().unwrap_or_else(|| name.to_string())
+    };
+    known.insert(name.to_string(), found.clone());
+    found
+}
+
+#[cfg(test)]
+#[test]
+fn site_names_meet_game_names() {
+    assert!(same_team("FC Twente", "Twente Enschede FC"));
+    assert!(same_team("AC Milan", "Milan"));
+    assert!(same_team("Fenerbahçe SK", "Fenerbahce"));
+    assert!(!same_team("FC Twente", "FC Utrecht"));
+    assert!(!same_team("FC", "AC"));
 }
 
 /// The fifth season running at a club counts once (`clubs`: a manager's by season).
@@ -227,6 +385,7 @@ struct Season {
     goals: String,
     rating: String,
     items: Vec<String>,
+    details: Vec<String>, // a line under each item (Season tab), only for seasons the game worked out; not saved
 }
 
 #[derive(Clone, Default)]
@@ -267,6 +426,7 @@ struct League {
     prizes: Vec<(String, String, i32, bool)>, // the same with their category, for the Regels page
     ranks: Vec<(String, i32)>,
     tasks: Vec<(String, String, i32)>, // category, text, points
+    archived: Vec<String>, // challenges kept for old rows, never drawn again (the RAD review, 2026-11-06)
     best: Vec<(String, i32, i32)>,     // a manager's best player on 1 January: name, season, staff index
 }
 
@@ -287,7 +447,12 @@ impl League {
                 }
                 // (a reading was written as G at first, the rank's letter: five fields tell it apart)
                 "G" if c.len() < 5 => l.ranks.push((text(1), number(2))),
-                "C" => l.tasks.push((text(1), text(2), number(3))),
+                "C" => {
+                    l.tasks.push((text(1), text(2), number(3)));
+                    if number(4) != 0 {
+                        l.archived.push(text(2));
+                    }
+                }
                 "Q" => l.goals.push((text(1), text(2), number(3))),
                 "W" => l.marks.push(Mark { name: text(1), goal: text(2), picked: number(3), country: text(4), done: number(5) }),
                 "E" => l.leaders.push((text(1), number(2), [number(3) != 0, number(4) != 0, number(5) != 0])),
@@ -300,6 +465,7 @@ impl League {
                     goals: text(5),
                     rating: text(6),
                     items: text(7).split('|').filter(|i| !i.is_empty()).map(english).collect(),
+                    details: Vec::new(),
                 }),
                 "R" => l.rads.push(Rad {
                     id: number(1) as u32,
@@ -418,10 +584,11 @@ impl League {
         let used: Vec<String> = mine.iter().filter(|r| r.year == year).filter_map(|r| category(&r.text)).collect();
         let others: Vec<&str> = self.rads.iter().filter(|r| r.year == year).map(|r| r.text.as_str()).collect();
         let mut pool: Vec<&(String, String, i32)> = Vec::new();
-        let mut cats: Vec<&String> = self.tasks.iter().map(|t| &t.0).collect();
+        let live = |t: &&(String, String, i32)| !self.archived.contains(&t.1);
+        let mut cats: Vec<&String> = self.tasks.iter().filter(live).map(|t| &t.0).collect();
         cats.dedup();
         for cat in cats.into_iter().filter(|c| !used.contains(c)) {
-            let all: Vec<&(String, String, i32)> = self.tasks.iter().filter(|t| t.0 == *cat).collect();
+            let all: Vec<&(String, String, i32)> = self.tasks.iter().filter(live).filter(|t| t.0 == *cat).collect();
             let fresh: Vec<&(String, String, i32)> = all.iter().copied().filter(|t| !mine.iter().any(|r| r.text == t.1)).collect();
             pool.extend((if fresh.is_empty() { all } else { fresh }).into_iter().filter(|t| !others.contains(&t.1.as_str())));
         }
@@ -579,6 +746,8 @@ unsafe fn facts_of(staff: usize) -> (Vec<Fact>, Vec<Job>) {
             nation: nation_name(nation),
             lowest: lowest_of(comp),
             family: None,
+            day,
+            name: latin1(&game_text(comp + 4, 51)).to_string(),
         });
     }
     history::free(list);
@@ -671,21 +840,37 @@ unsafe fn club_in(season: i32, jobs: &[Job], now: usize) -> usize {
     jobs.iter().rev().find(|j| j.hired && starts(j) <= season).or(jobs.iter().find(|j| !j.hired)).map_or(now, |j| j.club)
 }
 
-/// A title that ends a long wait: the same competition won before, 10, 20 or 30 years back, in the
-/// competitions' result rows (`year` their calendar year; a club that never won it gets nothing,
-/// as on the site), and no other title of the club within a year (a supercup in August ended
-/// no wait after the league in May).
+/// A title that ends a long wait: the club's last prize of any kind, in any competition (a lower
+/// league's title too), 10, 20 or 30 years back, in the competitions' result rows (`year` their
+/// calendar year; a club that never won anything gets nothing). Across all competitions on the
+/// user's word (2026-11-06): Lyon's Ligue 1 of 2034 after the Ligue 2 of 2030 ends no wait.
 unsafe fn drought(club: usize, comp: usize, year: i32) -> Option<&'static str> {
     let (base, count) = (rd::<usize>(comp::HISTORY), rd::<i32>(comp::HISTORY_COUNT));
     if club == 0 || count <= 0 || !readable(base, count as usize * 26) {
         return None;
     }
     let won: Vec<(usize, i32)> = (0..count as usize).map(|k| base + k * 26).filter(|&r| rd::<usize>(r + 0xa) == club).map(|r| (rd::<usize>(r + 4), rd::<i16>(r + 8) as i32)).collect();
-    if won.iter().any(|w| w.0 != comp && (year - 1..=year).contains(&w.1)) {
-        return None;
-    }
-    let last = won.iter().filter(|w| w.0 == comp && w.1 < year).map(|w| w.1).max()?;
+    waited_for(&won, comp, year)
+}
+
+/// The wait a title ends, from the club's titles as (competition, year): the latest other one.
+fn waited_for(won: &[(usize, i32)], comp: usize, year: i32) -> Option<&'static str> {
+    let last = won.iter().filter(|w| w.1 <= year && **w != (comp, year)).map(|w| w.1).max()?;
     [(30, "First prize in 30+ years"), (20, "First prize in 20+ years"), (10, "First prize in 10+ years")].into_iter().find(|t| year - last >= t.0).map(|t| t.1)
+}
+
+#[cfg(test)]
+#[test]
+fn waits_across_competitions() {
+    let (ligue1, ligue2, coupe) = (1, 2, 3);
+    // Lyon: Ligue 1 2008, Coupe de la Ligue 2020, Ligue 2 2030, Ligue 1 2034: no wait ended
+    assert_eq!(waited_for(&[(ligue1, 2008), (coupe, 2020), (ligue2, 2030), (ligue1, 2034)], ligue1, 2034), None);
+    // without the Ligue 2: 14 years since the cup
+    assert_eq!(waited_for(&[(ligue1, 2008), (coupe, 2020), (ligue1, 2034)], ligue1, 2034), Some("First prize in 10+ years"));
+    assert_eq!(waited_for(&[(ligue1, 2008), (ligue1, 2034)], ligue1, 2034), Some("First prize in 20+ years"));
+    // the first title ever ends no wait; another title in the same year neither
+    assert_eq!(waited_for(&[(ligue1, 2034)], ligue1, 2034), None);
+    assert_eq!(waited_for(&[(ligue1, 1990), (coupe, 2034), (ligue1, 2034)], ligue1, 2034), None);
 }
 
 /// The season a date belongs to when the year turns on day `from`.
@@ -693,10 +878,55 @@ fn season_from(day: i16, year: i32, from: i16) -> i32 {
     if day >= from { year } else { year - 1 }
 }
 
-/// The name a top scorer is kept and shown by: the first name, as the typed rows have it. A line
-/// of the file with the full name reads the same.
+/// The name a top scorer is kept and shown by: the full name, as the site has it (user,
+/// 2026-11-06; until then the first name only, so seasons the game wrote before stay so).
 fn scorer_name(name: &str) -> String {
-    name.split_whitespace().next().unwrap_or("").to_string()
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+const BUILD_HISTORY_LIST: usize = 0x450d50; // thiscall(Club_Records*, Club*, int* count) -> malloc'd array of 909-byte entries
+const FORMAT_NAME_IDS: usize = 0x53e140; // cdecl(first, second, common, char* buffer, short size, char style, int staff)
+const GAME_FREE: usize = 0x9452ca; // the game's free
+
+/// A club's top scorer of each season, this one too, as its history screen's Players tab shows
+/// "Top Goalscorer" (all competitions, label 0x10 of 0x4490b0; user, 2026-11-06): (year, name,
+/// goals). The year is the challenge's season (its first year). The site's typed scorers are this
+/// record: 18 of 18 past seasons of the friends' league equal it, name and goals (the league-only
+/// one, +0x183, differs in 10). An entry is a year (short; 0 the all-time records) and the
+/// season's 907-byte record: +0x168 the goals (negative: none), +0x169, +0x16d, +0x171 the name,
+/// +0x175 the staff (0x449810 case 0xf: its cases run one behind the labels).
+unsafe fn past_top_scorers(club: usize) -> Vec<(i32, String, i32)> {
+    let records = rd::<usize>(CLUB_RECORDS);
+    if club == 0 || !mapped(records, 4) || remote::CLIENT {
+        return Vec::new();
+    }
+    let mut count = 0i32;
+    let list = game::<extern "thiscall" fn(usize, usize, *mut i32) -> usize>(BUILD_HISTORY_LIST)(records, club, &mut count);
+    let mut out = Vec::new();
+    if list != 0 && readable(list, count.max(0) as usize * 909) {
+        for k in 0..count.clamp(0, 500) as usize {
+            let e = list + k * 909;
+            let (year, record) = (rd::<i16>(e) as i32, e + 2);
+            let goals = rd::<i8>(record + 0x168) as i32;
+            if year == 0 || goals <= 0 {
+                continue;
+            }
+            let mut name = [0u8; 200];
+            let ids = [0x169, 0x16d, 0x171].map(|at| ((record + at) as *const i32).read_unaligned());
+            let staff = ((record + 0x175) as *const i32).read_unaligned();
+            game::<extern "C" fn(i32, i32, i32, *mut u8, i16, i8, i32)>(FORMAT_NAME_IDS)(ids[0], ids[1], ids[2], name.as_mut_ptr(), 200, 1, staff);
+            let end = name.iter().position(|&c| c == 0).unwrap_or(0);
+            let name = latin1(&name[..end]).trim().to_string();
+            if trace() {
+                log(&format!("challenge history scorer {club:#x} {year}: {name} {goals}"));
+            }
+            out.push((year, name, goals));
+        }
+    }
+    if list != 0 {
+        game::<extern "C" fn(usize)>(GAME_FREE)(list);
+    }
+    out
 }
 
 /// The highest of (name, goals), None when nobody has scored.
@@ -725,6 +955,7 @@ unsafe fn seasons() -> Vec<Season> {
     let now = this_season();
     let mut all = l.seasons.clone();
     let mut changed = false;
+    let mut history: std::collections::HashMap<usize, Vec<(i32, String, i32)>> = Default::default();
     for (staff, name) in humans() {
         let (facts, jobs) = facts_of(staff);
         let current = rd::<usize>(staff + 0x39);
@@ -734,12 +965,24 @@ unsafe fn seasons() -> Vec<Season> {
         let clubs: Vec<usize> = years.iter().map(|&y| club_in(y, &jobs, current)).collect();
         let club_name = |c: usize| if readable(c, 0x40) { latin1(&game_text(c + 4, 51)).to_string() } else { String::new() };
         let names: Vec<String> = years.iter().enumerate().map(|(k, y)| entered.iter().find(|s| s.year == *y).map_or(club_name(clubs[k]), |s| s.club.clone())).collect();
+        // (staff +0x24: the national team he manages now; a tournament's prize is shown as its)
+        let nation_team = club_name(rd::<usize>(staff + 0x24));
         for (k, &year) in years.iter().enumerate() {
+            let of_year: Vec<Fact> = facts.iter().filter(|f| f.season == year).cloned().collect();
+            // a season typed on the site keeps its items; the lines under them come from the
+            // manager's own history as for a season the game works out (finals, semi finals and
+            // phases too, not only titles: user, 2026-11-07)
             if entered.iter().any(|s| s.year == year && !s.items.is_empty()) {
+                let won = prizes_with(&of_year);
+                if let Some(row) = all.iter_mut().find(|s| s.year == year && same_manager(&s.name, &name)) {
+                    let team = game_club(&names[k]);
+                    row.details = row.items.iter().map(|i| won.iter().find(|w| &w.0 == i).and_then(|w| w.1).map_or(String::new(), |f| prize_detail(&of_year[f], &team, &nation_team))).collect();
+                }
                 continue;
             }
-            let of_year: Vec<Fact> = facts.iter().filter(|f| f.season == year).cloned().collect();
-            let mut items = prizes(&of_year);
+            let won = prizes_with(&of_year);
+            let mut items: Vec<String> = won.iter().map(|p| p.0.clone()).collect();
+            let details: Vec<String> = won.iter().map(|p| p.1.map_or(String::new(), |i| prize_detail(&of_year[i], &names[k], &nation_team))).collect();
             items.extend(loyalty(&names, k).map(str::to_string));
             items.extend(moves(&jobs).into_iter().filter(|m| m.0 == year).map(|m| m.1.to_string()));
             // (the first division's title or a main or European cup: a lower league's counts not)
@@ -747,7 +990,10 @@ unsafe fn seasons() -> Vec<Season> {
             items.extend(waited.filter_map(|f| drought(clubs[k], f.table, f.year)).min().map(str::to_string));
             let kept = l.seasons.iter().position(|s| s.year == year && same_manager(&s.name, &name));
             if year == now {
-                if let (Some((scorer, goals)), None) = (top_scorer(current), kept.filter(|&i| !l.seasons[i].items.is_empty())) {
+                // (the club's own record of the season, as the site counts; the stats row when the
+                // game has none yet)
+                let from_history = history.entry(current).or_insert_with(|| past_top_scorers(current)).iter().find(|p| p.0 == now).map(|p| (p.1.clone(), p.2));
+                if let (Some((scorer, goals)), None) = (from_history.or_else(|| top_scorer(current)), kept.filter(|&i| !l.seasons[i].items.is_empty())) {
                     let goals = goals.to_string();
                     match kept {
                         Some(i) if scorer_name(&l.seasons[i].scorer) == scorer && l.seasons[i].goals == goals => {}
@@ -759,9 +1005,17 @@ unsafe fn seasons() -> Vec<Season> {
                     }
                 }
             }
-            let (scorer, goals) = l.seasons.iter().find(|s| s.year == year && same_manager(&s.name, &name)).map_or((String::new(), String::new()), |s| (s.scorer.clone(), s.goals.clone()));
+            let (mut scorer, mut goals) = l.seasons.iter().find(|s| s.year == year && same_manager(&s.name, &name)).map_or((String::new(), String::new()), |s| (s.scorer.clone(), s.goals.clone()));
+            // (a past season without one: the club's history, its top league scorer of that season)
+            if scorer.is_empty() && year < now {
+                let past = history.entry(clubs[k]).or_insert_with(|| past_top_scorers(clubs[k]));
+                if let Some(p) = past.iter().find(|p| p.0 == year) {
+                    (scorer, goals) = (p.1.clone(), p.2.to_string());
+                }
+            }
             all.retain(|s| !(s.year == year && same_manager(&s.name, &name)));
-            all.push(Season { name: name.clone(), year, club: names[k].clone(), scorer, goals, rating: String::new(), items });
+            let rating = l.seasons.iter().find(|s| s.year == year && same_manager(&s.name, &name)).map_or(String::new(), |s| s.rating.clone());
+            all.push(Season { name: name.clone(), year, club: names[k].clone(), scorer, goals, rating, items, details });
         }
     }
     if changed {
@@ -773,7 +1027,7 @@ unsafe fn seasons() -> Vec<Season> {
 
 /// The page as text, a line a thing, for whoever draws it. `me`: the name of the manager asking,
 /// `all`: he is the host, who spins and ticks for everyone.
-unsafe fn page(me: &str, all: bool) -> String {
+unsafe fn page(me: &str, all: bool, stats_year: i32) -> String {
     use_game();
     let rows = seasons();
     let l = league();
@@ -815,7 +1069,7 @@ unsafe fn page(me: &str, all: bool) -> String {
         let (rank, next, percent) = l.rank(total);
         let step = l.ranks.iter().filter(|r| total >= r.1).count();
         let club = rows.iter().rev().find(|s| mine(s, n)).map_or("", |s| &s.club);
-        out += &format!("K\t{n}\t{club}\t{total}\t{rank}\t{next}\t{percent}\t{step}\n");
+        out += &format!("K\t{n}\t{}\t{total}\t{rank}\t{next}\t{percent}\t{step}\n", game_club(club));
     }
     for r in &l.ranks {
         out += &format!("G\t{}\t{}\n", r.0, r.1);
@@ -849,25 +1103,49 @@ unsafe fn page(me: &str, all: bool) -> String {
             out += &format!("F\tBest season\t{points} ({year}/{})\n", year + 1);
         }
     }
+    // the Season tab: every season of every manager (the tab picks one), this season always
     for n in &names {
-        let (items, club) = rows.iter().find(|s| s.year == now && mine(s, n)).map_or((Vec::new(), ""), |s| (s.items.clone(), s.club.as_str()));
-        let points = l.item_points(&items) + l.rad_points(n, Some(now));
-        let shown: Vec<String> = items.iter().map(|i| format!("{i};{};{}", l.item_points(std::slice::from_ref(i)), l.trophies(std::slice::from_ref(i)))).collect();
-        out += &format!("L\t{n}\t{club}\t{points}\t{}\n", shown.join("|"));
+        let mut own: Vec<&Season> = rows.iter().filter(|s| mine(s, n)).collect();
+        let blank = Season { name: n.clone(), year: now, ..Default::default() };
+        if !own.iter().any(|s| s.year == now) {
+            own.push(&blank);
+        }
+        // (his national team now: a tournament won in a season typed on the site is its)
+        let nation = humans().into_iter().find(|h| same_manager(n, &h.1)).map_or(0, |h| rd::<usize>(h.0 + 0x24));
+        for s in own {
+            let points = l.item_points(&s.items) + l.rad_points(n, Some(s.year));
+            // (a season typed on the site has no lines of its own: the game's winners give them)
+            let missing = s.items.iter().enumerate().any(|(k, _)| s.details.get(k).is_none_or(|d| d.is_empty()));
+            let typed = if missing { won_details(&s.items, club_by_name(&game_club(&s.club)), nation, s.year) } else { Vec::new() };
+            let details: Vec<String> = (0..s.items.len()).map(|k| s.details.get(k).filter(|d| !d.is_empty()).or(typed.get(k)).cloned().unwrap_or_default()).collect();
+            let shown: Vec<String> = s.items.iter().enumerate().map(|(k, i)| format!("{i};{};{};{}", l.item_points(std::slice::from_ref(i)), l.trophies(std::slice::from_ref(i)), details.get(k).map_or("", |d| d))).collect();
+            let club = if s.club.is_empty() { rows.iter().rev().find(|r| mine(r, n)).map_or("", |r| &r.club) } else { &s.club };
+            out += &format!("L\t{n}\t{}\t{points}\t{}\t{}\t{}\n", game_club(club), shown.join("|"), s.year, s.rating);
+        }
     }
     for r in &l.rads {
         out += &format!("R\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", r.id, r.name, r.points, r.done as i32, r.text, r.year, r.state, r.note, track::rule(&r.text).is_some() as i32, r.manual as i32);
     }
     for s in rows.iter().rev().take(HISTORY_ROWS) {
         let points = l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
-        out += &format!("H\t{}/{}\t{}\t{}\t{}\t{}\t{}\t{points}\t{}\n", s.year, s.year + 1, s.name, s.club, scorer_name(&s.scorer), s.goals, s.rating, s.items.join(", "));
+        out += &format!("H\t{}/{}\t{}\t{}\t{}\t{}\t{}\t{points}\t{}\n", s.year, s.year + 1, s.name, game_club(&s.club), scorer_name(&s.scorer), s.goals, s.rating, s.items.join(", "));
     }
-    out += &stats_lines(&rows, &names, &goal_points);
+    // (Stats over one season when the viewer picked one, 0: all; career goals count only for all)
+    if stats_year != 0 {
+        let of_year: Vec<Season> = rows.iter().filter(|s| s.year == stats_year).cloned().collect();
+        out += &stats_lines(&of_year, &names, &|_| 0, Some(stats_year));
+    } else {
+        out += &stats_lines(&rows, &names, &goal_points, None);
+    }
+    out += &format!("V\t{stats_year}\n");
     for (category, item, points, trophy) in &l.prizes {
         out += &format!("P\t{category}\t{item}\t{points}\t{}\n", *trophy as i32);
     }
     for t in &l.tasks {
-        out += &format!("A\t{}\t{}\t{}\t{}\n", t.0, t.1, t.2, track::rule(&t.1).is_some() as i32);
+        // (an archived one stays out: the wheel and the Rules tab show what can still be drawn)
+        if !l.archived.contains(&t.1) {
+            out += &format!("A\t{}\t{}\t{}\t{}\n", t.0, t.1, t.2, track::rule(&t.1).is_some() as i32);
+        }
     }
     if goals_on {
         for (k, g) in l.goals.iter().enumerate() {
@@ -890,7 +1168,7 @@ unsafe fn page(me: &str, all: bool) -> String {
 }
 
 /// The Stats page: the three records, then a manager's card.
-fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) -> i32) -> String {
+fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) -> i32, year: Option<i32>) -> String {
     let l = league();
     let total = |s: &Season| l.item_points(&s.items) + l.rad_points(&s.name, Some(s.year));
     let mut out = String::new();
@@ -898,7 +1176,8 @@ fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) 
         out += &format!("T\tSeason record\t{}\t{} ({}/{})\n", total(s), s.name, s.year, s.year + 1);
     }
     let trophies = |n: &String| rows.iter().filter(|s| same_manager(&s.name, n)).map(|s| l.trophies(&s.items)).sum::<usize>();
-    let done = |n: &String| l.rads.iter().filter(|r| r.done && same_manager(&r.name, n)).count();
+    let in_year = |r: &&Rad| year.is_none_or(|y| y == r.year);
+    let done = |n: &String| l.rads.iter().filter(in_year).filter(|r| r.done && same_manager(&r.name, n)).count();
     if let Some(n) = names.iter().max_by_key(|n| trophies(n)) {
         out += &format!("T\tTrophy Collector\t{}\t{n}\n", trophies(n));
     }
@@ -908,7 +1187,7 @@ fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) 
     for n in names {
         let own: Vec<&Season> = rows.iter().filter(|s| same_manager(&s.name, n)).collect();
         let items: i32 = own.iter().map(|s| l.item_points(&s.items)).sum();
-        let rads = l.rad_points(n, None);
+        let rads = l.rad_points(n, year);
         let (rank, _, _) = l.rank(items + rads + goal_points(n));
         let season = |s: &Season| format!("{} ({}/{})", total(s), s.year, s.year + 1);
         let (best, worst) = (own.iter().copied().max_by_key(|s| total(s)), own.iter().copied().min_by_key(|s| total(s)));
@@ -932,7 +1211,7 @@ fn stats_lines(rows: &[Season], names: &[String], goal_points: &dyn Fn(&String) 
             }
         }
         let scorer = own.iter().copied().filter(|s| !s.goals.is_empty()).max_by_key(|s| s.goals.parse::<i32>().unwrap_or(0)).map_or(String::new(), |s| format!("{} ({})", scorer_name(&s.scorer), s.goals));
-        let all_rads = l.rads.iter().filter(|r| same_manager(&r.name, n)).count();
+        let all_rads = l.rads.iter().filter(in_year).filter(|r| same_manager(&r.name, n)).count();
         out += &format!(
             "Y\t{n}\t{rank}\t{}\t{avg}\t{}\t{}\t{}\t{}\t{all_rads}\t{items}\t{rads}\t{scorer}\t{}\t{}\n",
             own.len(),
@@ -954,6 +1233,7 @@ const ACT_DELETE: u32 = 3;
 const ACT_PICK: u32 = 4;
 const ACT_GOAL_TICK: u32 = 5;
 const ACT_COUNTRY: u32 = 6;
+pub(crate) const ACT_RATE: u32 = 7;
 
 /// The host does a click: a new RAD row for a manager, a row ticked (his word then stands over the
 /// game's) or a row taken away.
@@ -972,13 +1252,37 @@ unsafe fn act(action: u32, arg: u32, name: &[u8]) {
             }
         }
         ACT_TICK => {
+            // the host's word over the game's, both ways (user, 2026-11-06): a click makes it done,
+            // the next failed, the next the game's again (its next reading settles it)
             if let Some(r) = l.rads.iter_mut().find(|r| r.id == arg) {
-                (r.done, r.manual) = (!r.done, true);
+                match (r.manual, r.done) {
+                    (false, _) => (r.manual, r.done, r.state) = (true, true, track::GOOD),
+                    (true, true) => (r.done, r.state) = (false, track::BAD),
+                    (true, false) => (r.manual, r.done, r.state, r.closed) = (false, false, track::OPEN, false),
+                }
+                if !r.manual {
+                    track::update();
+                }
                 save();
             }
         }
         ACT_DELETE => {
             l.rads.retain(|r| r.id != arg);
+            save();
+        }
+        // a manager's own mark for his season, 1 to 10 (`arg`: year << 4 | mark; 0 takes it away),
+        // kept in the season's row as the site's rating (user, 2026-11-06)
+        ACT_RATE => {
+            let (year, mark) = ((arg >> 4) as i32, arg & 15);
+            let who = latin1(name).to_string();
+            if who.is_empty() || mark > 10 {
+                return;
+            }
+            let mark = if mark == 0 { String::new() } else { mark.to_string() };
+            match l.seasons.iter_mut().find(|s| s.year == year && same_manager(&s.name, &who)) {
+                Some(s) => s.rating = mark,
+                None => l.seasons.push(Season { name: who, year, rating: mark, ..Default::default() }),
+            }
             save();
         }
         // a career goal (`arg` its row): picked or dropped, ticked off, or its country (`name`: the
@@ -1022,11 +1326,16 @@ fn page_bytes(text: &str) -> Vec<u8> {
 }
 
 /// Host: a client's 'E': the page for its manager, read only.
-pub unsafe fn remote(channel: i16) -> Vec<u8> {
+pub unsafe fn remote(channel: i16, stats_year: u32, action: u32, arg: u32) -> Vec<u8> {
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
     let me = humans().into_iter().find(|h| h.0 == manager).map_or(String::new(), |h| h.1);
+    // (the one thing a client does itself: the mark for its own manager's season; asked again
+    // with the same words it sets the same mark)
+    if action == ACT_RATE && !me.is_empty() {
+        act(ACT_RATE, arg, me.as_bytes());
+    }
     // (a packet's room: whole lines)
-    let mut text = page_bytes(&page(&me, false));
+    let mut text = page_bytes(&page(&me, false, stats_year as i32));
     if text.len() > 38_000 {
         let cut = text[..38_000].iter().rposition(|&c| c == b'\n').map_or(0, |at| at + 1);
         text.truncate(cut);
@@ -1168,16 +1477,15 @@ mod tests {
     }
 
     #[test]
-    fn the_top_scorer_by_one_name() {
+    fn the_top_scorer_by_full_name() {
         let players = |v: &[(&str, i32)]| v.iter().map(|p| (p.0.to_string(), p.1)).collect::<Vec<_>>().into_iter();
-        assert_eq!(best_scorer(players(&[("Ann Smith", 3), ("Bob Jones", 7)])), Some(("Bob".to_string(), 7)));
+        assert_eq!(best_scorer(players(&[("Ann Smith", 3), ("Bob  Jones", 7)])), Some(("Bob Jones".to_string(), 7)));
         assert_eq!(best_scorer(players(&[("Ann Smith", 0)])), None);
-        assert_eq!(scorer_name("Ann Smith"), scorer_name("Ann"));
-        // a file with the full name loads as before and writes the one form, the goals untouched
+        // the site's full names and the game's older first-name rows both stay as they are
         let l = League::parse("", "S\tAnn\t2031\tAjax\tBob Jones\t7\t\tChampion\nS\tAnn\t2032\tAjax\tBob\t4\t\t\n");
         assert_eq!(l.seasons[0].scorer, "Bob Jones");
         assert_eq!(l.seasons[0].goals, "7");
-        assert_eq!(l.lines(), "S\tAnn\t2031\tAjax\tBob\t7\t\tChampion\nS\tAnn\t2032\tAjax\tBob\t4\t\t\n");
+        assert_eq!(l.lines(), "S\tAnn\t2031\tAjax\tBob Jones\t7\t\tChampion\nS\tAnn\t2032\tAjax\tBob\t4\t\t\n");
     }
 
     #[test]

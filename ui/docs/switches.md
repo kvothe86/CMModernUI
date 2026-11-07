@@ -1,6 +1,9 @@
 # Feature switches, exe patches, dsound stand-in
 
-## The 32 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+## The 37 switches (`FEATURES` in `src\lib.rs`, index = bit = exe switch byte)
+
+`ENABLED` is a u64 since 2026-11-07 (switches 32 and up); an exe made before has bytes 32-35 = 0
+(free space after the stub): off until `set_switch.py <folder> <index>` sets them.
 
 | # | Name | Const | Covers |
 |---|---|---|---|
@@ -19,9 +22,9 @@
 | 12 | `menu_fixes` | `MENU_FIXES` | menu bar icons, dark dropdowns, arrows, network "Contacting Server" box |
 | 13 | `status_bars` | `STATUS_BARS` | morale / condition bars |
 | 14 | `search_ability` | `SEARCH_ABILITY` | Ability view in search and squad |
-| 15 | `scout_stars` | `SCOUT_STARS` | scout Rec stars |
+| 15 | `scout_stars` | `SCOUT_STARS` | scout Rec stars; the CM intrinsic % after a rated player's name on the "... Search" screen, as the search's scout sees him (his error in it, no margin shown) |
 | 16 | `assistant_pick` | `ASSISTANT_PICK` | Assistant button |
-| 17 | `team_report` | `TEAM_REPORT` | Team report item in that button's menu (squad screen; needs `assistant_pick`) |
+| 17 | `team_report` | `TEAM_REPORT` | Team report item in that button's menu (squad screen; needs `assistant_pick`); a % pill under each slot, the slot's intrinsic score as the assistant sees it |
 | 18 | `honours` | `HONOURS` | cups and counts on a club's Honours list (needs `stats_table`) |
 | 19 | `export_button` | `EXPORT_BUTTON` | Print called Export, clear of the crest, always to a file |
 | 20 | `injury_history` | `INJURY_HISTORY` | last injuries and bans on Injuries & Bans |
@@ -30,12 +33,17 @@
 | 23 | `scout_screen` | `SCOUT_SCREEN` | Full scout report chip and screen |
 | 24 | `bigger_text` | `BIGGER_TEXT` | larger fonts where a text fits its box, 1280 wide or more (`font_up`, `roomier_font`) |
 | 25 | `squad_table` | `SQUAD_TABLE` | squad's Position(s) view as a table in two wide columns, 1280 wide or more |
-| 26 | `table_icons` | `TABLE_ICONS` | league table's C, P, Pl, R boxes as a cup and arrows (`comp::text`; needs `stats_table`) |
+| 26 | `table_icons` | `TABLE_ICONS` | league table's C, P, Pl, R boxes as a cup and arrows; Q as a green tick, Pl on a continental table (nation column) as a blue PO pill (`comp::text`; needs `stats_table`) |
 | 27 | `background_show` | `BACKGROUND_SHOW` | Background Changes on: panel-coloured pixels let the picture through at the flip (`keep_picture`, `let_picture_through`); how much in cmui.ini |
 | 29 | `challenge` | `CHALLENGE` | CM Challenge button and page in a network game ([challenge.md](challenge.md)) |
 | 28 | `modern_buttons` | `MODERN_BUTTONS` | grey buttons, dropdowns and list cells in steel blue, column heads flat, no box around an empty stats cell |
 | 30 | `career_goals` | `CAREER_GOALS` | the Goals tab of CM Challenge: ten career goals a manager (needs `challenge`; the host's switch decides, a client shows what the host sends). An exe from before has the byte 0: `set_switch.py <folder> 30` |
 | 31 | `coach` | `COACH` | Claude as coach (`src\coach.rs`): a Coach button under the menu bar (with CM Challenge's in Game Options' place; Game Options' widget moves under them, `options_flip`) opens a page right of the bar with Pre-match briefing, Post-match analysis, Team report (expanded) and Ask the coach (typed questions, a conversation). **Only at 1680 wide and up** (`small_screen()` false), single player or network host (off on a client), and **off when cmui.ini has no `claude_api_key=`** (read once at start; `claude_model=` overrides `claude-haiku-5-5`). One HTTPS request per tab per game day (WinHTTP, `anthropic-version: 2026-10-21`), on its own thread; Ask again repeats it. Sent along: the assistant's report and every player (age, positions, stars, condition, Av R, value, wage, contract), the next fixture as last seen on the squad / tactics screen with the scout's report on the opponent, our last match screen's texts (kept from the frames drawn) and the texts of the screen behind. Keys of the Ask tab go through a subclass of the game window (WM_KEYDOWN / WM_CHAR). The key never goes in the log; `cmui_package\make_zip.py` and `make_cm25_zip.py` drop the line and refuse any file with `sk-ant-`. An exe from before has the byte 0: `set_switch.py <folder> 31` |
+| 32 | `weather_icons` | `WEATHER_ICONS` | a drawn icon (sun, rain, downpour, snow, wind lines) before the game's weather text, "Weather - Gusty, Wet, 10°C" or "Breezy, 7°C" (no rain word: dry), and in the match screen's WEATHER box (`weather.rs`) |
+| 33 | `form_timeline` | `FORM_TIMELINE` | the club header's last five as small W / D / L pills under the league line (`form::mini`; results from FIXTURE_MANAGER::find_fixtures, `form.rs`) |
+| 34 | `match_card` | `MATCH_CARD` | on "Proceed to the match ?": both clubs, league place, last five, this season's meetings (`card.rs`) |
+| 35 | `season_review` | `SEASON_REVIEW` | on the first day of a new season a card over the screen until Back: place, record, goals, biggest win, points, stars, signings, last six (`season.rs`; a daily snapshot in `cmui_season.txt`) |
+| 36 | `national_pool` | `NATIONAL_POOL` | a "National pool" item in a national team's Assistant menu (squad screen, single player / host): every player whose first nationality is the country, by group (GK / DEF / MID / ATT), best 100 a group by the assistant's % (`scout::seen_score`, his error in it); + per row and "Add top 10 here" put players on the game's Short List (SCOUT_MANAGER `*0xb74448`, add_to_shortlist 0x7f75f0, is_player_shortlisted 0x7f7490); filters, pages, Back (`natpool.rs`) |
 
 Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where
 the exe's byte is 0 (`exe_switches`), then reads `cmui.ini`: `name=0` off, missing names written
@@ -49,11 +57,19 @@ keeps the game's palette and picture. Settings that are not switches in the same
 
 `make_exe.py` writes `cm0102_ui.exe` from `cm0102.exe`: a loader stub (entry point -> push
 "cmui.dll", `LoadLibraryA`, jmp 0x547a13) in the `.nick` section (or a `.cmui` section), the mark
-`CMUI` at stub+0x1c and one byte per feature at stub+0x20 (`FEATURES = 31`, all 1).
+`CMUI` at stub+0x1c and one byte per feature at stub+0x20 (`FEATURES = 36`, all 1).
 `make_patches.py "<cm0102.exe>"` writes the same as CM0102Patcher misc patches into `patches\`
 (`cmui Loader` + `cmui - <Title>` per switch + `cmui - Everything`); `--test exe out [a,b]` applies
 them like the patcher. `install.py "<game>" [--check|--off a,b|--crests|--badges|--uninstall|--list]`
 checks the hook sites, writes the exe, DLL and ini.
+
+**Safeguard (2026-11-07, after Career Goals was off in three folders for days):**
+`install_all.ps1` runs `check_switches.py <folder>` after each DLL copy: every switch byte that
+`FEATURES` in `lib.rs` names is set to 1 in that folder's exe (only those bytes change, checked),
+printing "= all N" or "TURNED ON <folder>: <switches>", and naming any `cmui.ini` switch-offs
+(those stay: the player's choice). The test `every_switch_list_agrees` fails the build's tests
+when `make_exe.py`'s count or a name in `make_patches.py`, `install.py` or `cmui_config.ps1`
+is missing. So a new switch needs only its lists right; the install turns it on everywhere.
 
 **Add a switch to an existing exe: `python set_switch.py "<folder>" <index> [0|1]`. Never rebuild
 an exe with `make_exe.py` to add one** (it drops patches made to that exe). Adding a feature means
@@ -62,7 +78,8 @@ touching five places: `FEATURES` + const in `lib.rs`, `FEATURES` in `make_exe.py
 `install_all.ps1` (the hard rule: main `E:\CM0102` too). `set_switch.py` keeps its first backup
 per index: an older `cm0102_ui_before_switch<index>.exe` in the folder makes its "no other byte
 changed" check fail after the byte is written (2026-10-30, F Restructured, a backup of
-2026-10-27); run it again to see "already 1".
+2026-10-27); run it again to see "already 1". The backups pile up (59 of them, 524 MB, went to
+the Recycle Bin on the user's word, 2026-11-07): remove them once the switch is seen working.
 
 ## dsound stand-in (`E:\CM0102\dsfix`)
 
@@ -75,6 +92,7 @@ same seven game folders as `install_all.ps1`, hash-checks each. FIXES "Network c
 
 ## Inconsistencies noticed
 
-- `..\README.md` still says "15 switch bytes" / "15 hook sites" / "all 16 not detected" in places;
-  the code has 29 (`FEATURES` in `lib.rs`, `make_exe.py`, `make_patches.py`, `install.py` all 29).
-  The hook-site count in `install.py` was not re-verified.
+- `..\README.md`'s switch byte count and switch list now point here (2026-11-07); its "15 hook
+  sites" / "all 16 not detected" are from the patcher test of 2026-10-27 and were not re-run.
+  `FEATURES` is 37 in `lib.rs`, `make_exe.py`, `make_patches.py`, `install.py` and
+  `cmui_config.ps1` (the window: three columns of thirteen).

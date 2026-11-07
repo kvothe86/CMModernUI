@@ -47,38 +47,35 @@ C	Staff	Max 2 staff members in total	3
 C	Staff	Dutch staff only	3
 C	Staff	No physio and no scout	3
 C	Staff	All coaches with coaching attributes below 5	6
-C	Players	Keeper 10+ clean sheets	6
-C	Players	Player scores 20+ goals	9
+C	Players	Keeper 10+ clean sheets	3
+C	Players	Player scores 20+ goals	6
 C	Players	At least 3 players with 10+ goals	6
-C	Players	At least 3 players with 5+ assists	6
+C	Players	At least 3 players with 5+ assists	3
+C	Players	Team gets no more than 1 red card	9
 C	Players	Team gets no more than 3 red cards	6
 C	Players	Team gets no more than 5 red cards	3
-C	Players	Player gets two of three (top scorer/assists/average rating)	6
-C	Players	Player becomes top scorer OR top assists OR highest average rating	3
-C	Tactics	Play with a sweeper in the starting XI	6
-C	Tactics	Play without wing backs	6
-C	Tactics	Play with at least three attackers	3
-C	Tactics	Always 4-4-2 (no other formation)	3
-C	Tactics	Play with at least five defenders	3
-C	Tactics	Play with at least five midfielders	3
-C	Tactics	Play without attacking wingers	6
-C	Tactics	Play without a striker (min. 15 competitive matches)	6
-C	Tactics	Play park the bus, defensive, long ball, counter	6
-C	Age	3 players 35+ in the starting XI	6
-C	Age	5 players 30+ in the starting XI	6
-C	Age	5 players 32+ in the starting XI	9
-C	Age	5 players under 21 in the starting XI	3
-C	Age	5 players under 23 in the starting XI	3
-C	Age	Average age starting XI <=23	6
-C	Age	Average age starting XI >=30	6
-C	Age	No player younger than 18 in the starting XI	3
-C	Squad	5 left-footed players in the starting XI	3
-C	Squad	5 right-footed players in the starting XI	3
-C	Squad	Keeper + 4 defenders all 28+	6
+C	Players	Player becomes top scorer OR top assists OR highest average rating	9
+C	Players	Player gets two of three (top scorer/assists/average rating)	20
+C	Players	Player becomes top scorer, top assists and highest average rating	20
+C	Age	3 players 35+ in the starting XI	20
+C	Age	5 players 30+ in the starting XI	9
+C	Age	5 players 32+ in the starting XI	20
+C	Age	5 players under 21 in the starting XI	20
+C	Age	5 players under 23 in the starting XI	20
+C	Age	Average age starting XI <=23	20
+C	Age	Average age starting XI >=30	20
+C	Age	No player younger than 18 in the starting XI	3	1
+C	Age	First team average age <=20	20
+C	Age	First team average age <=23	20
+C	Age	First team average age >=30	20
+C	Age	First team average age >=32	20
+C	Squad	5 left-footed players in the starting XI	12
+C	Squad	5 right-footed players in the starting XI	3	1
+C	Squad	Keeper + 4 defenders all 28+	12
 C	Squad	At least 3 homegrown players in the starting XI	6
 C	Squad	No player worth more than €10M in the starting XI	6
 C	Squad	At least 2 youth players promoted to the starting XI	6
-C	Squad	At least 3 players with international caps this season	6
+C	Squad	At least 3 players with international caps this season	3
 C	Transfers	Max 1 purchase	9
 C	Transfers	Max 3 purchases	6
 C	Transfers	No winter transfers	3
@@ -89,16 +86,35 @@ C	Transfers	Biggest purchase < €5M	6
 C	Transfers	Only Bosman/free transfers	6
 C	Transfers	Sell your best player (avg rating 1 January)	6
 C	Transfers	Release five players from your squad (no fee)	6
-C	Nationality	5 players from Africa	6
-C	Nationality	5 players from South America	6
-C	Nationality	5 players from Eastern Europe	6
-C	Nationality	5 players from Scandinavia	6
+C	Nationality	5 players from Africa	12
+C	Nationality	5 players from South America	12
+C	Nationality	5 players from Eastern Europe	20
+C	Nationality	5 players from Scandinavia	20
 C	Nationality	5 foreigners in the starting XI	3
-C	Nationality	5 players from NED/BEL/POR/TUR	3
+C	Nationality	5 players from NED/BEL/POR/TUR	6
 C	Nationality	5 players from ENG/SPA/GER/ITA/FRA	3
-C	Nationality	3 players from the same country (not your own)	3
-C	Nationality	No player from your own country in the starting XI (min. 15 times)	9
-C	Nationality	At least 5 different nationalities in the starting XI	6
+C	Nationality	3 players from the same country (not your own)	6
+C	Nationality	No player from your own country in the starting XI (min. 15 times)	12
+C	Nationality	At least 5 different nationalities in the starting XI	3
+C	Nationality	Team of 1 nationality from NED/BEL/POR/TUR	20
+C	Nationality	Team of 1 nationality from ENG/SPA/GER/ITA/FRA	20
+C	Nationality	Team of 1 nationality from the other countries	20
+C	Nationality	Fatbike kids challenge (African players only)	20
+C	Nationality	Favela challenge (South American players only)	20
+C	Nationality	Murica challenge (North American players only)	20
+C	Nationality	Prawn cracker challenge (Asian players only)	20
+C	Nationality	Down Under challenge (Oceanian players only)	20
+C	Nationality	No players from your own country (competition)	9	1
+C	Tactics	Play with a sweeper in the starting XI	6
+C	Tactics	Play without wing backs	6
+C	Tactics	Play with at least three attackers	3
+C	Tactics	Always 4-4-2 (no other formation)	3
+C	Tactics	Play with at least five defenders	3
+C	Tactics	Play with at least five midfielders	3
+C	Tactics	Play without attacking wingers	6
+C	Tactics	Play without a striker (min. 15 competitive matches)	6
+C	Tactics	Play park the bus, defensive, long ball, counter	6	1
+C	Tactics	Play with 1 defender (Kamikaze)	6
 Q	National honours	Win the league title in a country of your choice	25
 Q	National honours	Win the national cup in a country of your choice	10
 Q	National honours	Win the national Super Cup in a country of your choice	10

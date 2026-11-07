@@ -44,12 +44,17 @@ FEATURES = [
     ('scout_screen', 'Scout Screen', 'A Full scout report chip on "<club> scouting completed" stories: the eleven the scout expects, in the shape the manager prefers, without those injured or banned, and his report.'),
     ('bigger_text', 'Bigger Text', "At 1280 wide or more: buttons, tabs, the rows of a profile's tabs and the Position(s) view in a larger font where the text fits its box."),
     ('squad_table', 'Squad Table', "At 1280 wide or more: the squad's Position(s) view in two wide columns, a table of position, CA stars, average rating, condition, goals and appearances."),
-    ('table_icons', 'Table Icons', 'Needs Stats Table. The league table\'s C, P, Pl and R boxes as a cup, a green arrow up, two amber arrows and a red arrow down.'),
+    ('table_icons', 'Table Icons', 'Needs Stats Table. The league table\'s C, P, Pl and R boxes as a cup, a green arrow up, two amber arrows and a red arrow down; in a continental league phase Q as a green tick and Pl as a blue PO pill.'),
     ('background_show', 'Background Show', 'With Background Changes on: the dark panels let the picture through.'),
     ('modern_buttons', 'Modern Buttons', "The game's grey buttons, dropdowns and list cells in steel blue, column headers flat, and no box around an empty stats cell."),
     ('challenge', 'CM Challenge', "In a network game: a button under the menu bar opens the managers' league, prizes and points from the game's own history, RAD challenges and the seasons so far."),
     ('career_goals', 'Career Goals', 'Needs CM Challenge. A Goals tab: the host picks ten goals for a whole career per manager, from 48 worth 10 to 150 points; the game ticks off the 46 it can read (history, league tables, awards, club records), the host the rest.'),
     ('coach', 'Coach', 'At 1680x1050 and up, with claude_api_key=<your Anthropic API key> in cmui.ini: a Coach button under the menu bar. Claude gives a pre-match briefing, a post-match analysis, an expanded team report and answers typed questions. Each answer is one paid API request.'),
+    ('weather_icons', 'Weather Icons', "Needs Stats Table. An icon for the match's weather (sun, cloud, rain, snow) by the weather the game names on fixtures, results and the match screen."),
+    ('form_timeline', 'Form Timeline', "A strip on a club's screen: its last ten results as W, D and L pills with the opponent's crest, and its league place week by week as a line."),
+    ('match_card', 'Match Card', 'Before a match of the human manager: a card with both clubs, their last five results, their league places and the last meetings.'),
+    ('season_review', 'Season Review', "On 1 July a card on the human manager's season: final place, record, goals, biggest win, cup run, top scorer, assists, best average, signings, CM Challenge points and the last six results."),
+    ('national_pool', 'National Pool', "Needs Assistant Pick. A National pool item in a national team's Assistant menu: every player of the country (the first nationality), rated by the assistant, best 100 a position group for a big country; + puts one on the Short List."),
 ]
 
 

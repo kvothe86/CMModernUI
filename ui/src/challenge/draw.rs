@@ -53,6 +53,9 @@ static mut PICK: usize = 0; // the manager on Stats and RAD
 static mut FILTER: usize = 0; // History: 0 all, else that manager
 static mut SCROLL: usize = 0; // History, Rules: the first row
 static mut BACK_YEARS: i32 = 0; // RAD: how many seasons back
+static mut SEASON_BACK: usize = 0; // Season tab: how many seasons back
+static mut STATS_YEAR: i32 = 0; // Stats: the season counted, 0 all (the host counts it)
+static mut STATS_YEARS: Vec<i32> = Vec::new(); // the seasons there are, newest first (from the page)
 static mut HOVER: Option<usize> = None;
 static mut HOVERED: Option<Spot> = None; // the spot of `HOVER`, while `SPOTS` is drawn anew
 static mut SPOTS: Vec<(Rect, Spot)> = Vec::new();
@@ -83,6 +86,12 @@ enum Spot {
     Country(usize),
     Nation(usize),
     Cancel,
+    SeasonEarlier,
+    SeasonLater,
+    Rate(u32), // year << 4 | mark
+
+    StatsEarlier,
+    StatsLater,
 }
 
 /// A name's first word, as the page's lines match managers.
@@ -151,6 +160,7 @@ unsafe fn open() {
     OPEN = true;
     PAGE.clear();
     (TAB, PICK, FILTER, SCROLL, BACK_YEARS, HOVER, SPIN) = (0, 0, 0, 0, 0, None, None);
+    (SEASON_BACK, STATS_YEAR) = (usize::MAX, 0);
     (NEW_FROM, NEW_ROW, NOTHING_LEFT, PICKING) = (None, None, false, None);
     request(ACT_NONE, 0, &[]);
 }
@@ -160,7 +170,9 @@ unsafe fn open() {
 unsafe fn request(action: u32, arg: u32, name: &[u8]) {
     if remote::CLIENT {
         ASKS += 1;
-        KEY = key(b'E', &[ASKS]);
+        // (a mark for his own season goes with the question: the host sets it)
+        let (a, b) = if action == ACT_RATE { (action, arg) } else { (0, 0) };
+        KEY = key(b'E', &[ASKS, STATS_YEAR as u32, a, b]);
         WAITING = true;
         LOOKED = None;
         return;
@@ -168,7 +180,7 @@ unsafe fn request(action: u32, arg: u32, name: &[u8]) {
     act(action, arg, name);
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel());
     let me = humans().into_iter().find(|h| h.0 == manager).map_or(String::new(), |h| h.1);
-    let text = page(&me, true);
+    let text = page(&me, true, STATS_YEAR);
     if trace() {
         log(&format!("challenge page:\n{text}"));
     }
@@ -264,6 +276,24 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             Spot::Later => BACK_YEARS = (BACK_YEARS - 1).max(0),
             Spot::Up => SCROLL = SCROLL.saturating_sub(10),
             Spot::Down => SCROLL += 10,
+            Spot::Rate(arg) => {
+                let me = {
+                    let lines: Vec<Vec<&[u8]>> = PAGE.split(|&c| c == b'\n').map(fields).collect();
+                    lines.iter().find(|l| l[0] == b"C").map_or(Vec::new(), |l| field(l, 2).to_vec())
+                };
+                request(ACT_RATE, arg, &me);
+            }
+            Spot::SeasonEarlier => SEASON_BACK = SEASON_BACK.saturating_add(1),
+            Spot::SeasonLater => SEASON_BACK = SEASON_BACK.saturating_sub(1),
+            // (0 all, then the seasons newest first: the host counts the one chosen)
+            Spot::StatsEarlier | Spot::StatsLater => {
+                let mut choices = vec![0];
+                choices.extend(STATS_YEARS.iter().copied());
+                let at = choices.iter().position(|&y| y == STATS_YEAR).unwrap_or(0);
+                let at = if SPOTS[k].1 == Spot::StatsEarlier { (at + 1).min(choices.len() - 1) } else { at.saturating_sub(1) };
+                STATS_YEAR = choices[at];
+                request(ACT_NONE, 0, &[]);
+            }
         }
         redraw = true;
     }
@@ -436,9 +466,14 @@ pub unsafe fn overlay() {
             text_at((x1 + x2) / 2, sh / 2 - 30, sh / 2 + 30, f(4), MUTED, b"Fetching the standings...", 1);
         } else {
             let names: Vec<&[u8]> = managers.iter().map(|k| k[1]).collect();
+            // (the seasons there are, newest first: the Season and Stats steppers)
+            let mut years: Vec<i32> = of(b"L").iter().map(|l| number(field(l, 5))).filter(|&y| y > 0).collect();
+            years.sort_unstable_by(|a, b| b.cmp(a));
+            years.dedup();
+            STATS_YEARS = years;
             match TAB {
                 0 => dashboard(area, &managers, &of(b"F"), &of(b"G")),
-                1 => this_year(area, &of(b"L")),
+                1 => this_year(area, &of(b"L"), &of(b"R"), &of(b"P"), &of(b"Q"), &of(b"W"), number(field(head, 4)), field(head, 2)),
                 TAB_RAD => rads(area, &of(b"R"), &of(b"A"), head, &names),
                 3 => stats(area, &of(b"T"), &of(b"Y"), &names),
                 4 => past(area, &of(b"H"), &names),
@@ -541,15 +576,47 @@ unsafe fn dashboard((x1, y1, x2, y2): Rect, rows: &Lines, facts: &Lines, ranks: 
 }
 
 /// Season: this season so far, a card a manager with the game's results as chips.
-unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines) {
+/// "<  label  >" at the right of a row ending at x2: the arrows only where there is more.
+unsafe fn stepper(x2: i32, y: i32, h: i32, label: &[u8], earlier: Option<Spot>, later: Option<Spot>) {
+    let w = text_width(f(3), label) + 32;
+    let (right, mid) = (x2 - h - 6, x2 - h - 6 - w);
+    if let Some(s) = later {
+        button((x2 - h, y, x2, y + h), b">", s, false);
+    }
+    round((mid, y, right, y + h), 4, CARD);
+    text_at((mid + right) / 2, y, y + h, f(3), GOLD, label, 1);
+    if let Some(s) = earlier {
+        button((mid - 6 - h, y, mid - 6, y + h), b"<", s, false);
+    }
+}
+
+/// Season: a season of every manager (the stepper picks it, this season first). A card each: the
+/// prizes at the left, each with its competition, team and day under it; at the right the RAD
+/// challenges done (green) or failed (red) that season. The design the user chose on 2026-11-06.
+#[allow(static_mut_refs)]
+unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines, rads: &Lines, prizes: &Lines, goals: &Lines, marks: &Lines, now: i32, me: &[u8]) {
+    let years = STATS_YEARS.clone();
+    // (opened: the running season, not a later one a league file may already hold)
+    if SEASON_BACK == usize::MAX {
+        SEASON_BACK = years.iter().position(|&y| y == now).unwrap_or(0);
+    }
+    SEASON_BACK = SEASON_BACK.min(years.len().saturating_sub(1));
+    let year = years.get(SEASON_BACK).copied().unwrap_or(now);
+    let sh = (y2 - y1) * 5 / 100;
+    let label = format!("Season {year}/{}", year + 1);
+    stepper(x2, y1, sh, label.as_bytes(), (SEASON_BACK + 1 < years.len()).then_some(Spot::SeasonEarlier), (SEASON_BACK > 0).then_some(Spot::SeasonLater));
+    let rows: Vec<&&Vec<&[u8]>> = rows.iter().filter(|r| number(field(r, 5)) == year).collect();
+    let top = y1 + sh + 10;
     let n = (rows.len() as i32).max(1);
-    let bh = (y2 - y1 - (n - 1) * 12) / n;
-    let chip = f(3);
-    let chip_h = text_width(chip, b"Mg") * 2 / 3 + 12;
+    let bh = (y2 - top - (n - 1) * 12) / n;
+    let head_line = text_width(f(3), b"Mg") * 2 / 3 + 8;
+    // (the lists' rows: small text, so more fits)
+    let line = text_width(f(2), b"Mg") * 2 / 3 + 6;
+    let small = text_width(f(1), b"Mg") * 2 / 3 + 4;
     for (k, r) in rows.iter().enumerate() {
-        let y = y1 + k as i32 * (bh + 12);
+        let y = top + k as i32 * (bh + 12);
         card((x1, y, x2, y + bh));
-        let head = (chip_h * 2).min(bh / 2);
+        let head = (head_line * 2).min(bh / 3);
         draw_crest(r[2], x1 + 14, y + 8, head - 10);
         text_at(x1 + head + 16, y + 6, y + head / 2 + 6, f(4), INK, r[1], 0);
         text_at(x1 + head + 16, y + head / 2 + 4, y + head + 2, f(2), MUTED, r[2], 0);
@@ -558,34 +625,138 @@ unsafe fn this_year((x1, y1, x2, y2): Rect, rows: &Lines) {
         round(badge, 4, PRIMARY);
         text_at((badge.0 + badge.2) / 2, badge.1, badge.3, f(5), DARK, r[3], 1);
         text_at(badge.0 - 10, badge.1, badge.3, f(2), MUTED, b"points this season", 2);
-        let items: Vec<&[u8]> = r[4].split(|&c| c == b'|').filter(|i| !i.is_empty()).collect();
-        if items.is_empty() {
-            text_at(x1 + 18, y + head + 6, y + head + 6 + chip_h, f(3), MUTED, b"No results yet this season", 0);
+        // his own mark for the season, 1 to 10: boxes to click on his own card (a click on the mark
+        // he has takes it away), the mark as text on the others' (user, 2026-11-06)
+        let mark = number(field(r, 6));
+        let (mx, my, side) = ((x1 + x2) / 2 - 140, y + 12, (head - 18).clamp(14, 26));
+        if !me.is_empty() && first_word(r[1]) == first_word(me) {
+            text_at(mx - 10, my, my + side, f(2), MUTED, b"Your mark", 2);
+            for v in 1..=10u32 {
+                let bx = mx + (v as i32 - 1) * (side + 3);
+                let s = Spot::Rate((year as u32) << 4 | if mark == v as i32 { 0 } else { v });
+                let fill_c = if mark >= v as i32 { PRIMARY } else if lit(&s) { BORDER } else { CARD };
+                round((bx, my, bx + side, my + side), 3, fill_c);
+                text_at(bx + side / 2, my, my + side, f(1), if mark >= v as i32 { DARK } else { MUTED }, v.to_string().as_bytes(), 1);
+                spot((bx, my, bx + side, my + side), s);
+            }
+        } else if mark > 0 {
+            text_at(mx, my, my + side, f(2), MUTED, format!("Mark {mark}/10").as_bytes(), 0);
         }
-        // the chips, wrapped: a trophy gold, a loss of points red
-        let (mut x, mut row) = (x1 + 16, y + head + 8);
-        for item in items {
+        let (left, split, right, bottom) = (x1 + 16, (x1 + x2) / 2 + 8, x2 - 16, y + bh - 4);
+        let body = y + head + 6;
+        text_at(left, body, body + small, f(1), MUTED, b"TROPHIES", 0);
+        text_at(split, body, body + small, f(1), MUTED, b"CHALLENGES DONE", 0);
+        let list_top = body + small + 4;
+        // the results (trophies and places), then the bonuses (club changes, loyalty, a long wait
+        // ended: the rules' categories) under their own heading (user, 2026-11-06)
+        let bonus = |name: &[u8]| prizes.iter().any(|p| field(p, 2) == name && [&b"Club changes"[..], b"Trophy Drought"].contains(&field(p, 1)));
+        let (mut won, mut bonuses): (Vec<Entry>, Vec<Entry>) = (Vec::new(), Vec::new());
+        for item in r[4].split(|&c| c == b'|').filter(|i| !i.is_empty()) {
             let p: Vec<&[u8]> = item.split(|&c| c == b';').collect();
-            let (name, points, trophy) = (field(&p, 0), number(field(&p, 1)), field(&p, 2) != b"0");
-            let value = format!("{points:+}");
-            let w = text_width(chip, name) + text_width(chip, value.as_bytes()) + 42 + if trophy { chip_h } else { 0 };
-            if x + w > x2 - 12 {
-                (x, row) = (x1 + 16, row + chip_h + 6);
+            let e = Entry { icon: (field(&p, 2) != b"0").then_some((ICON_TROPHY, MEDAL)), name: field(&p, 0).to_vec(), points: Some(number(field(&p, 1))), detail: field(&p, 3).to_vec(), muted: false };
+            if bonus(field(&p, 0)) { bonuses.push(e) } else { won.push(e) }
+        }
+        if won.is_empty() {
+            text_at(left, list_top, list_top + line, f(2), MUTED, if year == now { &b"No results yet this season"[..] } else { b"No results" }, 0);
+        }
+        let end = entries((left - 4, list_top, split - 16, bottom), &won, line, small);
+        if !bonuses.is_empty() {
+            let at = end.max(list_top + line + 4) + 4;
+            text_at(left, at, at + small, f(1), MUTED, b"BONUSES", 0);
+            entries((left - 4, at + small + 4, split - 16, bottom), &bonuses, line, small);
+        }
+        // the challenges of that season: done or reached (green, with what the game read and who
+        // decided), failed (red)
+        let shown: Vec<Entry> = rads.iter().filter(|c| first_word(c[2]) == first_word(r[1]) && number(field(c, 6)) == year).filter_map(|c| {
+            let (text, points, note, host) = (field(c, 5), number(field(c, 3)), field(c, 8), field(c, 10) == b"1");
+            match standing(c, now).2 {
+                2 => Some(Entry { icon: Some((ICON_CROSS, DANGER)), name: [text, if host { &b"  -  failed (host)"[..] } else { b"  -  failed" }].concat(), points: None, detail: Vec::new(), muted: true }),
+                1 => {
+                    let who: &[u8] = if host { b"ticked by the host" } else { b"the game" };
+                    let detail = if note.is_empty() { who.to_vec() } else { [note, b"  -  ", who].concat() };
+                    Some(Entry { icon: Some((ICON_CHECK, SUCCESS)), name: text.to_vec(), points: Some(points), detail, muted: false })
+                }
+                _ => None,
             }
-            if row + chip_h > y + bh - 4 {
-                break;
-            }
-            round((x, row, x + w, row + chip_h), 4, CARD);
-            let mut tx = x + 12;
-            if trophy {
-                draw_icon(ICON_TROPHY, tx + chip_h / 3, row + chip_h / 6, chip_h * 6 / 10, MEDAL);
-                tx += chip_h;
-            }
-            text_at(tx, row, row + chip_h, chip, INK, name, 0);
-            text_at(x + w - 12, row, row + chip_h, chip, if points < 0 { ROSE } else { CYAN }, value.as_bytes(), 2);
-            x += w + 8;
+        }).collect();
+        if shown.is_empty() {
+            text_at(split, list_top, list_top + line, f(2), MUTED, b"None", 0);
+        }
+        let end = entries((split - 4, list_top, right, bottom), &shown, line, small);
+        // the career goals reached that season, a group of their own (user, 2026-11-06)
+        let reached: Vec<Entry> = marks.iter().filter(|w| first_word(w[1]) == first_word(r[1]) && number(field(w, 3)) == year).filter_map(|w| {
+            let goal = goals.iter().find(|q| field(q, 1) == field(w, 2))?;
+            let country = field(w, 4);
+            let who: &[u8] = if field(w, 5) == b"1" { b"ticked by the host" } else { b"the game" };
+            let detail = if country.is_empty() { who.to_vec() } else { [country, b"  -  ", who].concat() };
+            Some(Entry { icon: Some((ICON_STAR, MEDAL)), name: field(goal, 3).to_vec(), points: Some(number(field(goal, 4))), detail, muted: false })
+        }).collect();
+        if !reached.is_empty() {
+            let at = end.max(list_top + line + 4) + 4;
+            text_at(split, at, at + small, f(1), MUTED, b"CAREER GOALS", 0);
+            entries((split - 4, at + small + 4, right, bottom), &reached, line, small);
         }
     }
+}
+
+/// A row of the Season tab: icon, name, points (None: not shown), a detail line, a muted name.
+struct Entry {
+    icon: Option<(u32, [u8; 3])>,
+    name: Vec<u8>,
+    points: Option<i32>,
+    detail: Vec<u8>,
+    muted: bool,
+}
+
+/// The rows in a box as roomy as they fit: two lines each (the detail under the name), else one
+/// line each (the detail after it), else one line in two columns; what still does not fit is left.
+/// The bottom of what was drawn.
+unsafe fn entries((x1, y1, x2, y2): Rect, list: &[Entry], line: i32, small: i32) -> i32 {
+    let full: i32 = list.iter().map(|e| line + if e.detail.is_empty() { 0 } else { small } + 10).sum();
+    let one = line + 6;
+    let (two_lines, columns) = if full <= y2 - y1 { (true, 1) } else if one * list.len() as i32 <= y2 - y1 { (false, 1) } else { (false, 2) };
+    let per = if columns == 2 { ((y2 - y1) / one).max(1) as usize } else { list.len() };
+    let cw = (x2 - x1 - (columns - 1) * 8) / columns;
+    let (mut y, mut end) = (y1, y1);
+    // (small text, so a season with many trophies still fits: user, 2026-11-06)
+    let (big, tiny) = (f(2), f(1));
+    for (k, e) in list.iter().enumerate() {
+        let col = (k / per.max(1)) as i32;
+        if col >= columns {
+            break;
+        }
+        if k % per.max(1) == 0 && k > 0 {
+            y = y1;
+        }
+        let (bx1, bx2) = (x1 + col * (cw + 8), x1 + col * (cw + 8) + cw);
+        let h = if two_lines && !e.detail.is_empty() { line + small + 6 } else { line + 2 };
+        if y + h > y2 {
+            continue;
+        }
+        round((bx1, y, bx2, y + h), 4, CARD);
+        if let Some((icon, colour)) = e.icon {
+            draw_icon(icon, bx1 + 8, y + 1 + line / 6, line * 6 / 10, colour);
+        }
+        let tx = bx1 + line + 8;
+        let value = e.points.map(|p| format!("{p:+}")).unwrap_or_default();
+        let value_w = if value.is_empty() { 0 } else { text_width(big, value.as_bytes()) + 12 };
+        let name_w = text_width(big, &e.name).min(bx2 - 12 - value_w - tx);
+        text_at(tx, y + 1, y + 1 + line, big, if e.muted { MUTED } else { INK }, &clip_text(big, &e.name, bx2 - 12 - value_w - tx), 0);
+        if let Some(p) = e.points {
+            text_at(bx2 - 10, y + 1, y + 1 + line, big, if p < 0 { ROSE } else { CYAN }, value.as_bytes(), 2);
+        }
+        if !e.detail.is_empty() {
+            if two_lines {
+                text_at(tx, y + 1 + line, y + 1 + line + small, tiny, MUTED, &clip_text(tiny, &e.detail, bx2 - 10 - tx), 0);
+            } else if columns == 1 {
+                let dx = tx + name_w + 14;
+                text_at(dx, y + 1, y + 1 + line, tiny, MUTED, &clip_text(tiny, &e.detail, bx2 - 12 - value_w - dx), 0);
+            }
+        }
+        end = end.max(y + h);
+        y += h + 4;
+    }
+    end
 }
 
 /// Where a challenge stands: its word, its colour and its group (0 active, 1 reached, 2 failed).
@@ -701,7 +872,9 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     }
     fill(rx, y1 + line + 2, rr, y1 + line + 3, BORDER);
     let mine = of_season(chosen);
-    let points: i32 = mine.iter().filter(|r| r[4] == b"1").map(|r| number(r[3])).sum();
+    // (a row the game reads reached counts too: only "at least" challenges get there, and they stay
+    // reached; `track::judge`)
+    let points: i32 = mine.iter().filter(|r| standing(r, now).2 == 1).map(|r| number(r[3])).sum();
     let rh = (y2 - y1 - line * 3) / 8;
     let mut y = y1 + line + 8;
     if mine.is_empty() {
@@ -722,7 +895,7 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
             y += rh;
         }
     }
-    let foot = if host { format!("{points} points in. Click a row to tick it off, the cross to remove it.") } else { format!("{points} points in. The host spins and ticks off.") };
+    let foot = if host { format!("{points} points in. A click on a row: done, then failed, then the game's again. The cross removes it.") } else { format!("{points} points in. The host spins and ticks off.") };
     text_at(rx, y2 - line * 7 / 10, y2 - 2, f(2), MUTED, foot.as_bytes(), 0);
 }
 
@@ -735,12 +908,14 @@ unsafe fn challenge_row(r: Rect, row: &[&[u8]], now: i32, host: bool) {
     let tick = Spot::Tick(id as u32);
     let new = NEW_ROW == Some(id);
     fill(r.0, r.1, r.2, r.3, if new { SELECTED } else if lit(&tick) { CARD } else { BG });
-    let (word, colour, _) = standing(row, now);
+    let (word, colour, group) = standing(row, now);
     fill(r.0, r.1, r.0 + 4, r.3, colour);
     let size = h * 50 / 100;
     let mark = (r.0 + 14, r.1 + (h - size) / 2, r.0 + 14 + size, r.1 + (h + size) / 2);
-    round(mark, 3, if done { SUCCESS } else { BORDER });
-    if done {
+    // (ticked when done, and as soon as the game reads it reached: user, 2026-11-07)
+    let ticked = done || group == 1;
+    round(mark, 3, if ticked { SUCCESS } else { BORDER });
+    if ticked {
         draw_icon(ICON_CHECK, (mark.0 + mark.2) / 2, mark.1 + size / 5, size * 6 / 10, INK);
     }
     let tx = mark.2 + 10;
@@ -785,6 +960,13 @@ unsafe fn stats((x1, y1, x2, y2): Rect, tiles: &Lines, cards: &Lines, names: &[&
     let ch = h * 5 / 100;
     PICK = PICK.min(names.len().saturating_sub(1));
     chips(x1, cy, ch, names, PICK, Spot::Manager);
+    // the season counted (the host counts it: a click asks again), all seasons first
+    #[allow(static_mut_refs)]
+    {
+        let at = STATS_YEARS.iter().position(|&y| y == STATS_YEAR).map_or(0, |k| k + 1);
+        let label = if STATS_YEAR == 0 { "All seasons".to_string() } else { format!("Season {STATS_YEAR}/{}", STATS_YEAR + 1) };
+        stepper(x2, cy, ch, label.as_bytes(), (at < STATS_YEARS.len()).then_some(Spot::StatsEarlier), (at > 0).then_some(Spot::StatsLater));
+    }
     let Some(c) = cards.get(PICK) else { return };
     let (top, x1i, x2i) = (cy + ch + 10, x1 + 16, x2 - 16);
     card((x1, top, x2, y2));

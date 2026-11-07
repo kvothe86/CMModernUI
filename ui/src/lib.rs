@@ -37,6 +37,11 @@ mod history;
 mod news;
 mod prefetch;
 mod scout;
+mod weather;
+mod form;
+mod card;
+mod season;
+mod natpool;
 
 /// Whether `len` bytes at `addr` are committed, readable memory of this process.
 fn mapped(addr: usize, len: usize) -> bool {
@@ -613,6 +618,19 @@ fn is_news_date(t: &[u8]) -> bool {
         && [b"AM".as_slice(), b"PM", b"EVE"].contains(&words[3])
 }
 
+/// A date as the game writes an older one: day.month.year ("31.12.28", "1.7.28").
+fn dotted_date(t: &[u8]) -> bool {
+    let parts: Vec<&[u8]> = t.split(|&c| c == b'.').collect();
+    parts.len() == 3 && parts.iter().all(|p| (1..=4).contains(&p.len()) && p.iter().all(u8::is_ascii_digit))
+}
+
+#[cfg(test)]
+#[test]
+fn news_dates() {
+    assert!(is_news_date(b"Mon 1 Jan AM") && !is_news_date(b"31.12.28"));
+    assert!(dotted_date(b"31.12.28") && dotted_date(b"1.7.28") && !dotted_date(b"7.25") && !dotted_date(b"Mon 1 Jan AM"));
+}
+
 unsafe fn has_crest(key: &[u8]) -> bool {
     if !on(CRESTS_ON) {
         return false;
@@ -955,6 +973,8 @@ extern "C" fn background(x: i32, y: i32, picture: usize) {
         }
         #[allow(static_mut_refs)]
         LAST_MINUTES.clear();
+        #[allow(static_mut_refs)]
+        EMPTIED.clear();
         news::MENU_SEEN = false; // (an open menu is drawn again in this frame)
         comp::full_frame();
         #[allow(static_mut_refs)]
@@ -1250,15 +1270,52 @@ fn px565(p: u32) -> u32 {
 /// mike_appguy's bar: a dark track over the cell, filled by the value (full at 20 and above) in
 /// its colour, shaded from 75% to full along the bar.
 fn bar(x1: i32, y1: i32, x2: i32, y2: i32, value: i32) {
+    bar_of(x1, y1, x2, y2, value, false)
+}
+
+/// The bar width of an attribute (1..20) on the stretched scale (user, 2026-11-07): from 7 up,
+/// so 15 to 20 is half the bar (on the plain scale a quarter); 1..7 a sliver that still grows.
+fn stretched(value: i32, width: i32) -> i32 {
+    let v = value.clamp(0, 20);
+    if v > 7 { width * 8 / 100 + (width * 92 / 100) * (v - 7) / 13 } else { width * 8 / 100 * v / 7 }
+}
+
+#[cfg(test)]
+#[test]
+fn the_top_of_the_scale_stretches() {
+    assert_eq!(stretched(20, 1300), 1300);
+    assert!(stretched(20, 1300) - stretched(15, 1300) >= 1300 * 35 / 100);
+    assert!(stretched(7, 1300) < stretched(8, 1300) && stretched(1, 1300) > 0);
+}
+
+/// A value bar; `attribute`: a 1..20 attribute, drawn on the stretched scale with an elite mark
+/// next to the bar, an outlined star, gold at 20 and grey at 19 (the user's pick of the mockup,
+/// B + C; 2026-11-07: outline, beside the bar not on it). Every attribute bar keeps the star's room,
+/// so the bars line up.
+fn bar_of(x1: i32, y1: i32, x2: i32, y2: i32, value: i32, attribute: bool) {
     let (top, bottom) = (y1 + 2, y2 - 2);
+    let size = (bottom - top - 2).max(6);
+    let star = x2 - size / 2 - 1;
+    let x2 = if attribute { x2 - size - 4 } else { x2 };
     fill(x1, top, x2, bottom, [0x24, 0x27, 0x2d]);
-    let (w, c) = ((x2 - x1) * value.clamp(0, 20) / 20, level_colour(value));
+    let w = if attribute { stretched(value, x2 - x1) } else { (x2 - x1) * value.clamp(0, 20) / 20 };
+    let c = level_colour(value);
     unsafe {
         blend(x1, top, w, bottom - top, |col, _| {
             let shade = 0.75 + 0.25 * col as f32 / w.max(1) as f32;
             (rgb565(c.map(|v| (v as f32 * shade) as u8)), 255)
-        })
+        });
+        if attribute && value >= 19 {
+            // E734: the outlined star (E735 is the filled one)
+            draw_icon(0xE734, star, top + (bottom - top - size) / 2, size, if value >= 20 { GOLD } else { [0xc0, 0xc6, 0xd0] });
+        }
     }
+}
+
+/// The text of a value cell is a plain attribute number (1..20), not a percentage or a word.
+fn attribute_number(s: &[u8]) -> bool {
+    let t = s.trim_ascii();
+    !t.is_empty() && t.len() <= 2 && t.iter().all(u8::is_ascii_digit)
 }
 
 /// How a value cell in the attribute grid is shown.
@@ -1369,7 +1426,9 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             if on(COACH) {
                 coach::note_text(x1, y1, t);
             }
-            if on(NEWS) && is_news_date(t) {
+            // (an item of an earlier year is dated "31.12.28", no weekday or time: only on the news
+            // screen, where Players Out's "1.7.28" never is; user's shot 2026-11-07)
+            if on(NEWS) && (is_news_date(t) || (dotted_date(t) && comp::screen_ends_with(b" News"))) {
                 let small = smaller(font, 2); // (also on a first draw, before any stats table)
                 NEWS_DATE = Some((x1, y1, x2, y2, t.to_vec(), small));
                 fill(x1, y1, x2 + 1, y2, AREA);
@@ -1428,7 +1487,19 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             }
             // the Match Report's lines: an icon by a goal, a card, an injury, a substitution
             if on(MATCH_SCREEN) && MATCH {
-                report::note_text(x1, y1, x2, y2, s);
+                report::note_text(x1, y1, x2, y2, colour, s);
+            }
+            // a search list's rated player: his rating after the name at the flip
+            if on(SCOUT_STARS) {
+                scout::note_name(x1, y1, x2, y2, font, t);
+            }
+            // the question before the human's match: the match card at the flip
+            if on(MATCH_CARD) {
+                card::note(LAST_DARK, y1, t);
+            }
+            // the match's weather ("Dry, 8°C"): an icon before it
+            if on(WEATHER_ICONS) && weather::text(x1, y1, x2, y2, flags, font, colour, s) {
+                return;
             }
             // (an event line starts with two spaces; a dropdown menu's rows with five, and a menu
             // opened over a match result is no list of events)
@@ -1713,7 +1784,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 };
                 match kind {
                     Cell::Bar(v) => {
-                        bar(x1, y1, x2, y2, v);
+                        bar_of(x1, y1, x2, y2, v, attribute_number(s));
                         VALUE_CELL = x2 - x1;
                         colour = white; // the text goes on the bar, centred as the game has it
                     }
@@ -2276,14 +2347,18 @@ unsafe fn options_flip(full_frame: bool, placed: bool) {
         // 2026-11-04. Another screen's bar with it elsewhere sets a new home)
         return;
     }
-    if !full_frame {
-        return;
+    // (the count of cmui's buttons over it only on a whole frame; the click area is put back under
+    // them on every frame: the day's fixtures screen builds its bar again without one, and Game
+    // Options' widget stayed in its home under the moved drawing, a click there missed, user's
+    // shot 2026-11-07. Only the box moves, no redraw is asked: no loop)
+    if full_frame {
+        let extra = (on(CHALLENGE) && challenge::button_shown()) as i32 + (on(COACH) && coach::button_shown()) as i32;
+        if extra != EXTRA_BUTTONS {
+            EXTRA_BUTTONS = extra;
+            REDRAW = true;
+        }
     }
-    let extra = (on(CHALLENGE) && challenge::button_shown()) as i32 + (on(COACH) && coach::button_shown()) as i32;
-    if extra != EXTRA_BUTTONS {
-        EXTRA_BUTTONS = extra;
-        REDRAW = true;
-    }
+    let extra = EXTRA_BUTTONS;
     let Some(home) = OPTIONS_HOME else { return };
     let s = extra * (home.3 - home.1 + 4);
     let target = (home.0, home.1 + s, home.2, home.3 + s);
@@ -2407,6 +2482,7 @@ unsafe fn sidebar_icon(label: &str, t: &[u8]) -> Option<u32> {
         _ if has("options") => 0xE713,
         _ if label == "chat" => 0xE8BD,
         _ if has("add") && has("manager") => 0xE8FA,
+        _ if has("change") && has("player") => 0xE748, // switch user (user, 2026-11-07)
         _ if has("restart") => 0xE72C,
         _ if has("exit") => 0xE7E8,
         _ if has("waiting") => 0xE916,
@@ -2563,15 +2639,37 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 32] = [
+const FEATURES: [&str; 37] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
-    "coach",
+    "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
 ];
+/// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
+/// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
+/// the settings window. A new switch missing from one of them fails the build's tests.
+#[cfg(test)]
+#[test]
+fn every_switch_list_agrees() {
+    let exe = include_str!("../make_exe.py");
+    assert!(exe.contains(&format!("FEATURES = {}\n", FEATURES.len())), "make_exe.py FEATURES is not {}", FEATURES.len());
+    for (file, text) in [("make_patches.py", include_str!("../make_patches.py")), ("install.py", include_str!("../install.py")), ("cmui_config.ps1", include_str!("../cmui_config.ps1"))] {
+        for name in FEATURES {
+            assert!(text.contains(&format!("'{name}'")), "{file} has no switch '{name}'");
+        }
+    }
+}
+
 const COACH: usize = 31; // Claude as coach (`coach.rs`; 1680 wide and up, needs claude_api_key in cmui.ini)
+// the user's wishes of 2026-11-07 (ui\FIXES.md "Wishes"); an exe made before has these bytes 0: off
+// until set_switch.py sets them
+const WEATHER_ICONS: usize = 32; // an icon by the match's weather ("Dry, 8°C")
+const FORM_TIMELINE: usize = 33; // the club screen's last 10 results and league place by week
+const MATCH_CARD: usize = 34; // the pre-match card: both sides' form, head-to-head, places
+const SEASON_REVIEW: usize = 35; // the season's review card on 1 July
+const NATIONAL_POOL: usize = 36; // a national team's every player of the country, + to the Short List
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -2603,10 +2701,10 @@ const MATCH_SCREEN: usize = 10;
 const COMPARE_SCREEN: usize = 11;
 const MENU_FIXES: usize = 12;
 const STATUS_BARS: usize = 13;
-static mut ENABLED: u32 = u32::MAX;
+static mut ENABLED: u64 = u64::MAX;
 
 fn on(feature: usize) -> bool {
-    unsafe { ENABLED & 1 << feature != 0 }
+    unsafe { ENABLED & 1u64 << feature != 0 }
 }
 
 /// The exe's PE header (cm0102.exe is always loaded at 0x400000).
@@ -2667,13 +2765,13 @@ fn load_features() {
     if let Some(switches) = unsafe { exe_switches() } {
         for (k, &s) in switches.iter().enumerate() {
             if s == 0 {
-                unsafe { ENABLED &= !(1 << k) };
+                unsafe { ENABLED &= !(1u64 << k) };
             }
         }
     }
     for (k, name) in FEATURES.iter().enumerate() {
         match setting(name).as_deref() {
-            Some("0") => unsafe { ENABLED &= !(1 << k) },
+            Some("0") => unsafe { ENABLED &= !(1u64 << k) },
             Some(_) => {}
             None => set_setting(name, "1"),
         }
@@ -2722,6 +2820,26 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         let released = std::mem::replace(&mut WAS_HELD, held) && !held;
         let (mx, my) = (*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
         let over = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
+        // the national pool (over everything while it is open)
+        if on(NATIONAL_POOL) {
+            if let Some(redraw) = natpool::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
+        // the season review card (over everything while it is open, on 1 July)
+        if on(SEASON_REVIEW) {
+            if let Some(redraw) = season::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
         // the coach's button and screen (first: its screen covers everything)
         if on(COACH) {
             if let Some(redraw) = coach::input(mx, my, released) {
@@ -2762,6 +2880,12 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         if released && DETAILS_BUTTON.is_some_and(over) {
             SHOW_DETAILS = !SHOW_DETAILS;
             set_setting("profile_details", if SHOW_DETAILS { "1" } else { "0" });
+            game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+            return -1;
+        }
+        if released && RADAR_BUTTON.is_some_and(over) {
+            PROFILE_RADAR = !PROFILE_RADAR;
+            set_setting("profile_radar", if PROFILE_RADAR { "1" } else { "0" });
             game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
             return -1;
         }
@@ -3194,10 +3318,13 @@ unsafe fn money_texts(staff: usize) -> (String, String) {
         game::<extern "thiscall" fn(usize, *mut u8, u32, u32)>(0x85e750)(c, wage.as_mut_ptr(), 2, 2);
     }
     let mut value = [0u8; 256];
-    let mut cash = [0u32; 4];
-    // Cash::Cash(this, amount), Cash::format_display_amount(this, out, size, flags 2 separators)
-    game::<extern "thiscall" fn(*mut u32, i32) -> usize>(0x450a90)(cash.as_mut_ptr(), *((staff + 0x52) as *const i32));
-    game::<extern "thiscall" fn(*mut u32, *mut u8, u32, u32)>(0x450aa0)(cash.as_mut_ptr(), value.as_mut_ptr(), 256, 2);
+    // as the Transfer tab writes it (staff_screens_draw_transfer_tab 0x87e0bc): the Cash of +0x52,
+    // Cash::get_display_amount(flags 6: rounded to the display step), cash_format_money(out, size,
+    // amount, 6). Format_display_amount with flags 2 wrote it unrounded: 118,000 in the header,
+    // 120,000 on the tab (user, 2026-11-07; night 6 C-10)
+    let cash = [((staff + 0x52) as *const i32).read_unaligned(), 0, 0, 0];
+    let amount = game::<extern "thiscall" fn(*const i32, u32) -> i64>(0x43f460)(cash.as_ptr(), 6);
+    game::<extern "C" fn(*mut u8, i32, i64, u32) -> i32>(0x441c10)(value.as_mut_ptr(), 200, amount, 6);
     (buffer_text(&wage), buffer_text(&value))
 }
 
@@ -3381,13 +3508,88 @@ unsafe fn positions(player: usize, x: i32, y: i32, w: i32, h: i32, font: u32, ro
         ("Side /20", if SPOTS[best].0 == GK { "-".to_string() } else { rating(SPOTS[best].1).to_string() }, light),
     ];
     let (label_w, value_w) = (w * 24 / 100, w * 19 / 100);
+    // the switch Positions | Radar at the header's right (user, 2026-11-07); kept in cmui.ini
+    let small = smaller(font, 1);
+    let tw = text_width(small, b"Positions") + 16;
+    let (s2, s1) = (x + label_w + value_w - 6, x + label_w + value_w - 6 - 2 * tw - 4);
+    for (k, label) in [&b"Positions"[..], b"Radar"].into_iter().enumerate() {
+        let (b1, b2) = (s1 + k as i32 * (tw + 4), s1 + k as i32 * (tw + 4) + tw);
+        let on_now = (k == 1) == PROFILE_RADAR;
+        pill(b1, y + 3, b2, y + row - 3, if on_now { GOLD } else { [0x2b, 0x30, 0x38] });
+        text_at((b1 + b2) / 2, y, y + row, small, if on_now { [0x2b, 0x21, 0x05] } else { LIGHT }, label, 1);
+    }
+    RADAR_BUTTON = Some((s1, y + 3, s2, y + row - 3));
+    let staff = profiled_staff().unwrap_or(0);
+    let (px1, py1) = (x + label_w + value_w + 8, y + 4);
+    let py2 = (y + h).min(py1 + ((x + w - 8 - px1) * 64 / 100));
+    if PROFILE_RADAR && valid_staff(staff) {
+        // the groups' averages: the strongest, the weakest and the mean beside the radar
+        let vals: Vec<i32> = attributes(staff).iter().map(|&v| v as i32).collect();
+        let group = |g: &[usize]| g.iter().map(|&i| vals[i].clamp(0, 20) as f32).sum::<f32>() / g.len() as f32;
+        let scores: Vec<(f32, &str)> = RADAR.iter().map(|(n, g)| (group(g), *n)).collect();
+        let strongest = scores.iter().copied().fold((f32::MIN, ""), |a, b| if b.0 > a.0 { b } else { a });
+        let weakest = scores.iter().copied().fold((f32::MAX, ""), |a, b| if b.0 < a.0 { b } else { a });
+        let mean = scores.iter().map(|s| s.0).sum::<f32>() / scores.len() as f32;
+        let lines = [
+            ("Position", SPOTS[best].4.to_string(), light),
+            ("Strongest", format!("{} {:.1}", strongest.1, strongest.0), rgb(P1) as u32),
+            ("Weakest", format!("{} {:.1}", weakest.1, weakest.0), rgb(P2) as u32),
+            ("Average", format!("{mean:.1}"), light),
+        ];
+        for (i, (label, value, colour)) in lines.into_iter().enumerate() {
+            let ry = y + (i as i32 + 1) * row;
+            draw(x, ry, x + label_w, ry + row, 0x1, font, grey, text(format!("  {label}")).as_ptr(), -1);
+            draw(x + label_w, ry, x + label_w + value_w + 40, ry + row, 0x1, font, colour, text(value).as_ptr(), -1);
+        }
+        single_radar(&vals, px1, py1, x + w - 8, (y + h).max(py2), small);
+        return;
+    }
     for (i, (label, value, colour)) in lines.into_iter().enumerate() {
         let ry = y + (i as i32 + 1) * row;
         draw(x, ry, x + label_w, ry + row, 0x1, font, grey, text(format!("  {label}")).as_ptr(), -1);
         draw(x + label_w, ry, x + label_w + value_w, ry + row, 0x1, font, colour, text(value).as_ptr(), -1);
     }
-    let (px1, py1) = (x + label_w + value_w + 8, y + 4);
-    fit_pitch(player, px1, py1, x + w - 8, (y + h).min(py1 + ((x + w - 8 - px1) * 64 / 100)));
+    fit_pitch(player, px1, py1, x + w - 8, py2);
+}
+
+/// The profile's radar: Positions or Radar in the positions panel, and the switch's box.
+static mut PROFILE_RADAR: bool = false;
+static mut RADAR_BUTTON: Option<(i32, i32, i32, i32)> = None;
+
+/// One player's radar in a box: the Compare screen's eight groups (`RADAR`), rings at 10, 15 and
+/// 20, the group's name and value at each corner.
+unsafe fn single_radar(vals: &[i32], x1: i32, y1: i32, x2: i32, y2: i32, font: u32) {
+    let draw_line = game::<extern "C" fn(i32, i32, i32, i32, u32, u32)>(DRAW_LINE);
+    let group = |g: &[usize]| g.iter().map(|&i| vals[i].clamp(0, 20) as f32).sum::<f32>() / g.len() as f32;
+    let label_h = text_width(font, b"Mg") * 2 / 3 + 4;
+    let radius = ((x2 - x1) as f32 * 0.2).min((y2 - y1 - 2 * label_h) as f32 * 0.5).max(10.0);
+    let (cx, cy) = (((x1 + x2) / 2) as f32, ((y1 + y2) / 2) as f32);
+    let corner = |k: usize, v: f32| {
+        let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 4.0;
+        (cx + a.cos() * radius * v / 20.0, cy + a.sin() * radius * v / 20.0)
+    };
+    let grid = rgb([0x4a, 0x50, 0x5a]) as u32;
+    for ring in [10.0, 15.0, 20.0] {
+        for k in 0..8 {
+            let (a, b) = (corner(k, ring), corner((k + 1) % 8, ring));
+            draw_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, 2, grid);
+        }
+    }
+    let points: Vec<(f32, f32)> = RADAR.iter().enumerate().map(|(k, (_, g))| corner(k, group(g))).collect();
+    for k in 0..8 {
+        let (ax, ay) = corner(k, 20.0);
+        draw_line(cx as i32, cy as i32, ax as i32, ay as i32, 2, grid);
+    }
+    polygon(&points, P1, 80);
+    for k in 0..8 {
+        let (a, b) = (points[k], points[(k + 1) % 8]);
+        draw_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, 2, rgb(P1) as u32);
+    }
+    for (k, (name, g)) in RADAR.iter().enumerate() {
+        let (lx, ly) = corner(k, 23.0);
+        let align = if (lx - cx).abs() < 4.0 { 1 } else if lx < cx { 2 } else { 0 };
+        text_at(lx as i32, ly as i32 - label_h / 2, ly as i32 + label_h / 2, font, GREY, format!("{name} {:.1}", group(g)).as_bytes(), align);
+    }
 }
 
 /// The pitch as FM draws it: grey lines on the dark area, a grey dot for each spot he does not
@@ -3537,6 +3739,7 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             STATS_COLS.clear();
         }
         HIDE_BUTTON = None; // set again below when the ability block is drawn
+        RADAR_BUTTON = None; // (and the positions panel's switch)
         let darkened = std::mem::take(&mut DARKENED);
         let strip = STRIP.take();
         // (kept for the next time: only a change of view draws the list twice. Another screen's
@@ -3568,6 +3771,12 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         if on(MATCH_SCREEN) {
             report::flip();
         }
+        if on(SCOUT_STARS) {
+            scout::flip();
+        }
+        if on(MATCH_CARD) {
+            card::flip();
+        }
         if on(NEWS) {
             news::mark_button(FULL_FRAME);
         }
@@ -3578,9 +3787,8 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         if on(STATS_TABLE) {
             comp::flip(FULL_FRAME);
         }
-        if on(THEME_ON) {
-            news::scrollbars();
-        }
+        // (scroll bars stay the game's own: cmui's flat ones turned back to the game's while
+        // dragged, user 2026-11-06)
         ROW_NAME = (i32::MIN, 0);
         POSITION_ROW = i32::MIN;
         league_line();
@@ -3643,10 +3851,16 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             button_arrows();
         }
         assistant::report();
+        if on(NATIONAL_POOL) {
+            natpool::draw();
+        }
         options_flip(full_frame, false);
         if on(CHALLENGE) {
             challenge::flip(full_frame);
             challenge::overlay();
+        }
+        if on(SEASON_REVIEW) {
+            season::flip();
         }
         if on(COACH) {
             coach::flip(full_frame);
@@ -4160,6 +4374,12 @@ unsafe fn league_line() {
     let width = game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(font, c.as_ptr());
     let left = (x1 + x2 - width) / 2;
     game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(left - 2, top, left + width + 2, top + h, 0xc, font, colour, c.as_ptr(), -1);
+    // the club's last five as small pills under this line (user's wish, 2026-11-07, slimmed the
+    // same day); a club screen's own title only (not History, Tactics, Training)
+    if on(FORM_TIMELINE) && HEADER_PLAIN {
+        let (py1, py2) = (top + h + 3, (top + h + 3 + bar * 15 / 106).min(t.3 - 3));
+        form::mini(club, (x1 + x2) / 2, py1, py2);
+    }
     if let Some((_, (bx1, by1, bx2, by2), _)) = pos {
         LEAGUE_LINK = Some(((left, top, left + width, top + h), ((bx1 + bx2) / 2, (by1 + by2) / 2)));
     }
@@ -4467,6 +4687,8 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
         EVENT_ROW = y1;
         let small = smaller(font, 1);
         let name = t.trim_ascii();
+        let lift = event_lift(x1, x2, y1);
+        let (y1, y2) = (y1 - lift, y2 - lift);
         fill(x1, y1, x2 + 2, y2, [0x26, 0x2b, 0x31]);
         let r = (y2 - y1) * 30 / 100;
         let c = event_icon(x1 + 14 + r, (y1 + y2) / 2, r, name);
@@ -4474,8 +4696,9 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
         return true;
     }
     if y1 == EVENT_ROW && y2 - y1 < 40 && digits {
-        fill(x1 - 2, y1, x2, y2, [0x26, 0x2b, 0x31]);
-        text_at(x2 - 14, y1, y2, minutes_font(font, x2 - x1 - 12, t.trim_ascii()), GOLD, t.trim_ascii(), 2);
+        let lift = event_lift(x1, x2, y1);
+        fill(x1 - 2, y1 - lift, x2, y2 - lift, [0x26, 0x2b, 0x31]);
+        text_at(x2 - 14, y1 - lift, y2 - lift, minutes_font(font, x2 - x1 - 12, t.trim_ascii()), GOLD, t.trim_ascii(), 2);
         // (one cell a side: the other side's event on the same row comes between this and its
         // third minute, Real Madrid v Ajax 2026-10-29)
         #[allow(static_mut_refs)]
@@ -4493,12 +4716,16 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
             let joined = join_minutes(minutes, t);
             *minutes = joined;
             *bottom = y2;
-            fill(*mx1 - 2, *my1, *mx2, *my2, [0x26, 0x2b, 0x31]);
-            text_at(*mx2 - 14, *my1, *my2, minutes_font(font, *mx2 - *mx1 - 12, minutes), GOLD, minutes, 2);
+            let (top, step) = (*my1, y1 - *my1);
+            let up = event_lift(*mx1, *mx2, top);
+            fill(*mx1 - 2, top - up, *mx2, *my2 - up, [0x26, 0x2b, 0x31]);
+            text_at(*mx2 - 14, top - up, *my2 - up, minutes_font(font, *mx2 - *mx1 - 12, minutes), GOLD, minutes, 2);
             // (emptied in what is beside it on its row: the plain background when that side has no
-            // event on the row, not an event row's colour)
-            let beside = pixel_at(x1 - 12, (y1 + y2) / 2).unwrap_or([0x26, 0x2b, 0x31]);
-            fill(x1 - 2, y1, x2, y2, beside);
+            // event on the row, not an event row's colour; the rows below then move up into it)
+            let lift = event_lift(x1, x2, y1);
+            let beside = pixel_at(x1 - 12, (y1 + y2) / 2 - lift).unwrap_or([0x26, 0x2b, 0x31]);
+            fill(x1 - 2, y1 - lift, x2, y2 - lift, beside);
+            EMPTIED.push((x1 + x2 < screen().0, y1, step));
             return true;
         }
     }
@@ -4525,6 +4752,10 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
             }
             text_at(x, y1 + 4, mid, smaller(font, 2), GREY, caps.as_bytes(), align);
             text_at(x, mid - 2, y2 - 4, font, GOLD, &value, align);
+            // (the weather: its icon before the value, user 2026-11-07)
+            if align == 2 && on(WEATHER_ICONS) {
+                weather::before_right(&value, x, mid - 2, y2 - 4, font);
+            }
             return true;
         }
     }
@@ -4672,6 +4903,17 @@ unsafe fn match_record() -> Option<(usize, bool, usize)> {
 static mut EVENT_ROW: i32 = i32::MIN;
 /// The last event row's minute cell, its minutes and the bottom of the rows they span.
 static mut LAST_MINUTES: Vec<((i32, i32, i32, i32), Vec<u8>, i32)> = Vec::new();
+/// The game's minutes rows emptied this frame (their minutes joined onto the scorer's row): side
+/// (true = home, left half), the row's top and its step to the row above. The events below it on
+/// that side are drawn a step higher, so no empty row is left (user, 2026-11-06).
+static mut EMPTIED: Vec<(bool, i32, i32)> = Vec::new();
+
+/// How far an event row on a side moves up: a step for each emptied row above it.
+#[allow(static_mut_refs)]
+unsafe fn event_lift(x1: i32, x2: i32, y1: i32) -> i32 {
+    let home = x1 + x2 < screen().0;
+    EMPTIED.iter().filter(|e| e.0 == home && y1 > e.1).map(|e| e.2).sum()
+}
 /// The ground of a live match, from its bottom bar.
 static mut MATCH_GROUND: Vec<u8> = Vec::new();
 /// The top of the referee row this frame; the title sides' colours (x, RGB565).
@@ -5695,6 +5937,12 @@ unsafe fn screen_param(k: i32) -> usize {
     if remote::CLIENT {
         return ask_host(&key(b'P', &[k as u32])).and_then(|v| word(&v)).unwrap_or(0);
     }
+    // (no current screen, as on holiday: 0x7ff010 would raise "scrman.cpp 1673" and end the game;
+    // its node is +0x7e2 of the serving channel's 0x300 bytes, the channel at +0x382a. 2026-11-07)
+    let channel = rd::<i16>(SCREEN_MANAGER + 0x382a) as usize;
+    if channel > 16 || rd::<usize>(SCREEN_MANAGER + channel * 0x300 + 0x7e2) == 0 || !(0..60).contains(&k) {
+        return 0;
+    }
     game::<extern "thiscall" fn(usize, i32) -> usize>(GET_SCREEN_PARAM)(SCREEN_MANAGER, k)
 }
 
@@ -5966,6 +6214,44 @@ unsafe fn draw_crest(key: &[u8], x: i32, y: i32, size: i32) -> bool {
         }
     }
     blend_picture(px, n, x, y, size, flag);
+    true
+}
+
+/// A flag of the pack ("flag:Italy") stretched into a w x h frame at (x, y), whatever its own
+/// shape, so a column of flags is even (user, 2026-11-07: Switzerland's square flag next to wide
+/// ones). The filled part of its square (rows and columns with any alpha) is what fills the frame.
+unsafe fn draw_flag_frame(key: &[u8], x: i32, y: i32, w: i32, h: i32) -> bool {
+    if !on(CRESTS_ON) || w < 2 || h < 2 {
+        return false;
+    }
+    let Some((px, side)) = crest_pixels(key) else { return false };
+    let n = side as i32;
+    // (the filled part's bounds, once a flag: a scan of every pixel each frame was a list's cost)
+    static mut BOUNDS: Vec<(Vec<u8>, Option<(i32, i32, i32, i32)>)> = Vec::new();
+    #[allow(static_mut_refs)]
+    let bounds = match BOUNDS.iter().find(|b| b.0 == key) {
+        Some(b) => b.1,
+        None => {
+            let alpha = |sx: i32, sy: i32| px[((sy * n + sx) * 3 + 2) as usize];
+            let rows: Vec<i32> = (0..n).filter(|&r| (0..n).any(|c| alpha(c, r) > 0)).collect();
+            let cols: Vec<i32> = (0..n).filter(|&c| (0..n).any(|r| alpha(c, r) > 0)).collect();
+            let b = match (rows.first(), rows.last(), cols.first(), cols.last()) {
+                (Some(&r0), Some(&r1), Some(&c0), Some(&c1)) => Some((r0, r1, c0, c1)),
+                _ => None,
+            };
+            if BOUNDS.len() < 512 {
+                BOUNDS.push((key.to_vec(), b));
+            }
+            b
+        }
+    };
+    let Some((r0, r1, c0, c1)) = bounds else { return false };
+    let (fw, fh) = (c1 - c0 + 1, r1 - r0 + 1);
+    blend(x, y, w, h, |col, row| {
+        let (sx, sy) = (c0 + (col * 2 + 1) * fw / (w * 2), r0 + (row * 2 + 1) * fh / (h * 2));
+        let p = &px[((sy * n + sx) * 3) as usize..][..3];
+        (u16::from_le_bytes([p[0], p[1]]), if p[2] >= 128 { 255 } else { 0 })
+    });
     true
 }
 
@@ -6329,7 +6615,10 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         }
         b'B' => prefetch::valid_club(arg(1)).then(|| assistant::remote_scout(channel, arg(1))),
         // a club's star players
-        b'E' => Some(challenge::remote(channel)),
+        b'E' => Some(challenge::remote(channel, arg(1) as u32, arg(2) as u32, arg(3) as u32)),
+        // the coach's game data for a client's manager (a number); the client asks Claude itself
+        // ('K' is taken: a club's page)
+        b'k' => Some(coach::remote_data(channel)),
         b'U' => prefetch::valid_club(staff).then(|| scout::best_three(staff).iter().flat_map(|&s| (s as u32).to_le_bytes()).collect()),
         _ => None,
     }
@@ -6700,6 +6989,7 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             // mov eax, [0xaebe0c]
             PANEL_ORIG = hook_entry(DRAW_PANEL, &[0xa1, 0x0c, 0xbe, 0xae, 0x00], panel as usize);
             HIDE_CA_PA = setting("hide_ca_pa").as_deref() == Some("1");
+            PROFILE_RADAR = setting("profile_radar").as_deref() == Some("1");
             SHOW_DETAILS = setting("profile_details").as_deref() == Some("1");
             if setting("background_opacity").is_none() {
                 set_setting("background_opacity", "30");

@@ -19,12 +19,24 @@ pub enum Kind {
     Substitution,
 }
 
-/// The events whose report lines get an icon.
-const EVENTS: [(&str, Kind); 21] = [
+/// The events whose report lines get an icon. A goal's line is often one of the fine-goal events
+/// ("scored with a lovely strike", "finished a fine move": user 2026-11-07, Restructured's
+/// events_eng.cfg); the disallowed ones (ILLEGAL_GOAL_*, the same words) are told apart by colour
+/// (`note_text`).
+const EVENTS: [(&str, Kind); 30] = [
     ("EVENT_GOAL_ONE", Kind::Goal),
     ("EVENT_GOAL_THREE", Kind::Goal),
     ("EVENT_GOLDEN_GOAL", Kind::Goal),
     ("EVENT_SCORED_PENALTY", Kind::Goal),
+    ("EVENT_GOOD_STRIKE", Kind::Goal),
+    ("EVENT_GREAT_STRIKE", Kind::Goal),
+    ("EVENT_GOOD_TEAM_GOAL", Kind::Goal),
+    ("EVENT_GREAT_TEAM_GOAL", Kind::Goal),
+    ("EVENT_GREAT_SOLO_GOAL", Kind::Goal),
+    ("EVENT_GOOD_MOVE_GOOD_STRIKE", Kind::Goal),
+    ("EVENT_GOOD_MOVE_GREAT_STRIKE", Kind::Goal),
+    ("EVENT_GREAT_MOVE_GOOD_STRIKE", Kind::Goal),
+    ("EVENT_GREAT_MOVE_GREAT_STRIKE", Kind::Goal),
     ("EVENT_GOAL_TWO", Kind::OwnGoal),
     ("EVENT_MISSED_PENALTY", Kind::PenaltyMissed),
     ("EVENT_SAVES_PENALTY", Kind::PenaltyMissed),
@@ -133,25 +145,57 @@ pub fn kind_of(line: &[u8]) -> Option<Kind> {
     patterns().iter().find(|p| fits(&p.1, line)).map(|p| p.0)
 }
 
-/// This frame's icons (centre, radius, kind).
+/// This frame's icons (centre, radius, kind), and the report lines drawn this frame (left, top,
+/// bottom): their icon place is cleared first.
 static mut ICONS: Vec<(i32, i32, i32, Kind)> = Vec::new();
+static mut LINES: Vec<(i32, i32, i32)> = Vec::new();
+
+/// The game's colour of a counted goal's line: blue (RGB565 in the low half; the lines are white,
+/// a booking's yellow, a goal's blue, a goal ruled out stays white: user's shots 2026-11-07).
+fn blue(colour: u32) -> bool {
+    let c = colour as u16;
+    let (r, g, b) = ((c >> 11 & 31) * 255 / 31, (c >> 5 & 63) * 255 / 63, (c & 31) * 255 / 31);
+    b >= 150 && r < 120 && b > g
+}
 
 /// A text the game draws on a match screen: a report line (one space first; the match's own
 /// event list has two) gets its icon left of it, in the minute column's right end.
 #[allow(static_mut_refs)]
-pub unsafe fn note_text(x1: i32, y1: i32, x2: i32, y2: i32, s: &[u8]) {
+pub unsafe fn note_text(x1: i32, y1: i32, x2: i32, y2: i32, colour: u32, s: &[u8]) {
     if x2 - x1 < 600 || y2 - y1 > 40 || !s.starts_with(b" ") || s.starts_with(b"  ") || ICONS.len() >= 64 {
         return;
     }
-    if let Some(kind) = kind_of(s) {
+    // a list redrawn alone (a scroll: the game moves the rows' pixels, icons and all, and draws
+    // only the rows that came into view, with no flip pass): one whole redraw a moment after the
+    // scrolling stops puts every icon right (user's shot 2026-11-07: right only after a click on
+    // the track). Each scroll step moves it on; a whole frame asks for nothing, so no loop.
+    if !crate::FULL_FRAME {
+        crate::REDRAW_AT = Some(std::time::Instant::now() + std::time::Duration::from_millis(200));
+        return;
+    }
+    if LINES.len() < 128 {
+        LINES.push((x1, y1, y2));
+    }
+    // (a goal's words with the line not blue: a goal that was ruled out, EVENT_ILLEGAL_GOAL_*)
+    if let Some(kind) = kind_of(s).filter(|k| !matches!(k, Kind::Goal | Kind::OwnGoal) || blue(colour)) {
         let r = ((y2 - y1) * 36 / 100).max(4);
         ICONS.push((x1 - 8 - r, (y1 + y2) / 2, r, kind));
     }
 }
 
-/// The flip pass: the icons of this frame.
+/// The flip pass: the icon place of every report line drawn this frame cleared (the game draws a
+/// line's own box only, so an icon stayed when the lines moved under it: a trail of balls and
+/// cards when the report scrolled, user's shots 2026-11-07), then this frame's icons. Paints only:
+/// no redraw is asked (user: no endless-redraw trouble as before).
 #[allow(static_mut_refs)]
 pub unsafe fn flip() {
+    for (x1, y1, y2) in std::mem::take(&mut LINES) {
+        let r = ((y2 - y1) * 36 / 100).max(4);
+        // (the list's own colour, just left of the line's text, right of where an icon goes)
+        if let Some(bg) = pixel_at(x1 - 3, (y1 + y2) / 2) {
+            fill(x1 - 10 - 2 * r - 3, y1, x1 - 4, y2, bg);
+        }
+    }
     for (cx, cy, r, kind) in std::mem::take(&mut ICONS) {
         match kind {
             Kind::Goal | Kind::OwnGoal => _ = event_icon(cx, cy, r, b"x"),

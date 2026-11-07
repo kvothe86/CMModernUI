@@ -51,9 +51,54 @@ pub fn button_shown() -> bool {
     unsafe { BUTTON.is_some() }
 }
 
-/// The coach is there: its switch, a key, a flagship-size screen, not a network client.
+/// The coach is there: its switch, a key (each player's own), a flagship-size screen. A network
+/// client too since 2026-11-07: the host gives it the game data (key 'k'), the client asks Claude.
 pub fn active() -> bool {
-    on(COACH) && key().is_some() && !small_screen() && unsafe { !remote::CLIENT }
+    on(COACH) && key().is_some() && !small_screen()
+}
+
+/// Client: a question waiting for the host's game data (tab, question, the key asked, since when).
+static mut PENDING: Option<(usize, String, Vec<u8>, std::time::Instant)> = None;
+static mut ASKS: u32 = 0;
+
+/// Host: a client's 'k': the game data of its manager's club (the first line "CLUB\t<name>"), as
+/// the coach on the host would give it.
+pub unsafe fn remote_data(channel: i16) -> Vec<u8> {
+    let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
+    let club = if readable(manager, 0x3d) { rd::<usize>(manager + 0x39) } else { 0 };
+    if !readable(club, 0x60) {
+        return b"\n".to_vec();
+    }
+    let mut text = to_latin1(&format!("CLUB\t{}\n{}", latin1(&game_text(club + 4, 51)), game_data(club, manager)));
+    // (a packet's room: whole lines)
+    if text.len() > 38_000 {
+        let cut = text[..38_000].iter().rposition(|&c| c == b'\n').map_or(0, |at| at + 1);
+        text.truncate(cut);
+    }
+    text
+}
+
+/// Client: the host's game data once it came; the question it waited for is sent then.
+#[allow(static_mut_refs)]
+unsafe fn poll_pending() -> bool {
+    let Some((tab, question, k, since)) = PENDING.take() else { return false };
+    match ask_host(&k) {
+        Some(data) => {
+            let text = latin1(&data).into_owned();
+            let (club, data) = text.split_once('\n').map_or(("", text.as_str()), |(first, rest)| (first.strip_prefix("CLUB\t").unwrap_or(""), rest));
+            send_question(tab, &question, club, data);
+            true
+        }
+        None if since.elapsed().as_secs() < 30 => {
+            PENDING = Some((tab, question, k, since));
+            false
+        }
+        None => {
+            ANSWERS[tab] = b"The host did not send the game data. Try again.".to_vec();
+            WAITING = None;
+            true
+        }
+    }
 }
 
 static mut ACTIVE: bool = false;
@@ -104,13 +149,14 @@ unsafe fn today() -> i32 {
     rd::<i16>(TODAY + 2) as i32 * 366 + rd::<i16>(TODAY) as i32
 }
 
-/// A fixture's date, as today(): +0x28 the day of the year, +0x2a the year (the Next Match tab
-/// builds its Date from them, 0x45ccf0). None when they do not read as a date.
+/// A fixture's date, as today(): +0x28 the year, +0x2a the day of the year (the rebuild's
+/// fixture_moves.rs `put_date`; the two were read the other way round before 2026-11-07, so no
+/// fixture ever had a date here and any one seen was taken). None when they do not read as a date.
 unsafe fn fixture_day(f: usize) -> Option<i32> {
     if !readable(f, 0x50) {
         return None;
     }
-    let (d, y) = (rd::<i16>(f + 0x28) as i32, rd::<i16>(f + 0x2a) as i32);
+    let (d, y) = (rd::<i16>(f + 0x2a) as i32, rd::<i16>(f + 0x28) as i32);
     ((0..366).contains(&d) && (1900..2200).contains(&y)).then_some(y * 366 + d)
 }
 
@@ -132,8 +178,8 @@ unsafe fn note_fixture(f: usize, club: usize) {
     }
 }
 
-/// A game day as "12 Nov 2025".
-fn day_text(day: i32) -> String {
+/// A game day as "12 Nov 2025" (the CM Challenge Season tab's dates too).
+pub(crate) fn day_text(day: i32) -> String {
     let (year, mut d) = (day / 366, day % 366);
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     for (m, len) in [31, 28 + leap as i32, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31].into_iter().enumerate() {
@@ -547,7 +593,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if !ACTIVE {
         return None;
     }
-    let arrived = ARRIVED.swap(false, Ordering::AcqRel) && take_reply();
+    // (a client: the host's game data in, the question goes out; the page shows it is waiting)
+    #[allow(static_mut_refs)]
+    let data_in = PENDING.is_some() && poll_pending();
+    let arrived = (ARRIVED.swap(false, Ordering::AcqRel) && take_reply()) || data_in;
     let inside = |r: Rect| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
     if !OPEN {
         let over = !assistant::REPORT_OPEN && BUTTON.is_some_and(inside);
@@ -744,7 +793,24 @@ fn read_answer(reply: &str) -> (String, Visual) {
 /// A request for a tab, on its own thread; `question` for the Ask tab.
 #[allow(static_mut_refs)]
 unsafe fn ask(tab: usize, question: &str) {
-    let (Some(key), Some(club)) = (key(), human_club_ptr()) else { return };
+    // (a network client: the host has the game; its data first, then the question)
+    if remote::CLIENT {
+        ASKS += 1;
+        let k = crate::key(b'k', &[ASKS]);
+        WAITING = Some(tab);
+        PENDING = Some((tab, question.to_string(), k, std::time::Instant::now()));
+        poll_pending();
+        return;
+    }
+    let Some(club) = human_club_ptr() else { return };
+    let name = latin1(&game_text(club + 4, 51)).into_owned();
+    send_question(tab, question, &name, &game_data(club, 0));
+}
+
+/// The question to Claude with the game data, answered on a thread.
+#[allow(static_mut_refs)]
+unsafe fn send_question(tab: usize, question: &str, club_name: &str, data: &str) {
+    let Some(key) = key() else { return };
     let system = format!(
         "You are the first-team coach at {} in Championship Manager 01/02, talking to the manager, who plays the game. \
          Work only from the game data below; never make up players, results or numbers, and say so briefly when the data does not tell. \
@@ -757,8 +823,8 @@ unsafe fn ask(tab: usize, question: &str) {
          formation and xi an eleven (one GK, a slot each, names exactly as in the game data) when you pick or suggest one, else empty; \
          players the few you single out (club exactly as in the game data, stars from the data or 0, a short note); \
          bars only comparisons the task asks for; score only for a match you analyse (else empty names and 0).\n\nGAME DATA\n{}",
-        latin1(&game_text(club + 4, 51)),
-        game_data(club)
+        club_name,
+        data
     );
     let mut messages: Vec<(&str, String)> = Vec::new();
     if tab == ASK {
@@ -838,7 +904,8 @@ fn game_words(text: &str) -> Vec<u8> {
 /// What the coach knows: the date, the squad as the assistant sees it, the next match and the
 /// opponent as the scout sees them, our last match's screens, the screen behind.
 #[allow(static_mut_refs)]
-unsafe fn game_data(club: usize) -> String {
+/// `manager`: the human whose formation it reads (0: the one at the screen; a client's for 'k').
+unsafe fn game_data(club: usize, manager: usize) -> String {
     let mut out = String::new();
     let (d, m, year) = day_month(TODAY);
     out += &format!("Today: {d} {} {year}\n", MONTHS[m]);
@@ -848,7 +915,7 @@ unsafe fn game_data(club: usize) -> String {
     }
     // the squad: the assistant's report (his best and backup elevens), then every player
     let humans = rd::<usize>(assistant::HUMAN_MANAGER);
-    let formation = if mapped(humans, 4) { game::<extern "thiscall" fn(usize, usize) -> usize>(assistant::ACTIVE_TACTIC)(humans, 0) } else { 0 };
+    let formation = if mapped(humans, 4) { game::<extern "thiscall" fn(usize, usize) -> usize>(assistant::ACTIVE_TACTIC)(humans, manager) } else { 0 };
     let slots = if mapped(formation, 0x200) { assistant::formation_slots(formation) } else { Vec::new() };
     if slots.len() >= 11 {
         out += &format!("Our formation now: {}\n", slots[..11].iter().map(|s| latin1(s).into_owned()).collect::<Vec<_>>().join(" "));

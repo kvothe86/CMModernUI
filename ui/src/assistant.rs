@@ -134,7 +134,7 @@ pub unsafe fn run_pending(tactics: bool) -> bool {
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
     let humans = rd::<usize>(HUMAN_MANAGER);
     let note = if readable(manager, 0x3d) && mapped(humans, 4) {
-        let club = rd::<usize>(manager + 0x39);
+        let club = served_team(manager);
         // (the client on its tactics screen: that screen's own copy, as tactics_screen; the
         // parameters read are the served channel's)
         let ts = if tactics { screen_param(0) } else { 0 };
@@ -340,7 +340,7 @@ pub unsafe fn flip(full_frame: bool) {
         SLOTS = formation_slots(f);
         SLOTS.truncate(keep);
     }
-    let own = human_club_ptr().is_some_and(|c| c == SQUAD_CLUB && c != 0);
+    let own = my_team().is_some();
     // (a network client: the squad screen and the tactics screen before a match; the host knows
     // its slots and assistant)
     let ready = if remote::CLIENT { !LIVE_TACTICS } else { SLOTS.len() >= 11 };
@@ -382,7 +382,7 @@ pub unsafe fn flip(full_frame: bool) {
     }
     if MENU_OPEN {
         for k in 0..menu_len() {
-            let name = ITEMS.get(k).map_or(REPORT_ITEM, |i| i.1);
+            let name = item_name(k);
             let r = item_rect(b, k);
             fill(r.0, r.1, r.2, r.3, if HOVER == Some(k) { SELECTED } else { [0x22, 0x25, 0x2a] });
             fill(r.0, r.3 - 1, r.2, r.3, [0x34, 0x38, 0x40]);
@@ -421,9 +421,32 @@ fn item_rect(b: (i32, i32, i32, i32), k: usize) -> (i32, i32, i32, i32) {
     (b.0, b.3 + 2 + k as i32 * h, b.2, b.3 + 2 + (k as i32 + 1) * h)
 }
 
-/// The menu's items: the four picks, and on the squad screen the team report.
+/// The menu's items: the four picks, and on the squad screen the team report, and for a national
+/// team the national pool (`natpool.rs`, single player and host).
 unsafe fn menu_len() -> usize {
-    ITEMS.len() + (SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS && on(TEAM_REPORT)) as usize
+    ITEMS.len() + report_item() as usize + pool_item() as usize
+}
+
+unsafe fn report_item() -> bool {
+    SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS && on(TEAM_REPORT)
+}
+
+unsafe fn pool_item() -> bool {
+    SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS && on(NATIONAL_POOL) && !remote::CLIENT && my_team().is_some_and(|t| national_team(t))
+}
+
+/// The name of item `k` of the menu.
+unsafe fn item_name(k: usize) -> &'static str {
+    match ITEMS.get(k) {
+        Some(i) => i.1,
+        None if k == ITEMS.len() && report_item() => REPORT_ITEM,
+        None => "National pool",
+    }
+}
+
+/// `line_rank` for the national pool's position groups.
+pub(crate) fn line_rank_of(positions: &[u8]) -> usize {
+    line_rank(positions)
 }
 
 /// The report's Back button.
@@ -451,7 +474,7 @@ unsafe fn open_report() {
         args.extend(UNAVAILABLE.iter().map(|&s| s as u32));
         REPORT_KEY = key(b'T', &args);
         REPORT_LOOKED = None;
-    } else if let Some(club) = human_club_ptr() {
+    } else if let Some(club) = my_team().or(human_club_ptr()) {
         REPORT = report_for(club, SLOTS.clone(), UNAVAILABLE.clone());
     }
 }
@@ -468,7 +491,7 @@ pub unsafe fn remote_report(channel: i16, args: &[u32]) -> Vec<u8> {
     let unavailable = args.iter().skip(2).take(n).map(|&s| s as usize).filter(|&s| valid_staff(s)).collect();
     let formation = game::<extern "thiscall" fn(usize, usize) -> usize>(ACTIVE_TACTIC)(humans, manager);
     let slots = if mapped(formation, 0x200) { formation_slots(formation) } else { Vec::new() };
-    report_for(rd::<usize>(manager + 0x39), slots, unavailable)
+    report_for(served_team(manager), slots, unavailable)
 }
 
 #[cfg(test)]
@@ -615,7 +638,7 @@ pub(crate) unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
     let np = rd::<usize>(boss + 0x69);
     let (form, spots) = (rd::<i8>(np + 0x43) as usize).checked_sub(1).and_then(|k| FORMATIONS[..9].get(k)).unwrap_or(&FORMATIONS[2]);
     let labels: Vec<&[u8]> = std::iter::once("GK").chain(spots.iter().copied()).map(str::as_bytes).collect();
-    let eye = Eye { mode: Mode::Best, id: rd::<i32>(judge), reading: coaching(judge, 0x21) };
+    let eye = Eye { mode: Mode::Best, id: rd::<i32>(judge), reading: coaching(judge, 0x21), judge };
     // (as `report_for`: the ban check takes a banned player out of the club's selection)
     let selection = ((club + 0x1e0) as *const [usize; 20]).read_unaligned();
     let pool = candidates_in(judge, club, rd::<usize>(club + 0x57), 0, &[], &[]);
@@ -756,7 +779,9 @@ fn formation_text(own: &[u8], chosen: &[u8], preferred: &str, strongest: &[u8]) 
 /// the selection or the tactic.
 pub(crate) unsafe fn report_for(club: usize, slots: Vec<Vec<u8>>, unavailable: Vec<usize>) -> Vec<u8> {
     let Some(a) = assistant_of(club).filter(|_| slots.len() >= 11) else { return b"\n".to_vec() };
-    let eye = Eye { mode: Mode::Best, id: rd::<i32>(a), reading: coaching(a, 0x21) };
+    // (a national team's stand-in judge reads perfectly: the manager cannot hire another)
+    let _perfect = scout::perfect_if(national_team(club));
+    let eye = Eye { mode: Mode::Best, id: rd::<i32>(a), reading: if scout::is_perfect() { 20.0 } else { coaching(a, 0x21) }, judge: a };
     // (the ban check drops a banned player from the club's selection, 20 slots at +0x1e0: put
     // back, a report changes nothing)
     let selection = ((club + 0x1e0) as *const [usize; 20]).read_unaligned();
@@ -829,7 +854,10 @@ unsafe fn team_rows(club: usize, a: usize, pool: &[Candidate], starters: &[&[u8]
         if !placed {
             out.push((staff, score));
         }
-        let fields: [&[u8]; 7] = [&name, &short, &positions, &[role], slot.as_bytes(), label, halves.as_bytes()];
+        // (the CM intrinsic score as he sees it in that slot, and his margin by his judging: the
+        // pitches' rating pills, user 2026-11-07)
+        let (pct, margin) = (score.clamp(0.0, 100.0).round().to_string(), scout::margin(a).unwrap_or(0.0).round().to_string());
+        let fields: [&[u8]; 9] = [&name, &short, &positions, &[role], slot.as_bytes(), label, halves.as_bytes(), pct.as_bytes(), margin.as_bytes()];
         rows.push((role, line, -(score * 10.0) as i32, fields.join(&b'\t')));
     }
     rows.sort_by_key(|r| (r.0, r.1, r.2));
@@ -977,7 +1005,7 @@ pub unsafe fn report() {
     text_at((b.0 + b.2) / 2, b.1, b.3, f(3), if REPORT_HOVER { GOLD } else { WHITE }, b"Back", 1);
     let mut lines = REPORT.split(|&c| c == b'\n');
     let head: Vec<&[u8]> = lines.next().unwrap_or(b"").split(|&c| c == b'\t').collect();
-    let rows: Vec<Vec<&[u8]>> = lines.map(|l| l.split(|&c| c == b'\t').collect()).filter(|r: &Vec<&[u8]>| r.len() == 7).collect();
+    let rows: Vec<Vec<&[u8]>> = lines.map(|l| l.split(|&c| c == b'\t').collect()).filter(|r: &Vec<&[u8]>| r.len() >= 7).collect(); // (9 with the rating and margin; a scout's report 7)
     let scouting = REPORT_SCOUT;
     let title: &[u8] = if scouting { b"Scout Report" } else { b"Assistant Manager Team Report" };
     if rows.is_empty() {
@@ -1076,6 +1104,19 @@ pub unsafe fn report() {
             pill(nx - half, ny1, nx + half, ny2, [0x14, 0x18, 0x1c]);
             text_at(nx, ny1, ny2, name_font, WHITE, &name, 1);
             text_at(nx, ny2, ny2 + label_h, label_font, GOLD, row[5], 1);
+            // the CM intrinsic rating as the assistant sees him, in a small box under the slot:
+            // exact for a perfect judge, with his margin for a poorer one (user, 2026-11-07)
+            if let Some(pct) = row.get(7).filter(|p| !p.is_empty()) {
+                // (his error is in the score, the margin not shown: user, 2026-11-07, "that makes
+                // it fun")
+                let bytes = format!("{}%", latin1(pct)).into_bytes();
+                let half = text_width(label_font, &bytes) / 2 + 6;
+                let (ry1, ry2) = (ny2 + label_h + 1, ny2 + 2 * label_h + 3);
+                pill(nx - half, ry1, nx + half, ry2, [0x14, 0x18, 0x1c]);
+                let score = latin1(pct).parse::<i32>().unwrap_or(0);
+                let c = if score >= 75 { [0x4c, 0xc0, 0x7a] } else if score >= 60 { GOLD } else { [0xe0, 0x88, 0x58] };
+                text_at(nx, ry1, ry2, label_font, c, &bytes, 1);
+            }
         }
     }
     // what the marks in the list mean
@@ -1129,8 +1170,14 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         if released {
             MENU_OPEN = false;
             HOVER = None;
-            if hover == Some(ITEMS.len()) {
-                open_report();
+            if let Some(k) = hover.filter(|&k| k >= ITEMS.len()) {
+                if item_name(k) == "National pool" {
+                    if let Some(team) = my_team() {
+                        crate::natpool::open(team);
+                    }
+                } else {
+                    open_report();
+                }
                 return Some(true);
             }
             // (done by the club screen's input, which then has the screen built again; a
@@ -1156,12 +1203,30 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
 
 /// The human's club's assistant manager.
 unsafe fn assistant() -> Option<usize> {
-    assistant_of(human_club_ptr()?)
+    assistant_of(my_team().or(human_club_ptr())?)
+}
+
+/// The team on the squad screen when the human runs it: his club or his national team.
+unsafe fn my_team() -> Option<usize> {
+    (SQUAD_CLUB != 0 && human_runs(SQUAD_CLUB)).then_some(SQUAD_CLUB)
+}
+
+/// Host, serving a client: the team its request is for, the national team on its screen when he
+/// runs that, else his club.
+unsafe fn served_team(manager: usize) -> usize {
+    let shown = screen_param(0);
+    if shown != 0 && readable(manager, 0x3d) && rd::<usize>(manager + 0x24) == shown { shown } else { rd::<usize>(manager + 0x39) }
 }
 
 pub(crate) unsafe fn assistant_of(club: usize) -> Option<usize> {
-    let a = game::<extern "C" fn(usize) -> usize>(CLUB_ASSISTANT)(club);
-    (readable(a, 0x6e) && readable(rd::<usize>(a + 0x69), 68)).then_some(a)
+    let staffed = |a: usize| (readable(a, 0x6e) && readable(rd::<usize>(a + 0x69), 68)).then_some(a);
+    staffed(game::<extern "C" fn(usize) -> usize>(CLUB_ASSISTANT)(club)).or_else(|| {
+        // a national team never has staff (user, 2026-11-06): the human who manages it (staff
+        // +0x24 his national team, any channel) picks through his club's assistant, else himself
+        let manager = (0..8).map(|c| CHANNEL_MANAGER + 0x300 * c).filter(|&s| readable(s, 4)).map(|s| rd::<usize>(s)).find(|&m| club != 0 && readable(m, 0x3d) && rd::<usize>(m + 0x24) == club)?;
+        let own = rd::<usize>(manager + 0x39);
+        (own != 0 && own != club).then(|| staffed(game::<extern "C" fn(usize) -> usize>(CLUB_ASSISTANT)(own))).flatten().or_else(|| staffed(manager))
+    })
 }
 
 /// A coaching attribute of a staff member as shown (1..20): non-player record +0x69, CA at +4.
@@ -1226,6 +1291,9 @@ struct Eye {
     mode: Mode,
     id: i32,
     reading: f64,
+    /// The judge himself (assistant, scout): his per-slot intrinsic score of a player is what the
+    /// pick goes by.
+    judge: usize,
 }
 
 impl Eye {
@@ -1259,14 +1327,19 @@ impl Eye {
         // to DL on fit 1, night 6 C-16; an outfield player out of position is still the better
         // choice, so the keeper's score is all but nothing there)
         let keeper_out = label != b"GK" && rd::<i8>(c.player + GK) >= 15;
-        c.judged * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c) * if keeper_out { 0.001 } else { 1.0 }
+        // (the CM intrinsic score for this slot as he sees it, the % the team report shows: a
+        // perfect judge picks the best intrinsic team, a poor one is off by his error; user,
+        // 2026-11-07. Before, the game's own overall judgement 0x6e86d0 picked, so a worse
+        // striker by the % could start)
+        let slot = crate::scout::seen_score(c.staff, self.judge, Some(label)).map_or(c.judged, |s| s.max(0.1));
+        slot * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c) * if keeper_out { 0.001 } else { 1.0 }
     }
 }
 
 /// The pick itself: the selection written, the note returned.
 #[allow(static_mut_refs)]
 unsafe fn pick(mode: Mode) -> Option<Vec<u8>> {
-    let club = human_club_ptr().filter(|&c| c == SQUAD_CLUB)?;
+    let club = my_team()?;
     pick_for(mode, club, 0, SLOTS.clone(), UNAVAILABLE.clone(), tactics_screen())
 }
 
@@ -1393,10 +1466,12 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
     }
     let get = game::<extern "thiscall" fn(usize, usize, i32, i32) -> usize>(GET_SLOT);
     let before: Vec<usize> = (0..11).map(|k| get(tactics, club, k, 0)).collect();
-    let (judging, reading) = (coaching(a, 0x17), coaching(a, 0x21));
+    // (a national team's stand-in judge reads perfectly: the manager cannot hire another)
+    let _perfect = scout::perfect_if(national_team(club));
+    let (judging, reading) = if scout::is_perfect() { (20.0, 20.0) } else { (coaching(a, 0x17), coaching(a, 0x21)) };
     let fixture = next_fixture(ts, club);
     let pool = candidates(a, club, fixture, &unavailable, &before);
-    let eye = Eye { mode, id: rd::<i32>(a), reading };
+    let eye = Eye { mode, id: rd::<i32>(a), reading, judge: a };
     let score = |c: &Candidate, label: &[u8]| eye.score(c, label);
     let starters: Vec<&[u8]> = slots[..11].iter().map(|s| s.as_slice()).collect();
     let chosen = eleven(&eye, &pool, &starters);

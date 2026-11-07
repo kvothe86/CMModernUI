@@ -4,7 +4,7 @@
 //! them (his Judging Ability for current, Judging Potential for future; a fixed error per scout
 //! and player).
 
-use crate::{game, log, rd, readable, STAFF_COUNT, STAFF_TABLE};
+use crate::{game, latin1, log, rd, readable, staff_name, text_at, text_width, STAFF_COUNT, STAFF_TABLE};
 
 // A SearchEditSession: the current index at +0, ten PLAYER_SEARCH of 0x2b0 bytes from +1
 // (0x804a40). A search's results: +0x1ee the entries, +0x1f6 their count; an entry is 0x2d
@@ -175,6 +175,11 @@ pub(crate) unsafe fn seen_score(staff: usize, assistant: usize, label: Option<&[
     Some(score + error(rd::<i32>(assistant), rd::<i32>(staff), kind, eye))
 }
 
+/// How far off a judge can be, in score points: ±0.7·(20 − Judging Ability); 0 for a perfect eye.
+pub(crate) unsafe fn margin(judge: usize) -> Option<f64> {
+    judging(judge, false).map(|j| (20.0 - j).max(0.0) * EYE)
+}
+
 /// A club's best eleven's intrinsic score on average, no one's eye in it (0 with no squad).
 pub(crate) unsafe fn strength(club: usize) -> f64 {
     let mut squad: Vec<f64> = (0..50).filter_map(|k| records(rd::<usize>(club + 0xd7 + 4 * k))).map(|(s, p)| intrinsic(p, s, word(p, 5))).collect();
@@ -281,8 +286,31 @@ unsafe fn club_cuts(club: usize) -> Option<[f64; 4]> {
 
 /// A scout's Judging Ability (or Judging Potential), 1..20 as shown: non-player record staff
 /// +0x69, judgement +0x17, judging potential +0x18, its CA +4 (0x6e86d0).
+/// While set, every judge reads perfectly (20): a national team's pick, report and pool, whose
+/// stand-in judge the manager cannot choose (user, 2026-11-07). Set only through `perfect_if`.
+static mut PERFECT: bool = false;
+
+/// Perfect judging for as long as the returned guard lives, when `on`.
+pub(crate) struct Perfect(bool);
+impl Drop for Perfect {
+    fn drop(&mut self) {
+        unsafe { PERFECT = self.0 };
+    }
+}
+pub(crate) unsafe fn perfect_if(on: bool) -> Perfect {
+    let before = PERFECT;
+    PERFECT = before || on;
+    Perfect(before)
+}
+pub(crate) unsafe fn is_perfect() -> bool {
+    PERFECT
+}
+
 unsafe fn judging(scout: usize, potential: bool) -> Option<f64> {
     let np = rd::<usize>(scout + 0x69);
+    if PERFECT && readable(np, 68) {
+        return Some(20.0);
+    }
     readable(np, 68).then(|| shown(rd::<i8>(np + if potential { 0x18 } else { 0x17 }), rd::<i16>(np + 4), true))
 }
 
@@ -309,6 +337,7 @@ pub(crate) unsafe fn restar(session: usize) {
         }
     };
     let (base, count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
+    RATED.clear();
     for k in 0..SEARCHES {
         let search = session + 1 + k * SEARCH_SIZE;
         let scout = game::<extern "thiscall" fn(usize) -> usize>(GET_SCOUT)(search);
@@ -336,7 +365,60 @@ pub(crate) unsafe fn restar(session: usize) {
             let seen_future = intrinsic(p, s, future_ability(p, s)) + error(scout_id, id, 1, eye_future);
             *now = stars(seen, &cuts);
             *future = stars(seen_future, &cuts).max(*now);
+            if RATED.len() < 2048 {
+                RATED.push((latin1(&staff_name(base + who as usize * 0x6e)).into_owned(), seen.clamp(0.0, 100.0).round() as i32, ((20.0 - eye_now).max(0.0) * EYE).round() as i32));
+            }
         }
+    }
+}
+
+/// The rated players of the session's searches as their scouts see them: full name, the CM
+/// intrinsic score in %, the scout's margin (user, 2026-11-07: the rating after the name).
+static mut RATED: Vec<(String, i32, i32)> = Vec::new();
+/// This frame's names in a search list that have a rating: cell, font, name as drawn.
+static mut RATED_NAMES: Vec<((i32, i32, i32, i32), u32, Vec<u8>)> = Vec::new();
+
+/// A text drawn this frame: a search list's "Surname, First" of a rated player is noted for the
+/// flip, which writes his rating after it.
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn note_name(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, t: &[u8]) {
+    // (the search screen's lists only: a squad list's "Bertasius, D" of a scouted player is no
+    // place for it, user 2026-11-07)
+    if RATED.is_empty() || RATED_NAMES.len() >= 64 || y2 - y1 > 40 || !t.contains(&b',') || !crate::comp::screen_ends_with(b"Search") {
+        return;
+    }
+    if rating_of(t).is_some() {
+        RATED_NAMES.push(((x1, y1, x2, y2), font, t.to_vec()));
+    }
+}
+
+/// "Chistyakov, Dmitriy" -> the rating of Dmitriy Chistyakov.
+#[allow(static_mut_refs)]
+unsafe fn rating_of(t: &[u8]) -> Option<(i32, i32)> {
+    let t = latin1(t);
+    let (surname, first) = t.split_once(", ")?;
+    // (a whole first name, not an initial: "D" is anyone's)
+    if first.chars().count() < 2 {
+        return None;
+    }
+    let full = format!("{first} {surname}");
+    RATED.iter().find(|r| r.0 == full || (r.0.ends_with(surname) && r.0.contains(first))).map(|r| (r.1, r.2))
+}
+
+/// The flip pass: "78%" (and "±6" for a scout who can be off) after each rated name of this frame.
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn flip() {
+    for ((x1, y1, x2, y2), font, t) in std::mem::take(&mut RATED_NAMES) {
+        // (the score as the scout sees him, his error in it but not shown: user, 2026-11-07, "that
+        // makes it fun")
+        let Some((pct, _)) = rating_of(&t) else { continue };
+        let bytes = format!("{pct}%").into_bytes();
+        let x = x1 + 2 + text_width(font, &t) + 10;
+        if x + text_width(font, &bytes) > x2 - 4 {
+            continue;
+        }
+        let c = if pct >= 75 { [0x4c, 0xc0, 0x7a] } else if pct >= 60 { crate::GOLD } else { [0xe0, 0x88, 0x58] };
+        text_at(x, y1, y2, font, c, &bytes, 0);
     }
 }
 

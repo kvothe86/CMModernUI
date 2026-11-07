@@ -144,6 +144,26 @@ height, at 800x600 `NARROW_ROW`, so 24 clubs scroll there). At 800x600 `narrow`:
 Check: `suite.ps1 ... squad` (`_last_match`, `_last_match_stats`) and part `match` (live; moves the
 game on, run last). Spec: `..\helper_match.md`.
 
+## Fixture lists, form, match card, season review
+
+Built 2026-11-07 (FIXES "Built 2026-11-07" and "Wishes"; user-tested on Restructured).
+
+| What | Where |
+|---|---|
+| Continental competitions: the three-letter nation codes (table column, the boxes beside a tie, the day's fixtures / results) as flags in one 3:2 frame | `comp.rs` `nation_flag`, `of_nations` (the comp screen's Comp, screen parameter 0, its row at +4; on the day's screens the title band's competition with no nation), `nation_of_code` (club +0x53 nation, nation +0x53 code), `flag_in_box` (paints the box with the colour on the side towards the list's middle), `lib.rs` `draw_flag_frame` |
+| Crests before club / national team names on tie rows (continental, cups, internationals); an international's empty box gets the country's flag | `comp.rs` `tie_box`, `tie_name`, `tie_flags` (flip) |
+| Continental league phase boxes: Q green tick, Pl blue PO pill | `comp.rs` `table_icons` branch (`nation_column`) |
+| League table form pills: one width and height per table | `comp.rs` `form_pills` and its caller (width by screen height, not row height) |
+| Match report icons: no trails while scrolling (a list redrawn alone asks one redraw 200 ms later); more goal events; a ball only on blue (counted) goal lines | `report.rs` `note_text`, `flip`, `blue` |
+| Weather icons | `weather.rs` `read`, `text`, `before_right` (the match screen's WEATHER box in `match_text`) |
+| Club header form: last five pills under the league line | `form.rs` `mini` from `league_line` |
+| A club's results | `form.rs` `results` (last 200 days, kept per club and day), `played` (any date range), `today_fixture`: FIXTURE_MANAGER `*0xae2a58`, find_fixtures 0x5acbe0, a 0x4f-byte copy per fixture: +0xc home, +0x10 away club index, +0x28 year, +0x2a day, +0x43 / +0x44 goals (0xff unplayed) |
+| Match card on "Proceed to the match ?" | `card.rs` `note`, `flip`; league place `challenge::league_place` (League+0xb1 rows of 0x3b: +0x11 played, +0x12..+0x14 W D L, +0x15 / +0x17 goals (unverified), +0x19 points) |
+| Season review on the first day of a new season | `season.rs` (daily snapshot `cmui_season.txt`, `transfers` from the transfer manager, Back via `input`) |
+| News: Fine kind (banknote), the FA's discipline words, last year's items "31.12.28" | `news.rs` `kind`, `icon`, `short_date`; `lib.rs` `dotted_date` |
+| Assistant picks by the per-slot intrinsic % he sees (team report, pick button, scout's XI) | `assistant.rs` `Eye::score` (`scout::seen_score` × fit × condition) |
+| National pool (national team's Assistant menu): the country's players, + to the Short List | `natpool.rs` `open`, `gather`, `draw`, `input`; menu `assistant.rs` `pool_item`, `item_name` |
+
 ## Save / Restore dialogs
 
 No drawing of its own: typing into the file box needs a quiet screen. The fix is `comp.rs`

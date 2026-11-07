@@ -347,6 +347,10 @@ pub unsafe fn cell_font(y1: i32, y2: i32, font: u32) -> u32 {
 /// Form pills (W green, D grey, L red, X dim), `n` wide, from x.
 unsafe fn form_pills(x: i32, y1: i32, y2: i32, bw: i32, font: u32, t: &[u8]) {
     let mut x = x;
+    // (one height for every pill, centred on its row: the rows are a pixel taller or shorter here
+    // and there after scaling, and pills of row height minus 6 were uneven, user 2026-11-07)
+    let ph = ((bw - 3) * 8 / 10).max(8).min(y2 - y1 - 2);
+    let top = (y1 + y2 - ph) / 2;
     for &c in t {
         let colour = match c {
             b'W' => [0x3e, 0xa8, 0x6a],
@@ -354,7 +358,7 @@ unsafe fn form_pills(x: i32, y1: i32, y2: i32, bw: i32, font: u32, t: &[u8]) {
             b'L' => [0xd0, 0x50, 0x48],
             _ => [0x2c, 0x30, 0x36],
         };
-        pill(x, y1 + 3, x + bw - 3, y2 - 3, colour);
+        pill(x, top, x + bw - 3, top + ph, colour);
         {
             text_at(x + (bw - 3) / 2, y1, y2, font, WHITE, &[if c == b'X' { b'D' } else { c }], 1);
         }
@@ -378,6 +382,7 @@ unsafe fn forget() {
     LINES.drain(..START[2].min(LINES.len()));
     SCORES.drain(..START[3].min(SCORES.len()));
     START = [0; 4];
+    TIES_CRESTED = false;
     BEST = 0.0;
     LABEL_RIGHT = i32::MIN;
     FORMS.0 = 0; // (the results go on: asked again when a list opens)
@@ -495,6 +500,12 @@ pub unsafe fn view_is(title: &[u8]) -> bool {
     VIEW == title
 }
 
+/// The screen's title (its band) ends so ("Test Manager News").
+#[allow(static_mut_refs)]
+pub unsafe fn screen_ends_with(tail: &[u8]) -> bool {
+    SCREEN.ends_with(tail)
+}
+
 /// A profile left its History tab's Playing Career for a tab without a list title.
 #[allow(static_mut_refs)]
 pub unsafe fn leave_career() {
@@ -577,6 +588,11 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
     let t = raw.trim_ascii();
     let (w, h) = (x2 - x1, y2 - y1);
     let (_, sh) = screen();
+    // a tie row's box (a nation's code, a division, or empty for a national team): noted for the
+    // row's names and the empty ones' flags (`tie_flags`)
+    if tie_box(x1, y1, x2, y2, flags, screen().0) && TIE_BOXES.len() < 128 {
+        TIE_BOXES.push(((x1, y1, x2, y2), t.is_empty()));
+    }
     // the screen's title, the list's (never an empty box: a scroll draws wide empty ones)
     if t.is_empty() {
         return false;
@@ -606,6 +622,14 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
     // (a dropdown over the list: its rows start with five spaces and go to `menu_row`)
     if h > 40 || t.is_empty() || raw.starts_with(b"     ") {
         return false;
+    }
+    if t.len() == 3 && nation_flag(x1, y1, x2, y2, t) {
+        return true;
+    }
+    // a club's or national team's name on a tie row (a box drawn on its row this frame, the left
+    // one comes before both names): its crest before it
+    if flags & 0xf == 0x1 && w > screen().0 / 5 && TIE_BOXES.iter().any(|b| b.0 .1 == y1) && tie_name(x1, y1, x2, y2, flags, font, colour, raw) {
+        return true;
     }
     // (only `flip` empties the cells, and it runs with the stats table)
     if on(HONOURS) && on(STATS_TABLE) && VIEW == b"Honours" && SCREEN.ends_with(b" History") && HONOUR_CELLS.len() < 256 {
@@ -655,7 +679,7 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
         return false;
     }
     // the league table's boxes: champions a cup, promoted and relegated an arrow, play-offs both
-    if on(TABLE_ICONS) && table() && (16..100).contains(&w) && [&b"C"[..], b"Pl", b"P", b"R"].contains(&t) {
+    if on(TABLE_ICONS) && table() && (16..100).contains(&w) && [&b"C"[..], b"Pl", b"P", b"R", b"Q"].contains(&t) {
         fill(x1 - 2, y1 - 2, x2 + 3, y2 + 3, AREA);
         let s = (h * 7 / 10).max(8);
         let (cx, top) = ((x1 + x2) / 2, y1 + (h - s) / 2);
@@ -663,6 +687,18 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
             b"C" => trophy(cx - s / 2, top, s, GOLD),
             b"P" => arrow(cx, top, s, true, [0x46, 0xc8, 0x6e]),
             b"R" => arrow(cx, top, s, false, [0xe8, 0x4c, 0x4c]),
+            // a continental league phase (user, 2026-11-07: the old red Q box and the league's
+            // play-off arrows did not suit it): Q through to the round of 16, a green disc with a
+            // tick; Pl the knockout play-off at least, a steel blue "PO" pill
+            b"Q" => {
+                dot(cx, top + s / 2, s / 2 + 1, [0x3e, 0xa8, 0x6a]);
+                draw_icon(0xE73E, cx, top + s / 6, s * 7 / 10, [0xf4, 0xf6, 0xf8]);
+            }
+            b"Pl" if nation_column() => {
+                let half = s * 9 / 10;
+                pill(cx - half, top, cx + half, top + s, [0x3a, 0x6e, 0xb0]);
+                text_at(cx, top, top + s, SMALL_FONT.unwrap_or(0xffff0001), [0xf4, 0xf6, 0xf8], b"PO", 1);
+            }
             _ => {
                 arrow(cx - s / 2, top, s, true, [0xe8, 0x9a, 0x2c]);
                 arrow(cx + s / 2, top, s, false, [0xe8, 0x9a, 0x2c]);
@@ -847,7 +883,10 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
             let drawn = crest_name(x1, y1, x2, y2, flags, font, colour, raw);
             if let Some(pld) = HEADS.iter().find(|h| h.0 == b"Pld").filter(|_| !nation_column() && !live_table()) {
                 if let Some(f) = form_named(t.trim_ascii()) {
-                    let (bw, gap) = if narrow() { NARROW_FORM } else { ((h + 2).min(22), 70) };
+                    // (one width for the whole table, by the screen: a row a pixel shorter after
+                    // scaling made its pills narrower and the five of them started further right,
+                    // user's shots 2026-11-07)
+                    let (bw, gap) = if narrow() { NARROW_FORM } else { ((screen().1 * 22 / 1050).clamp(14, 22), 70) };
                     let small = SMALL_FONT.unwrap_or(0xffff0001);
                     form_pills(pld.1 - gap - f.len() as i32 * bw, y1, y2, bw, small, &f);
                 }
@@ -1022,6 +1061,169 @@ unsafe fn crest_key(name: &[u8]) -> Option<Vec<u8>> {
     key
 }
 
+/// The competition on screen is a club cup of several nations (the Champions League, the CAF and
+/// CONCACAF cups, the Libertadores, the Club World Cup): the kind the game lists each club's nation
+/// for (`has_nation_column`), screen parameter 0 being the Comp, its ClubComp (a row of the
+/// competition table) at +4 (as `titles` reads it; the first build took parameter 0 for the row
+/// itself and drew no flag, user's shots 2026-11-07).
+unsafe fn continental() -> bool {
+    let (comps, count) = (rd::<usize>(0xae23d0), rd::<i32>(0xae2378)); // (the competition table, 0x6b a row)
+    let comp = screen_param(0);
+    if count <= 0 || !mapped(comp, 0x43) {
+        return false;
+    }
+    let row = rd::<usize>(comp + 4);
+    row >= comps && row < comps + count as usize * 0x6b && (row - comps) % 0x6b == 0 && has_nation_column(comp)
+}
+
+/// A nation's name by the three-letter code the game shows for it ("ITA"), from the clubs' nations
+/// (club +0x53; a nation's +0x53 its three-letter name): the nations a club cup can show.
+#[allow(static_mut_refs)]
+unsafe fn nation_of_code(code: &[u8]) -> Option<Vec<u8>> {
+    static mut CODES: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    if CODES.is_empty() {
+        let (base, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT));
+        let mut seen = std::collections::HashSet::new();
+        for k in 0..count.max(0) as usize {
+            let nation = rd::<usize>(base + k * CLUB_SIZE + 0x53);
+            if nation != 0 && seen.insert(nation) && readable(nation, 0x57) {
+                let code = game_text(nation + 0x53, 4);
+                if code.len() == 3 {
+                    CODES.push((code, game_text(nation + 4, 51)));
+                }
+            }
+        }
+    }
+    CODES.iter().find(|c| c.0 == code).map(|c| c.1.clone())
+}
+
+/// The screen is about a competition of several nations, a continental club cup or a national
+/// teams' one: the competition screen's own (`continental`), or the day's fixtures / results of a
+/// competition (its name in the title band, `SCREEN`) whose row in the competition table has no
+/// nation (+0x5d; a league's or a national cup's has its country: those lists show divisions,
+/// FL1, ENL, never a nation's code). User's shots 2026-11-07: the Evening Fixtures still had codes.
+#[allow(static_mut_refs)]
+unsafe fn of_nations() -> bool {
+    if continental() {
+        return true;
+    }
+    static mut LAST: (Vec<u8>, bool) = (Vec::new(), false);
+    if LAST.0 != SCREEN {
+        let (comps, count) = (rd::<usize>(0xae23d0), rd::<i32>(0xae2378));
+        let found = (count > 0 && readable(comps, count as usize * 0x6b))
+            .then(|| (0..count as usize).map(|k| comps + k * 0x6b).find(|&c| game_text(c + 4, 51) == SCREEN))
+            .flatten();
+        LAST = (SCREEN.clone(), found.is_some_and(|c| rd::<usize>(c + 0x5d) == 0));
+    }
+    LAST.1
+}
+
+/// A flag's frame in a row `h` high: one size for every flag (3:2), so a column of them is even.
+fn flag_frame(h: i32) -> (i32, i32) {
+    let fh = (h * 62 / 100).max(6);
+    (fh * 3 / 2, fh)
+}
+
+/// The nation's flag in a box (the game's code box or an empty one), the box painted over first
+/// with the colour beside it on the side towards the list's middle (left of the screen's middle:
+/// right of the box; the left boxes start at the list's edge, where the window's lighter grey is,
+/// user's shot 2026-11-07). Only a box of another colour than around it is painted (a table's
+/// nation column has none).
+unsafe fn flag_in_box(x1: i32, y1: i32, x2: i32, y2: i32, nation: &[u8]) -> bool {
+    let key = [b"flag:".as_slice(), nation].concat();
+    if !has_crest(&key) {
+        return false;
+    }
+    let h = y2 - y1;
+    let beside = if (x1 + x2) / 2 < screen().0 / 2 { x2 + 3 } else { x1 - 3 };
+    if let (Some(inside), Some(outside)) = (pixel_at(x1 + 2, y1 + h / 2), pixel_at(beside, y1 + h / 2)) {
+        if inside != outside {
+            fill(x1, y1, x2, y2, outside);
+        }
+    }
+    let (fw, fh) = flag_frame(h);
+    let fw = fw.min(x2 - x1 - 4);
+    draw_flag_frame(&key, (x1 + x2 - fw) / 2, y1 + (h - fh) / 2, fw, fh)
+}
+
+/// A three-letter nation code of a competition of several nations (the table's nation column, the
+/// boxes beside a tie): the nation's flag in its place (user, 2026-11-07). False: not such a code,
+/// or no flag in the pack.
+unsafe fn nation_flag(x1: i32, y1: i32, x2: i32, y2: i32, t: &[u8]) -> bool {
+    if !t.iter().all(u8::is_ascii_uppercase) || !of_nations() {
+        return false;
+    }
+    let name = nation_of_code(t);
+    let drawn = name.as_ref().is_some_and(|n| flag_in_box(x1, y1, x2, y2, n));
+    if trace() && !drawn {
+        log(&format!("nation flag {:?}: nation {:?}, no flag", latin1(t), name.as_deref().map(latin1)));
+    }
+    drawn
+}
+
+/// This frame's tie rows (a fixture or result list: a box beside each club, the code or division
+/// in it, or empty for a national team): the boxes (rect, empty) and the names drawn on their rows.
+static mut TIE_BOXES: Vec<((i32, i32, i32, i32), bool)> = Vec::new();
+static mut TIE_NAMES: Vec<((i32, i32, i32, i32), Vec<u8>)> = Vec::new();
+/// A name of the last frame's tie rows had a crest: the rows' names stand where a crest goes, also
+/// those without one (Frome, below the loaded leagues), so the column stays even.
+static mut TIES_CRESTED: bool = false;
+
+/// The box beside a club in a tie row: the game's small box (panel 0x30, its text centred) at the
+/// list's left or right end, about 83 of 1680 wide.
+fn tie_box(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, sw: i32) -> bool {
+    let w = (x2 - x1) * 1680 / sw.max(1);
+    flags == 0xc && y2 - y1 < 40 && (60..=110).contains(&w) && (x1 < sw * 15 / 100 || x2 > sw * 85 / 100)
+}
+
+/// A club's (or national team's) name in a tie row: its crest before it (user, 2026-11-07: "badges
+/// in the FA Cup", the continental cups' fixtures, internationals). Kept for the flags of the empty
+/// boxes (`tie_flags`). True: drawn here.
+#[allow(static_mut_refs)]
+unsafe fn tie_name(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, colour: u32, t: &[u8]) -> bool {
+    if TIE_NAMES.len() < 128 {
+        TIE_NAMES.push(((x1, y1, x2, y2), t.to_vec()));
+    }
+    let size = y2 - y1 - 4;
+    let key = crest_key(t);
+    if key.is_none() && !TIES_CRESTED {
+        return false;
+    }
+    if let Some(k) = key {
+        TIES_CRESTED = true;
+        draw_crest(&k, x1 + 4, y1 + 2, size);
+    }
+    let c = std::ffi::CString::new(t).unwrap_or_default();
+    game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(x1 + size + 10, y1, x2, y2, flags, font, colour, c.as_ptr(), -1);
+    true
+}
+
+/// The flip pass: a national team's empty box gets its country's flag (the team's nation, club
+/// +0x53, as the national team header has it: "Bosnia" is the team, "Bosnia-Herzegovina" the flag).
+#[allow(static_mut_refs)]
+unsafe fn tie_flags() {
+    let boxes = std::mem::take(&mut TIE_BOXES);
+    let names = std::mem::take(&mut TIE_NAMES);
+    if boxes.is_empty() {
+        return;
+    }
+    TIES_CRESTED = TIES_CRESTED && !names.is_empty();
+    for &((x1, y1, x2, y2), empty) in &boxes {
+        if !empty {
+            continue;
+        }
+        // (the name on its row, on its side: right of a left box, left of a right one)
+        let left = (x1 + x2) / 2 < screen().0 / 2;
+        let name = names.iter().filter(|n| n.0 .1 == y1 && if left { n.0 .0 >= x2 } else { n.0 .2 <= x1 }).min_by_key(|n| if left { n.0 .0 - x2 } else { x1 - n.0 .2 });
+        let Some((_, name)) = name else { continue };
+        let Some(team) = club_named(name).filter(|&c| national_team(c)) else { continue };
+        let nation = rd::<usize>(team + 0x53);
+        if readable(nation, 55) {
+            flag_in_box(x1, y1, x2, y2, &game_text(nation + 4, 51));
+        }
+    }
+}
+
 /// A club's name with its crest before it.
 unsafe fn crest_name(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, colour: u32, t: &[u8]) -> bool {
     let size = y2 - y1 - 4;
@@ -1117,6 +1319,7 @@ unsafe fn value_cell((x1, y1, x2, y2): (i32, i32, i32, i32), t: &[u8], font: u32
 pub unsafe fn flip(_full_frame: bool) {
     IN_FULL = false;
     honours();
+    tie_flags();
     let drawn = std::mem::take(&mut DRAWN);
     let values = std::mem::take(&mut VALUES);
     let best = values.iter().filter_map(|v| number(&v.1)).fold(0.0f32, f32::max);

@@ -3,8 +3,10 @@
 cmui = a Rust DLL (`ui\src\*.rs`, built to `ui\target\i686-pc-windows-msvc\release\cmui.dll`) that
 restyles CM 01/02 by hooking the original exe. Long history in dated rounds: `..\README.md`.
 Source sizes: `lib.rs` ~5300 lines (almost everything), `news.rs`, `comp.rs`, `assistant.rs`,
-`scout.rs`, `history.rs` (a player's injuries, bans, moves), `remote.rs` (network transport). Find a
-function: Grep `fn <name>` in `ui\src`.
+`scout.rs`, `history.rs` (a player's injuries, bans, moves), `remote.rs` (network transport),
+`report.rs` (match report icons), `weather.rs`, `form.rs` (a club's results from the fixture
+manager), `card.rs` (match card), `season.rs` (season review), `coach.rs`. Find a function: Grep
+`fn <name>` in `ui\src`.
 
 ## Screen / feature -> doc -> main functions
 
@@ -21,6 +23,7 @@ function: Grep `fn <name>` in `ui\src`.
 | Competition table / stats / history | [screens.md](screens.md#competition-screens) | `comp.rs`: `text`, `panel`, `flip`, `titles`, `add_history`, `history_winners` |
 | Match screen (overview, stats, live) | [screens.md](screens.md#match-screen) | `match_text`, `match_overlays`, `key_stats`, `event_icon`, `match_record` |
 | CM Challenge (managers' league, network games; how to drop it) | [challenge.md](challenge.md) | `src\challenge\`: `prizes`, `moves`, `seasons`, `page`, `update`, `overlay` |
+| Fixture lists (flags, crests), weather, form, match card, season review | [screens.md](screens.md#fixture-lists-form-match-card-season-review) | `comp.rs`: `nation_flag`, `tie_name`, `tie_flags`; `weather.rs`; `form.rs`; `card.rs`; `season.rs` |
 | Save / Restore dialogs, typing | [screens.md](screens.md#save--restore-dialogs) | `comp.rs` `TITLES_SEEN`, `poll_input` |
 | Network (host builds client screens, packets, block) | [network.md](network.md) | `remote.rs`, `host_answer`, `screen_sent`, `news::screen_block`, `comp::history_block`, `client_loop` |
 | Test scripts, saves, driving the game, logs | [testing.md](testing.md) | `poll_input`, `script`, `find_label` |

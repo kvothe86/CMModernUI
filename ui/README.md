@@ -279,7 +279,7 @@ such as `EXPANDEXE` (adds `.nick` if missing), `#` comments; a patch counts as a
 NEW byte is there; unapply writes OLD back. `cmui Loader` sets the entry point (file 0x120) to the
 stub at 0xdf0000 (file 0x6e5000; no community patch uses 0x6e4000-0x6e6000 or the entry field):
 push "cmui.dll", call [LoadLibraryA], jmp 0x547a13, then "cmui.dll", the mark `CMUI` at +0x1c and
-15 switch bytes at +0x20, all 0. Each `cmui - <feature>` patch sets one switch to 1. The DLL
+a switch byte per feature at +0x20 (36 since 2026-11-07, all 0). Each `cmui - <feature>` patch sets one switch to 1. The DLL
 (`exe_switches`) turns a feature off where its byte is 0; `cmui.ini` can only switch off.
 `make_exe.py` writes the same stub with all switches 1. cmui.dll still has to be copied into the
 game folder (the patcher cannot add files); the misc patches would go into the patcher's
@@ -476,9 +476,9 @@ made "Unable To Create" there.
 
 ## Switches
 
-`..\cmui.ini`: `theme`, `tabs`, `attribute_bars`, `crests`, `profile`, `stats_table`, `news`,
-`club_header`, `squad_list`, `tactics_pitch`, `match_screen`, `compare_screen`, `menu_fixes`,
-`status_bars`, `search_ability`, `scout_stars`, `assistant_pick`; `name=0` turns one off, missing names are written as `=1` at start. Read once at
+`cmui.ini` in the game folder holds one line per feature switch, 36 of them (the full list with
+what each covers: [docs/switches.md](docs/switches.md); the settings window `cmui_config.bat`
+shows them all); `name=0` turns one off, missing names are written as `=1` at start. Read once at
 start (restart after a change). `theme=0` leaves the game's palette and background picture.
 An exe made by the CM0102Patcher misc patches also carries a switch per feature (on only where
 its patch is applied); the ini can switch those off, not on.

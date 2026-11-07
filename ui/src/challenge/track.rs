@@ -68,9 +68,260 @@ pub struct Readings {
     foreign_staff: i32,
     coach_best: i32,
     assistant_best: i32,
+    // the squad (the RAD review, 2026-11-06): the starting XI is the 11 with most league starts this
+    // season, the first team who played 10+ league games, as `ui\challenge_sim.py` judges them
+    clean_sheets: i32, // a keeper's league clean sheets, the most
+    xi_35: i32,
+    xi_32: i32,
+    xi_30: i32,
+    xi_u23: i32,
+    xi_u21: i32,
+    xi_u18: i32,
+    xi_age10: i32,    // the XI's average age, in tenths
+    first_age10: i32, // the first team's
+    xi_left: i32,
+    back_young: i32, // of the XI's keeper and four defenders, how many are under 28 (5 when there are not five)
+    capped: i32,     // first team players with caps this season
+    africa: i32,
+    south_america: i32,
+    east: i32,
+    scandinavia: i32,
+    nbpt: i32,
+    big5: i32,
+    same_country: i32, // the most first team players of one country not the club's own
+    xi_foreign: i32,
+    xi_own: i32,
+    xi_nations: i32,
+    xi_not_nbpt: i32, // of the XI, how many are not of its one NED/BEL/POR/TUR nation (11: not one nation)
+    xi_not_big5: i32,
+    xi_not_other: i32,
+    xi_not_africa: i32,
+    xi_not_south_america: i32,
+    xi_not_north_america: i32,
+    xi_not_asia: i32,
+    xi_not_oceania: i32,
+    xi_dear: i32, // XI players worth more than 10M
+    xi_homegrown: i32,
+    xi_youth: i32,
+    // the tactics (the match-day tracker, 2026-11-07): of the league matches seen this season, how
+    // many broke the challenge; fewer than 10 seen count as broken until there are
+    tac_sweeper: i32,
+    tac_wing_backs: i32,
+    tac_three_up: i32,
+    tac_442: i32,
+    tac_five_back: i32,
+    tac_five_mid: i32,
+    tac_wingers: i32,
+    tac_no_striker: i32, // matches played without a striker (it wants 15)
+    tac_one_back: i32,
+}
+
+/// What a match's formation (its eleven slot labels, "GK", "DC", "WBL", "AMR", "FC" ...) does for
+/// the tactics challenges, in TACTICS order: with a sweeper, without wing backs, three or more
+/// forwards, a 4-4-2, five or more defenders, five or more midfielders, without attacking wingers,
+/// without a striker, one defender. Defenders: SW, D*, WB*; midfielders: DM*, M*, AMC; forwards
+/// F*, ST.
+pub(super) fn match_marks(labels: &[&[u8]]) -> [bool; 9] {
+    let count = |f: &dyn Fn(&[u8]) -> bool| labels.iter().filter(|l| f(l)).count();
+    let back = count(&|l| l.starts_with(b"SW") || (l.starts_with(b"D") && !l.starts_with(b"DM")) || l.starts_with(b"WB"));
+    let mid = count(&|l| l.starts_with(b"DM") || l.starts_with(b"M") || l == b"AMC");
+    let up = count(&|l| l.starts_with(b"F") || l.starts_with(b"ST"));
+    let wingers = count(&|l| l == b"AML" || l == b"AMR");
+    [
+        count(&|l| l.starts_with(b"SW")) > 0,
+        count(&|l| l.starts_with(b"WB")) == 0,
+        up >= 3,
+        back == 4 && mid == 4 && up == 2 && wingers == 0,
+        back >= 5,
+        mid >= 5,
+        wingers == 0,
+        up == 0,
+        back == 1,
+    ]
+}
+
+/// The tactics challenges' keys in the league file's season stats, in `match_marks` order.
+const TACTICS: [&str; 9] = ["tac_sweeper", "tac_no_wing_backs", "tac_three_up", "tac_442", "tac_five_back", "tac_five_mid", "tac_no_wingers", "tac_no_striker", "tac_one_back"];
+
+/// A league match played since the last look: the manager's formation now is the one he played
+/// with (the active tactic, 0x5fbd00, as the Assistant reads it); counted in the season's stats:
+/// `tac_matches` and a key of `TACTICS` for every challenge the match kept. The first look of a
+/// season only marks where the league stands (what came before is not known).
+unsafe fn watch_tactics(l: &mut League, name: &str, staff: usize, club: usize, now: i32) -> bool {
+    let Some(s) = standing(club) else { return false };
+    let seen = l.stat(name, now, "tac_seen");
+    let Some(seen) = seen.filter(|&n| n <= s.played) else { return l.set_stat(name, now, "tac_seen", s.played) };
+    if s.played == seen {
+        return false;
+    }
+    let humans = rd::<usize>(assistant::HUMAN_MANAGER);
+    let formation = if mapped(humans, 4) { game::<extern "thiscall" fn(usize, usize) -> usize>(assistant::ACTIVE_TACTIC)(humans, staff) } else { 0 };
+    if !mapped(formation, 0x200) {
+        return l.set_stat(name, now, "tac_seen", s.played);
+    }
+    let slots = assistant::formation_slots(formation);
+    let labels: Vec<&[u8]> = slots.iter().take(11).map(|v| v.as_slice()).collect();
+    let marks = match_marks(&labels);
+    let n = s.played - seen;
+    if trace() {
+        log(&format!("challenge tactics {name}: {n} match(es), {:?} -> {marks:?}", labels.iter().map(|l| latin1(l).to_string()).collect::<Vec<_>>()));
+    }
+    let add = |l: &mut League, key: &str, by: i32| {
+        let v = l.stat(name, now, key).unwrap_or(0) + by;
+        l.set_stat(name, now, key, v)
+    };
+    add(l, "tac_matches", n);
+    for (k, key) in TACTICS.iter().enumerate() {
+        if marks[k] {
+            add(l, key, n);
+        }
+    }
+    l.set_stat(name, now, "tac_seen", s.played);
+    true
+}
+
+/// The tactics readings from the season's stats (see `Readings`).
+fn tactic_readings(l: &League, name: &str, now: i32, r: &mut Readings) {
+    let matches = l.stat(name, now, "tac_matches").unwrap_or(0);
+    let kept = |k: usize| l.stat(name, now, TACTICS[k]).unwrap_or(0);
+    // (broken: the matches that did not keep it, and the ones still missing to 10)
+    let broken = |k: usize| matches - kept(k) + (10 - matches).max(0);
+    r.tac_sweeper = broken(0);
+    r.tac_wing_backs = matches - kept(1);
+    r.tac_three_up = broken(2);
+    r.tac_442 = matches - kept(3);
+    r.tac_five_back = broken(4);
+    r.tac_five_mid = broken(5);
+    r.tac_wingers = matches - kept(6);
+    r.tac_no_striker = kept(7);
+    r.tac_one_back = broken(8);
 }
 
 type Reading = fn(&Readings) -> i32;
+
+const EAST: [&str; 28] = ["Albania", "Armenia", "Azerbaijan", "Belarus", "Bosnia", "Bosnia-Herzegovina", "Bulgaria", "Croatia", "Czech Republic", "Czechia", "Estonia", "Georgia", "Hungary", "Kosovo", "Latvia", "Lithuania", "Moldova", "Montenegro", "North Macedonia", "Macedonia", "FYR Macedonia", "Poland", "Romania", "Russia", "Serbia", "Slovakia", "Slovenia", "Ukraine"];
+const SCANDINAVIA: [&str; 6] = ["Denmark", "Norway", "Sweden", "Finland", "Iceland", "Faroe Islands"];
+const NBPT: [&str; 6] = ["Holland", "Netherlands", "Belgium", "Portugal", "Turkey", "Türkiye"];
+const BIG5: [&str; 5] = ["England", "Spain", "Germany", "Italy", "France"];
+
+/// The squad's readings (see `Readings`): from this season's league records (0x7c3920; +0 apps,
+/// +1 as sub, +3 clean sheets), birth dates (+0x10), nations (+0x1a, their continent +0x71),
+/// feet (player +0x30 / +0x3b), values (+0x52), the day each joined (+0x3e).
+unsafe fn read_squad(club: usize, r: &mut Readings) {
+    let stats = rd::<usize>(PLAYER_STATS);
+    if !readable(stats, 0x34) {
+        return;
+    }
+    let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
+    // (the club's country by name: the league's nation field is not the nation record a player's
+    // +0x1a points at, so pointers never match; seen on Glory_v2, Dortmund's Germans were foreign)
+    let own_name = {
+        let league = rd::<usize>(club + 0x57);
+        if readable(league, COMP_SIZE) { super::nation_name(rd::<usize>(league + COMP_NATION)) } else { String::new() }
+    };
+    struct Man {
+        starts: i32,
+        apps: i32,
+        clean: i32,
+        age: i32,
+        joined_age: i32,
+        nation: usize,
+        nation_name: String,
+        continent: String,
+        left: bool,
+        keeper: bool,
+        defender: bool,
+        capped: bool,
+        value: i32,
+    }
+    let mut men: Vec<Man> = Vec::new();
+    for s in squad(club) {
+        let player = ((s + 0x61) as *const usize).read_unaligned();
+        if !readable(player, 70) {
+            continue;
+        }
+        let rec = |row: i32| {
+            let p = game::<extern "thiscall" fn(usize, usize, i32) -> usize>(GET_RECORD)(stats, player, row);
+            if p != 0 && readable(p, 32) { Some(p) } else { None }
+        };
+        let league = rec(2);
+        let (apps, subs, clean) = league.map_or((0, 0, 0), |p| (rd::<u8>(p) as i32, rd::<u8>(p + 1) as i32, rd::<u8>(p + 3) as i32));
+        let (_, _, y) = day_month(s + 0x10);
+        let (born, born_day) = if y == 1900 { (rd::<u16>(s + 0x18) as i32, 0) } else { (y, rd::<i16>(s + 0x10) as i32) };
+        let (_, _, joined) = day_month(s + 0x3e);
+        let nation = rd::<usize>(s + 0x1a);
+        let text = |p: usize| if readable(p, 0x40) { latin1(&game_text(p + 4, 51)).to_string() } else { String::new() };
+        let continent = if readable(nation, 0x78) { text(rd::<usize>(nation + 0x71)) } else { String::new() };
+        men.push(Man {
+            starts: apps - subs,
+            apps,
+            clean,
+            age: year - born - (day < born_day) as i32,
+            joined_age: if joined > 1900 { joined - born } else { 99 },
+            nation,
+            nation_name: text(nation),
+            continent,
+            left: rd::<i8>(player + 0x30) > rd::<i8>(player + 0x3b),
+            keeper: rd::<i8>(player + 0xf) >= 15,
+            defender: rd::<i8>(player + 0x11) >= 15 && rd::<i8>(player + 0xf) < 15,
+            capped: rec(5).is_some_and(|p| rd::<u8>(p) > 0),
+            value: ((s + 0x52) as *const i32).read_unaligned(),
+        });
+    }
+    men.sort_by_key(|m| -m.starts);
+    let xi: Vec<&Man> = men.iter().filter(|m| m.apps > 0).take(11).collect();
+    let first: Vec<&Man> = men.iter().filter(|m| m.apps >= 10).collect();
+    let count = |ms: &[&Man], f: &dyn Fn(&Man) -> bool| ms.iter().filter(|m| f(m)).count() as i32;
+    let avg10 = |ms: &[&Man]| if ms.is_empty() { 0 } else { ms.iter().map(|m| m.age * 10).sum::<i32>() / ms.len() as i32 };
+    r.clean_sheets = men.iter().filter(|m| m.keeper).map(|m| m.clean).max().unwrap_or(0);
+    r.xi_35 = count(&xi, &|m| m.age >= 35);
+    r.xi_32 = count(&xi, &|m| m.age >= 32);
+    r.xi_30 = count(&xi, &|m| m.age >= 30);
+    r.xi_u23 = count(&xi, &|m| m.age < 23);
+    r.xi_u21 = count(&xi, &|m| m.age < 21);
+    r.xi_u18 = count(&xi, &|m| m.age < 18);
+    r.xi_age10 = avg10(&xi);
+    r.first_age10 = avg10(&first);
+    r.xi_left = count(&xi, &|m| m.left);
+    let back: Vec<&&Man> = xi.iter().filter(|m| m.keeper).take(1).chain(xi.iter().filter(|m| m.defender).take(4)).collect();
+    r.back_young = if back.len() < 5 { 5 } else { back.iter().filter(|m| m.age < 28).count() as i32 };
+    r.capped = count(&first, &|m| m.capped);
+    let named = |m: &Man, set: &[&str]| set.contains(&m.nation_name.as_str());
+    r.africa = count(&first, &|m| m.continent == "Africa");
+    r.south_america = count(&first, &|m| m.continent == "South America");
+    r.east = count(&first, &|m| named(m, &EAST));
+    r.scandinavia = count(&first, &|m| named(m, &SCANDINAVIA));
+    r.nbpt = count(&first, &|m| named(m, &NBPT));
+    r.big5 = count(&first, &|m| named(m, &BIG5));
+    let mut by_nation: Vec<(usize, i32)> = Vec::new();
+    for m in first.iter().filter(|m| m.nation_name != own_name) {
+        match by_nation.iter_mut().find(|n| n.0 == m.nation) {
+            Some(n) => n.1 += 1,
+            None => by_nation.push((m.nation, 1)),
+        }
+    }
+    r.same_country = by_nation.iter().map(|n| n.1).max().unwrap_or(0);
+    r.xi_foreign = count(&xi, &|m| m.nation_name != own_name);
+    r.xi_own = count(&xi, &|m| m.nation_name == own_name);
+    let mut nations: Vec<usize> = xi.iter().map(|m| m.nation).collect();
+    nations.sort();
+    nations.dedup();
+    r.xi_nations = nations.len() as i32;
+    let one = nations.len() == 1 && xi.len() == 11;
+    let group = |set: &[&str]| if one && xi.iter().all(|m| named(m, set)) { 0 } else { 11 };
+    r.xi_not_nbpt = group(&NBPT);
+    r.xi_not_big5 = group(&BIG5);
+    r.xi_not_other = if one && xi.iter().all(|m| !named(m, &NBPT) && !named(m, &BIG5)) { 0 } else { 11 };
+    let outside = |continents: &[&str]| if xi.len() < 11 { 11 } else { count(&xi, &|m| !continents.contains(&m.continent.as_str())) };
+    r.xi_not_africa = outside(&["Africa"]);
+    r.xi_not_south_america = outside(&["South America"]);
+    r.xi_not_north_america = outside(&["North America", "Central America"]);
+    r.xi_not_asia = outside(&["Asia"]);
+    r.xi_not_oceania = outside(&["Oceania"]);
+    r.xi_dear = count(&xi, &|m| m.value > 10_000_000);
+    r.xi_homegrown = count(&xi, &|m| m.joined_age <= 18);
+    r.xi_youth = count(&xi, &|m| m.joined_age <= 18 && m.age <= 21);
+}
 
 /// How the game judges a challenge, by its text (`rules.tsv`, the euro sign as the game's byte
 /// 0x80): the reading, the way, the unit. None: the host's to tick.
@@ -99,16 +350,72 @@ pub fn rule(text: &str) -> Option<(Reading, Way, &'static str)> {
         "Dutch staff only" => (|r| r.foreign_staff, Way::EndMost(0), "foreign staff"),
         "All coaches with coaching attributes below 5" => (|r| r.coach_best, Way::EndMost(4), "highest attribute"),
         "Assistant manager <10" => (|r| r.assistant_best, Way::EndMost(9), "highest attribute"),
+        // the RAD review (2026-11-06): what the squad's records tell, judged at the season's end
+        "Team gets no more than 1 red card" => (|r| r.reds, Way::Most(1), "red cards"),
+        "Player becomes top scorer, top assists and highest average rating" => (|r| r.leads, Way::EndLeast(3), "of 3"),
+        "Keeper 10+ clean sheets" => (|r| r.clean_sheets, Way::Least(10), "clean sheets"),
+        "3 players 35+ in the starting XI" => (|r| r.xi_35, Way::EndLeast(3), "players 35+"),
+        "5 players 30+ in the starting XI" => (|r| r.xi_30, Way::EndLeast(5), "players 30+"),
+        "5 players 32+ in the starting XI" => (|r| r.xi_32, Way::EndLeast(5), "players 32+"),
+        "5 players under 21 in the starting XI" => (|r| r.xi_u21, Way::EndLeast(5), "players under 21"),
+        "5 players under 23 in the starting XI" => (|r| r.xi_u23, Way::EndLeast(5), "players under 23"),
+        "Average age starting XI <=23" => (|r| r.xi_age10, Way::EndMost(230), AGE10),
+        "Average age starting XI >=30" => (|r| r.xi_age10, Way::EndLeast(300), AGE10),
+        "No player younger than 18 in the starting XI" => (|r| r.xi_u18, Way::EndMost(0), "players under 18"),
+        "First team average age <=20" => (|r| r.first_age10, Way::EndMost(200), AGE10),
+        "First team average age <=23" => (|r| r.first_age10, Way::EndMost(230), AGE10),
+        "First team average age >=30" => (|r| r.first_age10, Way::EndLeast(300), AGE10),
+        "First team average age >=32" => (|r| r.first_age10, Way::EndLeast(320), AGE10),
+        "5 left-footed players in the starting XI" => (|r| r.xi_left, Way::EndLeast(5), "left-footed"),
+        "Keeper + 4 defenders all 28+" => (|r| r.back_young, Way::EndMost(0), "under 28"),
+        "At least 3 players with international caps this season" => (|r| r.capped, Way::EndLeast(3), "capped players"),
+        "At least 3 homegrown players in the starting XI" => (|r| r.xi_homegrown, Way::EndLeast(3), "homegrown"),
+        "At least 2 youth players promoted to the starting XI" => (|r| r.xi_youth, Way::EndLeast(2), "youth players"),
+        "No player worth more than \u{80}10M in the starting XI" => (|r| r.xi_dear, Way::EndMost(0), "worth over 10M"),
+        "5 players from Africa" => (|r| r.africa, Way::EndLeast(5), "players"),
+        "5 players from South America" => (|r| r.south_america, Way::EndLeast(5), "players"),
+        "5 players from Eastern Europe" => (|r| r.east, Way::EndLeast(5), "players"),
+        "5 players from Scandinavia" => (|r| r.scandinavia, Way::EndLeast(5), "players"),
+        "5 foreigners in the starting XI" => (|r| r.xi_foreign, Way::EndLeast(5), "foreigners"),
+        "5 players from NED/BEL/POR/TUR" => (|r| r.nbpt, Way::EndLeast(5), "players"),
+        "5 players from ENG/SPA/GER/ITA/FRA" => (|r| r.big5, Way::EndLeast(5), "players"),
+        "3 players from the same country (not your own)" => (|r| r.same_country, Way::EndLeast(3), "of one country"),
+        "No player from your own country in the starting XI (min. 15 times)" => (|r| r.xi_own, Way::EndMost(0), "own country"),
+        "At least 5 different nationalities in the starting XI" => (|r| r.xi_nations, Way::EndLeast(5), "nationalities"),
+        "Team of 1 nationality from NED/BEL/POR/TUR" => (|r| r.xi_not_nbpt, Way::EndMost(0), "not of it"),
+        "Team of 1 nationality from ENG/SPA/GER/ITA/FRA" => (|r| r.xi_not_big5, Way::EndMost(0), "not of it"),
+        "Team of 1 nationality from the other countries" => (|r| r.xi_not_other, Way::EndMost(0), "not of it"),
+        "Fatbike kids challenge (African players only)" => (|r| r.xi_not_africa, Way::EndMost(0), "not African"),
+        "Favela challenge (South American players only)" => (|r| r.xi_not_south_america, Way::EndMost(0), "not South American"),
+        "Murica challenge (North American players only)" => (|r| r.xi_not_north_america, Way::EndMost(0), "not North American"),
+        "Prawn cracker challenge (Asian players only)" => (|r| r.xi_not_asia, Way::EndMost(0), "not Asian"),
+        "Down Under challenge (Oceanian players only)" => (|r| r.xi_not_oceania, Way::EndMost(0), "not Oceanian"),
+        // the match-day tracker: league matches since it first looked, 10 at least
+        "Play with a sweeper in the starting XI" => (|r| r.tac_sweeper, Way::EndMost(0), "matches without"),
+        "Play without wing backs" => (|r| r.tac_wing_backs, Way::Most(0), "matches with"),
+        "Play with at least three attackers" => (|r| r.tac_three_up, Way::EndMost(0), "matches without"),
+        "Always 4-4-2 (no other formation)" => (|r| r.tac_442, Way::Most(0), "matches without"),
+        "Play with at least five defenders" => (|r| r.tac_five_back, Way::EndMost(0), "matches without"),
+        "Play with at least five midfielders" => (|r| r.tac_five_mid, Way::EndMost(0), "matches without"),
+        "Play without attacking wingers" => (|r| r.tac_wingers, Way::Most(0), "matches with"),
+        "Play without a striker (min. 15 competitive matches)" => (|r| r.tac_no_striker, Way::EndLeast(15), "matches"),
+        "Play with 1 defender (Kamikaze)" => (|r| r.tac_one_back, Way::EndMost(0), "matches without"),
         _ => return None,
     };
     Some(r)
 }
 
-/// The reading in words: "1 / 3 purchases", "€1.5M / €2M".
+/// An average age kept in tenths.
+const AGE10: &str = "average age";
+
+/// The reading in words: "1 / 3 purchases", "€1.5M / €2M", "24.3 / 23 average age".
 fn note(value: i32, way: Way, unit: &str) -> String {
     let limit = match way {
         Way::Most(n) | Way::Least(n) | Way::EndMost(n) | Way::EndLeast(n) => n,
     };
+    if unit == AGE10 {
+        return format!("{:.1} / {} {unit}", value as f32 / 10.0, limit / 10);
+    }
     if unit == "k" {
         return format!("\u{80}{:.1}M / \u{80}{}M", value as f32 / 1000.0, (limit + 1) / 1000);
     }
@@ -161,11 +468,68 @@ unsafe fn read_deals(staff: usize, year: i32, best: Option<i32>, r: &mut Reading
             }
         } else {
             r.winter_sales += winter as i32;
-            r.released += (fee <= 0 && other < 0) as i32;
             r.best_sold += (best == Some(who)) as i32;
         }
     }
     history::free(list);
+}
+
+/// The transfer manager's past transfers of this year in memory (TRANSFER_MANAGER::get_past_transfers
+/// 0x8cc030 reads them, the club screen's Players In / Out shows them): 37-byte rows, +0 the staff
+/// index, +0x10 the club he joined (-1: none, "Free Transfer"), +0x14 the club he left, +0x18 the
+/// fee, +0x1c the kind (0 a transfer, 2 a loan, 3 let go to no club, 4 a free transfer at the end of
+/// a contract), +0x1d the date (i16 day, i16 year). Traced on the user's Dorking game: Hebert's sale
+/// to Rotherham is (Rotherham, Dorking, fee, 0); the five released on 24.10.28 (Dorking left, no club
+/// joined, kind 3, day 297). Older years are moved out to transfers_<year>.tmp (not read: a season's
+/// rows stay in memory).
+const TRANSFER_MANAGER: usize = 0xde1f54;
+
+unsafe fn past_transfers() -> Vec<(i32, i32, i32, i32, u8, i16, i32)> {
+    let tm = rd::<usize>(TRANSFER_MANAGER);
+    if !readable(tm, 0x86e) {
+        return Vec::new();
+    }
+    let (rows, count) = (rd::<usize>(tm + 0x862), rd::<i32>(tm + 0x86a));
+    if count <= 0 || !readable(rows, count as usize * 0x25) {
+        return Vec::new();
+    }
+    (0..count as usize)
+        .map(|k| rows + k * 0x25)
+        .map(|t| (rd::<i32>(t), rd::<i32>(t + 0x10), rd::<i32>(t + 0x14), rd::<i32>(t + 0x18), rd::<u8>(t + 0x1c), rd::<i16>(t + 0x1d), rd::<i16>(t + 0x1f) as i32))
+        .collect()
+}
+
+/// Players the club let go in the season (user, 2026-11-07): to no club, after the season began; a
+/// contract running out at the start of the season is no release. Releases never reach the
+/// manager's history (traced on the user's game), so they come from the club's Players Out.
+unsafe fn releases(club: usize, year: i32) -> i32 {
+    let index = ((club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE) as i32;
+    let all = past_transfers();
+    let mut n = 0;
+    for t in all.into_iter().filter(|t| t.2 == index && t.1 == -1) {
+        let season = if t.5 >= DEALS_FROM { t.6 } else { t.6 - 1 };
+        if trace() {
+            log(&format!("challenge out {index}: staff {} fee {} kind {} day {} {} (season {season})", t.0, t.3, t.4, t.5, t.6));
+        }
+        n += (season == year && in_season(t.4, t.5, t.6)) as i32;
+    }
+    n
+}
+
+/// Whether a player let go (kind 3) was released in the season, not a contract running out: those
+/// leave on the turn of a season, 1 July or 1 January (the user's Dorking game: Pinchard and Lakin,
+/// kind 3 on 1 July 2028, day 182).
+/// ponytail: a release done on 1 July or 1 January itself reads as a contract running out.
+fn in_season(kind: u8, day: i16, year: i32) -> bool {
+    let leap = (year % 4 == 0 && year % 100 != 0 || year % 400 == 0) as i16;
+    kind == 3 && day != 0 && day != 181 + leap
+}
+
+#[cfg(test)]
+#[test]
+fn a_contract_running_out_is_no_release() {
+    assert!(!in_season(3, 182, 2028) && !in_season(3, 181, 2027) && !in_season(3, 0, 2026));
+    assert!(in_season(3, 297, 2028) && !in_season(0, 297, 2028) && !in_season(2, 297, 2028));
 }
 
 /// A season stat of a player in a stats row (2 League, 6 Senior Club) as a number.
@@ -242,6 +606,48 @@ pub(super) unsafe fn league_object(comp: usize) -> usize {
     let at = leagues + rd::<i32>(comp) as usize * 4;
     let league = if readable(at, 4) { rd::<usize>(at) } else { 0 };
     if readable(league, 0xc9) && rd::<usize>(league + 4) == comp { league } else { 0 }
+}
+
+/// The club's place in its league table and the number of teams (the match card, `card.rs`): one
+/// more than the clubs with more points, or with as many points and a better goal difference
+/// (+0x15 for, +0x17 against, as the table's For / Ag); None outside a league the game plays.
+pub(crate) unsafe fn league_place(club: usize) -> Option<(i32, i32)> {
+    let league = league_object(rd::<usize>(club + 0x57));
+    if league == 0 {
+        return None;
+    }
+    let (teams, rows) = (rd::<i16>(league + 0x3e).max(0) as usize, rd::<usize>(league + 0xb1));
+    if !(2..=64).contains(&teams) || !readable(rows, teams * 0x3b) {
+        return None;
+    }
+    let key = |r: usize| (rd::<i16>(r + 0x19) as i32, rd::<i16>(r + 0x15) as i32 - rd::<i16>(r + 0x17) as i32, rd::<i16>(r + 0x15) as i32);
+    let all: Vec<usize> = (0..teams).map(|k| rows + k * 0x3b).collect();
+    let own = *all.iter().find(|&&r| rd::<usize>(r) == club)?;
+    let mine = key(own);
+    Some((1 + all.iter().filter(|&&r| key(r) > mine).count() as i32, teams as i32))
+}
+
+/// The club's row of its league table: played, won, drawn, lost (bytes +0x11..+0x14), goals for
+/// and against (+0x15, +0x17), points (+0x19); and the league's name (the season review).
+pub(crate) unsafe fn league_row(club: usize) -> Option<([i32; 7], Vec<u8>)> {
+    let comp = rd::<usize>(club + 0x57);
+    let league = league_object(comp);
+    if league == 0 {
+        return None;
+    }
+    let (teams, rows) = (rd::<i16>(league + 0x3e).max(0) as usize, rd::<usize>(league + 0xb1));
+    if !(2..=64).contains(&teams) || !readable(rows, teams * 0x3b) {
+        return None;
+    }
+    let own = (0..teams).map(|k| rows + k * 0x3b).find(|&r| rd::<usize>(r) == club)?;
+    let b = |o: usize| rd::<u8>(own + o) as i32;
+    let s = |o: usize| rd::<i16>(own + o) as i32;
+    if trace() {
+        // (the goals at +0x15 / +0x17 are a guess: the raw row to check against the table)
+        let raw: Vec<u8> = (0x11..0x1b).map(|o| rd::<u8>(own + o)).collect();
+        log(&format!("league row {}: bytes 0x11.. {raw:02x?}", latin1(&game_text(club + 4, 51))));
+    }
+    Some(([b(0x11), b(0x12), b(0x13), b(0x14), s(0x15), s(0x17), s(0x19)], game_text(comp + 4, 51)))
 }
 
 /// The table of the club's league: League object `[LEAGUES][id]` (its +4 the competition), +0x3e
@@ -392,6 +798,7 @@ unsafe fn read(staff: usize, club: usize, year: i32, leads: bool, best: Option<i
     if !readable(club, 0x1cf + 12) {
         return r;
     }
+    r.released = releases(club, year);
     for s in squad(club) {
         let (goals, assists) = (stat(s, 6, 2) as i32, stat(s, 6, 5) as i32);
         r.reds += stat(s, 6, 11) as i32;
@@ -403,6 +810,7 @@ unsafe fn read(staff: usize, club: usize, year: i32, leads: bool, best: Option<i
         r.leads = league_leads(club);
     }
     read_staff(club, &mut r);
+    read_squad(club, &mut r);
     r
 }
 
@@ -450,13 +858,19 @@ pub unsafe fn update() {
                 changed = true;
             }
         }
+        // the formation of every league match, whatever challenges he has (one drawn later in the
+        // season finds the matches already counted)
+        if readable(club, 0x60) {
+            changed |= watch_tactics(l, &name, staff, club, now);
+        }
         let rows: Vec<u32> = l.rads.iter().filter(open).filter(|r| rule(&r.text).is_some()).map(|r| r.id).collect();
         if rows.is_empty() {
             continue;
         }
         let leads = l.rads.iter().filter(open).any(|r| r.text.starts_with("Player becomes") || r.text.starts_with("Player gets"));
         let best = l.best.iter().find(|b| b.1 == now && same_manager(&b.0, &name)).map(|b| b.2);
-        let readings = read(staff, club, now, leads, best);
+        let mut readings = read(staff, club, now, leads, best);
+        tactic_readings(l, &name, now, &mut readings);
         if trace() {
             log(&format!("challenge readings {name}: {readings:?}"));
         }
@@ -481,8 +895,110 @@ pub unsafe fn update() {
     }
 }
 
+/// The RAD review's census (2026-11-06): with `cmui.census` in the game folder, every squad of a
+/// played first division into `challenge_census.tsv`, a player a line: the facts the challenges
+/// could be judged by (nation, its continent and region, age, caps, feet, value, the age he joined
+/// the club, positions) and fields 0..24 of three of this season's stat rows (2 league, 5
+/// international, 6 all the club's games), as the game's own stats screen writes them. Read by
+/// `ui\challenge_sim.py`. Nothing else uses it.
+const GET_RECORD: usize = 0x7c3920; // PlayerStats::get_category_record, thiscall(stats, Player*, category) -> 32-byte record or 0
+
+unsafe fn census() {
+    // (asked of every poll: the file is looked for every 3 s)
+    static mut LOOKED: Option<std::time::Instant> = None;
+    if LOOKED.is_some_and(|t| t.elapsed().as_secs() < 3) {
+        return;
+    }
+    LOOKED = Some(std::time::Instant::now());
+    if std::fs::remove_file("cmui.census").is_err() {
+        return;
+    }
+    let (comps, comp_count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    let (table, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT));
+    log(&format!("challenge census asked: {count} clubs, {comp_count} competitions"));
+    if count <= 0 || comp_count <= 0 {
+        return;
+    }
+    let text = |p: usize, at: usize, n: usize| if readable(p, at + n) { latin1(&game_text(p + at, n)).to_string() } else { String::new() };
+    let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
+    let mut out = String::from("league\tclub\tplayer\tnation\tcontinent\tregion\tage\tcaps\tleft\tright\tvalue\tjoined_age\tpositions\tleague_record\tinternational_record\tclub_record\thistory_first\thistory_last\n");
+    // (a category's 32-byte record as hex, "" none: 0x7c3920 as the stats screens read it; field
+    // numbers past 0x11 stop the game, so the record and not the formatter)
+    let stats = rd::<usize>(PLAYER_STATS);
+    let record = |player: usize, row: i32| -> String {
+        if !readable(stats, 0x34) {
+            return String::new();
+        }
+        let r = game::<extern "thiscall" fn(usize, usize, i32) -> usize>(GET_RECORD)(stats, player, row);
+        if r == 0 || !readable(r, 32) {
+            return String::new();
+        }
+        (0..32).map(|i| format!("{:02x}", rd::<u8>(r + i))).collect()
+    };
+    // (every player of the database, not only today's first divisions: a past season's squad
+    // holds men who have moved down or on since; `club` his club's index now, -1 none)
+    let (staff_table, staff_count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
+    for k in 0..staff_count.max(0) as usize {
+        let s = staff_table + k * 0x6e;
+        let player = if readable(s, 0x6e) { ((s + 0x61) as *const usize).read_unaligned() } else { 0 };
+        if !readable(player, 70) {
+            continue;
+        }
+        let club = rd::<usize>(s + 0x39);
+        let club_index = if club >= table && club < table + count as usize * CLUB_SIZE { ((club - table) / CLUB_SIZE) as i64 } else { -1 };
+        let league = if club_index >= 0 { rd::<usize>(club + 0x57) } else { 0 };
+        let in_table = league >= comps && league < comps + comp_count as usize * COMP_SIZE;
+        let (league_name, club_name) = (if in_table { text(league, 4, 51) } else { String::new() }, format!("{club_index}"));
+        {
+            let nation = rd::<usize>(s + 0x1a);
+            let continent = if readable(nation, 0x78) { rd::<usize>(nation + 0x71) } else { 0 };
+            let continent_name = if readable(continent, 0x40) { text(continent, 4, 51) } else { format!("#{continent}") };
+            let region = if readable(nation, 0x78) { rd::<i8>(nation + 0x75) } else { -1 };
+            let born = |date: usize| {
+                let (_, _, y) = day_month(date);
+                if y == 1900 { (rd::<u16>(s + 0x18) as i32, 0) } else { (y, rd::<i16>(date) as i32) }
+            };
+            let (by, bd) = born(s + 0x10);
+            let age = year - by - (day < bd) as i32;
+            let (_, _, jy) = day_month(s + 0x3e);
+            let joined_age = if jy > 1900 { jy - by } else { -1 };
+            let positions: String = [(0xf, "GK"), (0x10, "SW"), (0x11, "D"), (0x12, "DM"), (0x13, "M"), (0x14, "AM"), (0x15, "F"), (0x16, "WB")].iter().filter(|p| rd::<i8>(player + p.0) >= 15).map(|p| p.1).collect::<Vec<_>>().join("/");
+            out += &format!(
+                "{league_name}\t{club_name}\t{}\t{}\t{continent_name}\t{region}\t{age}\t{}\t{}\t{}\t{}\t{joined_age}\t{positions}",
+                latin1(&staff_name(s)),
+                if readable(nation, 0x40) { text(nation, 4, 51) } else { String::new() },
+                rd::<u8>(s + 0x22),
+                rd::<i8>(player + 0x30),
+                rd::<i8>(player + 0x3b),
+                ((s + 0x52) as *const i32).read_unaligned(),
+            );
+            // (his past seasons: the first and last node of his chain in `player stats history.tmp`,
+            // +0x18 and +0x1c of his 39-byte entry at stats +0x30, by the player's id, 0x7c3920)
+            let entry = rd::<usize>(stats + 0x30) + rd::<u32>(player) as usize * 0x27;
+            let (first, last) = if readable(entry, 0x20) { (rd::<i32>(entry + 0x18), rd::<i32>(entry + 0x1c)) } else { (-1, -1) };
+            out += &format!("\t{}\t{}\t{}\t{first}\t{last}\n", record(player, 2), record(player, 5), record(player, 6));
+        }
+    }
+    let _ = std::fs::write("challenge_census.tsv", to_latin1(&out));
+    // (the history's lines name a club by its index: every club, its league and whether that is a
+    // played first division; and a copy of the history file as it is now)
+    let mut clubs = String::from("index\tclub\tleague\tfirst_division\tcountry\n");
+    for k in 0..count as usize {
+        let club = table + k * CLUB_SIZE;
+        let league = rd::<usize>(club + 0x57);
+        let in_table = league >= comps && league < comps + comp_count as usize * COMP_SIZE;
+        let first = in_table && first_division(league) && league_object(league) != 0;
+        let country = if in_table { super::nation_name(rd::<usize>(league + COMP_NATION)) } else { String::new() };
+        clubs += &format!("{k}\t{}\t{}\t{}\t{country}\n", text(club, 4, 51), if in_table { text(league, 4, 51) } else { String::new() }, first as i32);
+    }
+    let _ = std::fs::write("challenge_clubs.tsv", to_latin1(&clubs));
+    let _ = std::fs::copy("player stats history.tmp", "challenge_history.bin");
+    log(&format!("challenge census: {} lines on {day} {year}", out.lines().count() - 1));
+}
+
 /// A human turn on the host: once a game day.
 pub unsafe fn tick() {
+    census();
     static mut DAY: (i16, i16) = (0, 0);
     let today = (rd::<i16>(TODAY), rd::<i16>(TODAY + 2));
     if today == DAY || today.1 < 1900 || rd::<i32>(STAFF_COUNT) <= 0 || !game_on() {
@@ -523,6 +1039,24 @@ mod tests {
     }
 
     #[test]
+    fn formations_against_the_tactics_challenges() {
+        let f = |s: &str| s.split(' ').map(|l| l.as_bytes().to_vec()).collect::<Vec<_>>();
+        let marks = |s: &str| {
+            let v = f(s);
+            match_marks(&v.iter().map(|l| l.as_slice()).collect::<Vec<_>>())
+        };
+        // a 4-4-2: no sweeper, no wing backs, two up, a 4-4-2, no wingers
+        assert_eq!(marks("GK DL DC DC DR ML MC MC MR FC FC"), [false, true, false, true, false, false, true, false, false]);
+        // 5-3-2 with a sweeper and wing backs: five back
+        assert_eq!(marks("GK SW DC DC WBL WBR MC MC MC FC FC"), [true, false, false, false, true, false, true, false, false]);
+        // 4-3-3 with wingers: three up only counts forwards, the wingers break "without"
+        assert_eq!(marks("GK DL DC DC DR DMC MC MC AML AMR FC"), [false, true, false, false, false, false, false, false, false]);
+        // no striker, five in midfield; and the Kamikaze: one defender, three up
+        assert_eq!(marks("GK DL DC DC DR DMC ML MC MR AMC AMC"), [false, true, false, false, false, true, true, true, false]);
+        assert_eq!(marks("GK DC DMC ML MC MR AMC AMC FC FC FC"), [false, true, true, false, false, true, true, false, true]);
+    }
+
+    #[test]
     fn the_seasons_end_decides() {
         assert!(passed(Way::Most(1), 1, OPEN));
         assert!(!passed(Way::Most(1), 1, BAD));
@@ -543,14 +1077,17 @@ mod tests {
         assert_eq!(note(1, Way::Most(3), "purchases"), "1 / 3 purchases");
     }
 
-    /// Every challenge of a kind the game can read has its rule: a word changed in the rules file
-    /// would quietly make it the host's.
+    /// Since the RAD review (2026-11-06) every challenge the wheel can draw is one the game reads:
+    /// a word changed in the rules file would quietly make it the host's. The archived ones (the
+    /// tactics, the trivial ones) are kept for old rows only.
     #[test]
     fn the_rules_file_and_the_table_agree() {
         let l = League::parse(&latin1(RULES), "");
-        for t in l.tasks.iter().filter(|t| ["Transfers", "Staff"].contains(&t.0.as_str())) {
-            assert!(rule(&t.1).is_some(), "{}", t.1);
+        for t in l.tasks.iter().filter(|t| !l.archived.contains(&t.1)) {
+            assert!(rule(&t.1).is_some(), "drawn but not read: {}", t.1);
         }
-        assert_eq!(l.tasks.iter().filter(|t| rule(&t.1).is_some()).count(), 23);
+        assert_eq!(l.archived.len(), 4);
+        // (70 to draw; one archived is still read: "No player younger than 18", met 98% of the time)
+        assert_eq!(l.tasks.iter().filter(|t| rule(&t.1).is_some()).count(), 71);
     }
 }
