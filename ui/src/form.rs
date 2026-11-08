@@ -12,6 +12,9 @@
 use crate::*;
 
 const FIXTURE_MANAGER: usize = 0xae2a58;
+// A network client has no world of its own (`readable` there looks at the host's memory): the
+// game's find_fixtures on the host's pointer crashed it (0x5abf36, night 7, 2026-11-07). On a
+// client nothing is asked: no form there (ponytail: ask the host if the client wants it).
 const FIND_FIXTURES: usize = 0x5acbe0; // thiscall(this, start day, start year, end day, end year, club index, List*, comp -1, type -2, side -1)
 const LIST_NEW: usize = 0x68d020; // LLIST::LLIST, thiscall
 const LIST_CLEAR: usize = 0x68d040; // LLIST teardown: frees its nodes and the copies
@@ -63,7 +66,7 @@ pub unsafe fn results(club: i32, max: usize) -> Vec<Result_> {
 pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year): (i32, i32), max: usize) -> Vec<Result_> {
     let fm = rd::<usize>(FIXTURE_MANAGER);
     let mut out = Vec::new();
-    if club >= 0 && readable(fm, 16) && (1900..2200).contains(&year) && (1900..2200).contains(&start_year) {
+    if club >= 0 && !remote::CLIENT && readable(fm, 16) && (1900..2200).contains(&year) && (1900..2200).contains(&start_year) {
         let mut list = [0u8; 64];
         let l = list.as_mut_ptr() as usize;
         game::<extern "thiscall" fn(usize)>(LIST_NEW)(l);
@@ -111,7 +114,7 @@ pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year)
 pub unsafe fn today_fixture(club: i32) -> Option<(i32, i32)> {
     let fm = rd::<usize>(FIXTURE_MANAGER);
     let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
-    if club < 0 || !readable(fm, 16) || !(1900..2200).contains(&year) {
+    if club < 0 || remote::CLIENT || !readable(fm, 16) || !(1900..2200).contains(&year) {
         return None;
     }
     let mut list = [0u8; 64];

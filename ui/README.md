@@ -254,7 +254,7 @@ Pays Basque; Yugoslavia gets Serbia's.
     python install.py "<game folder>" --uninstall      lists cmui's files, removes them on y
     python install.py x --list                         the feature names
 
-It checks the exe at all 15 hook sites (the same checks the DLL makes at start; a site that does
+It checks the exe at all 15 hook sites (count of 2026-10-27; the same checks the DLL makes at start; a site that does
 not match leaves its feature off), writes `cm0102_ui.exe`, copies `cmui.dll` (the package's, else
 the build's) and writes `cmui.ini` (every feature on unless in `--off`). `--crests` runs
 `logos.py` match / comps / flags / fetch / pack for that game's database. `cm0102.exe` is never
@@ -279,14 +279,14 @@ such as `EXPANDEXE` (adds `.nick` if missing), `#` comments; a patch counts as a
 NEW byte is there; unapply writes OLD back. `cmui Loader` sets the entry point (file 0x120) to the
 stub at 0xdf0000 (file 0x6e5000; no community patch uses 0x6e4000-0x6e6000 or the entry field):
 push "cmui.dll", call [LoadLibraryA], jmp 0x547a13, then "cmui.dll", the mark `CMUI` at +0x1c and
-a switch byte per feature at +0x20 (36 since 2026-11-07, all 0). Each `cmui - <feature>` patch sets one switch to 1. The DLL
+a switch byte per feature at +0x20 (38 since 2026-11-07, all 0). Each `cmui - <feature>` patch sets one switch to 1. The DLL
 (`exe_switches`) turns a feature off where its byte is 0; `cmui.ini` can only switch off.
 `make_exe.py` writes the same stub with all switches 1. cmui.dll still has to be copied into the
 game folder (the patcher cannot add files); the misc patches would go into the patcher's
 `MiscPatches.zip` (a "cmui Patches" folder) if Nick takes them.
 
 Tested with the patcher's own code (`E:\CM0102\CM0102Patcher.exe` 2.0 loaded in PowerShell,
-`Patcher.LoadPatchFile` / `ApplyPatch` / `DetectPatch` / `UnApplyPatch`): all 16 not detected
+`Patcher.LoadPatchFile` / `ApplyPatch` / `DetectPatch` / `UnApplyPatch`): all 16 not detected (count of 2026-10-27)
 before, detected after; the patched exe equals `make_exe.py`'s byte for byte (the patcher only
 appends its log to the exe's end); unapplying all gives the original back. In the game (25-26,
 800x600): loader + 5 features → the other 10 logged off, menu bar written by the DLL
@@ -476,7 +476,7 @@ made "Unable To Create" there.
 
 ## Switches
 
-`cmui.ini` in the game folder holds one line per feature switch, 36 of them (the full list with
+`cmui.ini` in the game folder holds one line per feature switch, 38 of them (the full list with
 what each covers: [docs/switches.md](docs/switches.md); the settings window `cmui_config.bat`
 shows them all); `name=0` turns one off, missing names are written as `=1` at start. Read once at
 start (restart after a change). `theme=0` leaves the game's palette and background picture.

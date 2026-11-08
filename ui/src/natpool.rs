@@ -47,11 +47,109 @@ enum Spot {
     Add(usize), // the staff
 }
 
+// A network client: the list is gathered on the host (it judges through the game), key 'n' (team,
+// a request number, players to put on the Short List first); the ticks come with it.
+/// Client: the key whose answer is awaited (empty: none), the request count, its Short List.
+static mut KEY: Vec<u8> = Vec::new();
+static mut ASKS: u32 = 0;
+static mut LISTED: Vec<usize> = Vec::new();
+
 /// Opens the pool of the national team `team`.
 #[allow(static_mut_refs)]
 pub unsafe fn open(team: usize) {
     (OPEN, TEAM, FILTER, NOT_IN_SQUAD, PAGE) = (true, team, 0, false, 0);
-    MEN = gather(team);
+    if remote::CLIENT {
+        MEN.clear();
+        ask(&[]);
+    } else {
+        MEN = gather(team);
+    }
+}
+
+/// Client: the list asked again, with players to add first.
+#[allow(static_mut_refs)]
+unsafe fn ask(adds: &[usize]) {
+    ASKS += 1;
+    let mut args = vec![TEAM as u32, ASKS];
+    args.extend(adds.iter().map(|&s| s as u32));
+    KEY = key(b'n', &args);
+}
+
+/// Host: a client's key 'n' (team, number, players to add), while its channel is served (the
+/// Short List calls take the served channel's manager): the pool as bytes, each man: staff u32,
+/// group, age, caps, goals, score, in squad, on the Short List (u8 each), then name, positions
+/// and club (u8 length, Latin-1).
+pub unsafe fn remote(args: &[usize]) -> Vec<u8> {
+    let team = args.first().copied().unwrap_or(0);
+    if !readable(team, 0x5b) {
+        return Vec::new();
+    }
+    for &s in args.iter().skip(2).take(20) {
+        if valid_staff(s) {
+            add(s);
+        }
+    }
+    let mut out = Vec::new();
+    for m in gather(team) {
+        out.extend((m.staff as u32).to_le_bytes());
+        out.extend([m.group as u8, m.age.clamp(0, 255) as u8, m.caps.clamp(0, 255) as u8, m.goals.clamp(0, 255) as u8, m.score.clamp(0, 100) as u8, m.in_squad as u8, shortlisted(m.staff) as u8]);
+        for t in [&m.name, &m.positions, &m.club] {
+            out.push(t.len().min(255) as u8);
+            out.extend(&t[..t.len().min(255)]);
+        }
+    }
+    out
+}
+
+/// Client: the host's list read back (the men, those on the Short List).
+fn parse(v: &[u8]) -> (Vec<Man>, Vec<usize>) {
+    let (mut men, mut listed, mut at) = (Vec::new(), Vec::new(), 0);
+    while at + 11 <= v.len() {
+        let staff = u32::from_le_bytes(v[at..at + 4].try_into().unwrap()) as usize;
+        let b = &v[at + 4..at + 11];
+        at += 11;
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let Some(&n) = v.get(at) else { return (men, listed) };
+            let Some(t) = v.get(at + 1..at + 1 + n as usize) else { return (men, listed) };
+            texts.push(t.to_vec());
+            at += 1 + n as usize;
+        }
+        if b[6] != 0 {
+            listed.push(staff);
+        }
+        let club = texts.pop().unwrap();
+        let positions = texts.pop().unwrap();
+        let name = texts.pop().unwrap();
+        men.push(Man { staff, name, positions, group: b[0] as usize, age: b[1] as i32, club, caps: b[2] as i32, goals: b[3] as i32, score: b[4] as i32, in_squad: b[5] != 0 });
+    }
+    (men, listed)
+}
+
+#[cfg(test)]
+#[test]
+fn pool_bytes() {
+    let mut v = 0x1234u32.to_le_bytes().to_vec();
+    v.extend([2, 27, 40, 3, 81, 1, 1, 3]);
+    v.extend(b"Bos");
+    v.extend([2]);
+    v.extend(b"DC");
+    v.extend([4]);
+    v.extend(b"Ajax");
+    let (men, listed) = parse(&v);
+    assert_eq!((men.len(), men[0].staff, men[0].age, men[0].score, men[0].in_squad, &men[0].club[..], listed), (1, 0x1234, 27, 81, true, &b"Ajax"[..], vec![0x1234]));
+}
+
+/// Client: the host's answer, when it came, taken in. True: something new to draw.
+#[allow(static_mut_refs)]
+unsafe fn take_answer() -> bool {
+    if !remote::CLIENT || KEY.is_empty() {
+        return false;
+    }
+    let Some(v) = ask_host(&KEY) else { return false };
+    KEY.clear();
+    (MEN, LISTED) = parse(&v);
+    true
 }
 
 /// The country's players, best first in each group.
@@ -117,12 +215,20 @@ unsafe fn gather(team: usize) -> Vec<Man> {
     out
 }
 
+#[allow(static_mut_refs)]
 unsafe fn shortlisted(staff: usize) -> bool {
+    if remote::CLIENT {
+        return LISTED.contains(&staff);
+    }
     let sm = rd::<usize>(SCOUT_MANAGER);
     readable(sm, 4) && game::<extern "thiscall" fn(usize, usize, usize) -> i32>(IS_SHORTLISTED)(sm, staff, 0) & 0xff != 0
 }
 
 unsafe fn add(staff: usize) {
+    if remote::CLIENT {
+        LISTED.push(staff); // (ticked at once; the host's list follows)
+        return ask(&[staff]);
+    }
     let sm = rd::<usize>(SCOUT_MANAGER);
     if readable(sm, 4) && !shortlisted(staff) {
         game::<extern "thiscall" fn(usize, usize, usize) -> i32>(ADD_TO_SHORTLIST)(sm, staff, 0);
@@ -142,6 +248,7 @@ pub unsafe fn draw() {
     if !OPEN {
         return;
     }
+    take_answer();
     SPOTS.clear();
     let (sw, sh) = screen();
     // (the game's content area: the menu bar at the left stays the game's and works, a click on it
@@ -163,7 +270,8 @@ pub unsafe fn draw() {
         draw_crest(&game_text(TEAM + 4, 51), m + 12, my + 6, crest);
         text_at((m + sw - my) / 2, my + 4, my + band * 55 / 100, f5, white, &[game_text(TEAM + 4, 51).as_slice(), b" - National Pool"].concat(), 1);
     }
-    let judge = assistant::assistant_of(TEAM).map(|a| staff_name(a)).unwrap_or_default();
+    // (a game call: not on a network client, whose screen says "the assistant")
+    let judge = if remote::CLIENT { b"the assistant".to_vec() } else { assistant::assistant_of(TEAM).map(|a| staff_name(a)).unwrap_or_default() };
     let sub = format!("Every player of the country, rated by {} (a perfect eye) - + puts him on your Short List", latin1(&judge));
     text_at((m + sw - my) / 2, my + band * 55 / 100, my + band - 6, f2, muted, &to_latin1(&sub), 1);
     // the filters, the pages, add top 10
@@ -223,7 +331,8 @@ pub unsafe fn draw() {
         y += line + 4;
     }
     if rows.is_empty() {
-        text_at((m + sw) / 2, ly + line * 3, ly + line * 4, f3, muted, b"No player of the country found", 1);
+        let waiting = remote::CLIENT && !KEY.is_empty();
+        text_at((m + sw) / 2, ly + line * 3, ly + line * 4, f3, muted, if waiting { b"Asking the host...".as_slice() } else { b"No player of the country found" }, 1);
     }
     // Back: the full width at the bottom, as the game's screens have it
     let back = (m, sh - my - sh / 18, sw - my, sh - my);
@@ -248,8 +357,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     }
     *(LEFT_CLICK as *mut u32) = 0;
     *(assistant::RIGHT_CLICK as *mut u32) = 0;
+    // (a client's list on its way: drawn again when something came)
+    let came = remote::CLIENT && !KEY.is_empty() && (std::mem::take(&mut remote::ARRIVED) | remote::hold_over());
     if !released {
-        return Some(false);
+        return Some(came);
     }
     let Some(&(_, spot)) = SPOTS.iter().find(|s| (s.0 .0..=s.0 .2).contains(&mx) && (s.0 .1..=s.0 .3).contains(&my)) else { return Some(false) };
     match spot {
@@ -262,8 +373,15 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         Spot::Prev => PAGE = PAGE.saturating_sub(1),
         Spot::Next => PAGE += 1,
         Spot::AddTop => {
-            for man in shown().iter().filter(|m| !m.in_squad && !shortlisted(m.staff)).take(10) {
-                add(man.staff);
+            let top: Vec<usize> = shown().iter().filter(|m| !m.in_squad && !shortlisted(m.staff)).take(10).map(|m| m.staff).collect();
+            if remote::CLIENT {
+                // (one question for all ten: each add asks the whole list again)
+                LISTED.extend(&top);
+                ask(&top);
+            } else {
+                for staff in top {
+                    add(staff);
+                }
             }
         }
         Spot::Add(staff) => add(staff),

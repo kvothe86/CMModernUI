@@ -91,6 +91,11 @@ unsafe fn poll_pending() -> bool {
         }
         None if since.elapsed().as_secs() < 30 => {
             PENDING = Some((tab, question, k, since));
+            // (a client sends its questions when it draws; this page stands still while it
+            // waits, so the question went out only when the mouse moved, night 8)
+            if crate::remote::CLIENT {
+                crate::remote::ask();
+            }
             false
         }
         None => {
@@ -619,7 +624,9 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                 return Some(true);
             }
         }
-        return None;
+        // (an answer that came while the mouse rests on the menu bar, on the Coach button just
+        // clicked: drawn now, not when the mouse moves, night 8)
+        return arrived.then_some(true);
     }
     // (the game's poll does not run: a click would still be waiting for it after Back)
     *(LEFT_CLICK as *mut u32) = 0;
@@ -965,7 +972,10 @@ unsafe fn game_data(club: usize, manager: usize) -> String {
         );
     }
     // the next match, the opponent as our scout sees them
-    let fixture = NEXT_FIXTURE;
+    // (the one noted from the screens is the host's own club's: a network client's club gets its
+    // own looked up, night 8: "next match not known" on a client)
+    let ours = |f: usize| readable(f, 0x50) && (rd::<usize>(f + 0x1c) == club || rd::<usize>(f + 0x20) == club);
+    let fixture = if ours(NEXT_FIXTURE) { NEXT_FIXTURE } else { assistant::next_fixture(None, club) };
     let upcoming = fixture_day(fixture).is_none_or(|d| d >= today());
     NEXT_LABEL.clear();
     if !(upcoming && readable(fixture, 0x50) && (rd::<usize>(fixture + 0x1c) == club || rd::<usize>(fixture + 0x20) == club)) {

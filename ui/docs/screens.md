@@ -159,10 +159,20 @@ Built 2026-11-07 (FIXES "Built 2026-11-07" and "Wishes"; user-tested on Restruct
 | Club header form: last five pills under the league line | `form.rs` `mini` from `league_line` |
 | A club's results | `form.rs` `results` (last 200 days, kept per club and day), `played` (any date range), `today_fixture`: FIXTURE_MANAGER `*0xae2a58`, find_fixtures 0x5acbe0, a 0x4f-byte copy per fixture: +0xc home, +0x10 away club index, +0x28 year, +0x2a day, +0x43 / +0x44 goals (0xff unplayed) |
 | Match card on "Proceed to the match ?" | `card.rs` `note`, `flip`; league place `challenge::league_place` (League+0xb1 rows of 0x3b: +0x11 played, +0x12..+0x14 W D L, +0x15 / +0x17 goals (unverified), +0x19 points) |
-| Season review on the first day of a new season | `season.rs` (daily snapshot `cmui_season.txt`, `transfers` from the transfer manager, Back via `input`) |
+| Season review on the first day of a new season, and any day from the squad screen's Assistant menu "Season review" (the season so far) | `season.rs` (a daily snapshot per human club in `cmui_season.txt`, `card` works the texts out (host / single player), `draw` only draws, `transfers` from the transfer manager, Back via `input`; it acts only on a press made while it is up); `assistant::extras` for the menu item |
+| Season card "Save image": the card as a PNG in `Screenshots\` | `season.rs` `SAVE` / `save_rect`; `lib.rs` `grab` (back buffer), `png` (stored zlib, no library), `save_png` |
 | News: Fine kind (banknote), the FA's discipline words, last year's items "31.12.28" | `news.rs` `kind`, `icon`, `short_date`; `lib.rs` `dotted_date` |
 | Assistant picks by the per-slot intrinsic % he sees (team report, pick button, scout's XI) | `assistant.rs` `Eye::score` (`scout::seen_score` × fit × condition) |
-| National pool (national team's Assistant menu): the country's players, + to the Short List | `natpool.rs` `open`, `gather`, `draw`, `input`; menu `assistant.rs` `pool_item`, `item_name` |
+| National pool (national team's Assistant menu): the country's players, + to the Short List | `natpool.rs` `open`, `gather`, `draw`, `input`; menu `assistant.rs` `extras`, `item_name` |
+
+## Saved line-ups and national pool
+
+Built 2026-11-07, in network games since night 8 (see `network.md` "What works where").
+
+| What | Where |
+|---|---|
+| Saved line-ups (switch 37): on the human's own squad screen, a strip in the right part of the list's title band: three slots (1 / 2 / 3) and a Fill subs button. A slot keeps the eleven and the bench by staff id with the formation's shape; loading puts them back and replaces a starter who cannot play (gone, injured, banned, marked not available, condition under 75 %) by the assistant's pick; stand-ins get an amber "In" tag, the assistant's subs a blue "Ast". Fill subs keeps the selection and fills only the empty bench places. Lines are kept in `cmui_lineups.txt` by club. On a client the actions go to the host as `H` codes (100 Fill subs, 110+k load, 120+k save, 130+k clear) and the strip's shapes come by key `l` | `lineups.rs` `run`, `draw`, `input`, `remote_summary`; `assistant.rs` `fill_team`, `fill`, `run_pending` |
+| National pool (switch 36): for a national team manager, every player whose first nationality is the country, by group (GK / DEF / MID / ATT), best 100 a group by the assistant's eye; a + per row and "Add top 10 here" put players on the game's Short List; filters, pages, Back. From the squad screen's Assistant menu, item "National pool". On a client key `n` carries the list and the players to add to the client's own Short List | `natpool.rs` `open`, `gather`, `draw`, `input`, `remote`; menu `assistant.rs` `extras`, `item_name` |
 
 ## Save / Restore dialogs
 

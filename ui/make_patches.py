@@ -55,6 +55,7 @@ FEATURES = [
     ('match_card', 'Match Card', 'Before a match of the human manager: a card with both clubs, their last five results, their league places and the last meetings.'),
     ('season_review', 'Season Review', "On 1 July a card on the human manager's season: final place, record, goals, biggest win, cup run, top scorer, assists, best average, signings, CM Challenge points and the last six results."),
     ('national_pool', 'National Pool', "Needs Assistant Pick. A National pool item in a national team's Assistant menu: every player of the country (the first nationality), rated by the assistant, best 100 a position group for a big country; + puts one on the Short List."),
+    ('saved_lineups', 'Saved Line-ups', "Needs Assistant Pick. Three line-up slots and Fill subs on the squad screen: save your eleven and bench, load them back with the assistant standing in for whoever cannot play, and let him fill only the empty bench places."),
 ]
 
 

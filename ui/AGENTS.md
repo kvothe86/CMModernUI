@@ -29,8 +29,12 @@ Run it in `ui` or `net`. It must stay a 32-bit build.
 - **Check before patching.** Every hook compares the original bytes first and leaves the site alone
   when they differ, because players run exes changed by other patches. `install.py` holds the same
   list of sites: keep the two in step.
-- **Each feature has a switch**: a byte in the exe, a name in `FEATURES` in `install.py` and in
-  `ui/docs/switches.md`. A new feature gets its own switch and can be turned off alone.
+- **Each feature has a switch**: a byte in the exe and a name in five lists that must agree:
+  `FEATURES` (with a `const NAME: usize = N;`) in `ui/src/lib.rs`, `FEATURES = N` in
+  `ui/make_exe.py`, and the name in `ui/make_patches.py`, `ui/install.py` and
+  `ui/cmui_config.ps1`; the test `every_switch_list_agrees` (`cargo test`) fails when one is
+  missing. Add a row to `ui/docs/switches.md` too (documentation, not a list). A new feature
+  gets its own switch and can be turned off alone.
 - **Network games are part of every feature.** The host runs all screens and a client only sees what
   is sent, so whatever cmui draws from game memory needs a way to the client (`remote.rs`,
   `ui/docs/network.md`).

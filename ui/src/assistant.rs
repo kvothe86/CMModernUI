@@ -75,12 +75,13 @@ static mut PENDING: Option<Mode> = None;
 // 'H': mode, request number, the players the client sees marked not available), whose club
 // screen input makes the pick for that client's manager; the note comes back by request 'J'.
 /// Client: a choice to send (by poll_input), the number of the last request, the one shown.
-static mut CLIENT_SEND: Option<Mode> = None;
+/// (A request code: 0..3 the picks of ITEMS, from 100 a saved line-up action, `lineups::code`.)
+static mut CLIENT_SEND: Option<u32> = None;
 static mut ASKED: u32 = 0;
 static mut NOTE_FOR: u32 = 0;
-/// Host: a client's choice waiting for its screen input (channel, mode, not available, request
-/// number), and the notes of the clients' picks (channel, request number, note).
-static mut REMOTE_PENDING: Option<(i16, Mode, Vec<usize>, u32)> = None;
+/// Host: a client's choice waiting for its screen input (channel, request code, not available,
+/// request number), and the notes of the clients' picks (channel, request number, note).
+static mut REMOTE_PENDING: Option<(i16, u32, Vec<usize>, u32)> = None;
 static mut REMOTE_NOTES: Vec<(i16, u32, Vec<u8>)> = Vec::new();
 
 // The team report (switch `team_report`): a fifth menu item on the squad screen only, a full
@@ -125,12 +126,15 @@ pub static mut SCOUT_CHIP: Option<((i32, i32, i32, i32), usize, u32)> = None;
 /// channel). True: the screen is to be built again (its list shows the selection as it was when built).
 #[allow(static_mut_refs)]
 pub unsafe fn run_pending(tactics: bool) -> bool {
+    if on(SAVED_LINEUPS) && !tactics && crate::lineups::run() {
+        return true;
+    }
     if let Some(mode) = PENDING.take() {
         NOTE = pick(mode).unwrap_or_default();
         return true;
     }
     let serving = rd::<i16>(SCREEN_MANAGER + 0x382a);
-    let Some((channel, mode, unavailable, number)) = REMOTE_PENDING.take_if(|p| p.0 == serving) else { return false };
+    let Some((channel, code, unavailable, number)) = REMOTE_PENDING.take_if(|p| p.0 == serving) else { return false };
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
     let humans = rd::<usize>(HUMAN_MANAGER);
     let note = if readable(manager, 0x3d) && mapped(humans, 4) {
@@ -143,7 +147,15 @@ pub unsafe fn run_pending(tactics: bool) -> bool {
             Some(ts) => ts + 0xe44,
             None => game::<extern "thiscall" fn(usize, usize) -> usize>(ACTIVE_TACTIC)(humans, manager),
         };
-        if mapped(formation, 0x200) { pick_for(mode, club, manager, formation_slots(formation), unavailable, ts) } else { None }
+        if !mapped(formation, 0x200) {
+            None
+        } else if let Some(&(mode, _)) = ITEMS.get(code as usize) {
+            pick_for(mode, club, manager, formation_slots(formation), unavailable, ts)
+        } else if on(SAVED_LINEUPS) && !tactics {
+            crate::lineups::run_for(code, club, &formation_slots(formation), &unavailable).map(|r| r.0)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -155,9 +167,9 @@ pub unsafe fn run_pending(tactics: bool) -> bool {
 /// Client: the request for the host when a choice was made ('H', mode, number, not available).
 #[allow(static_mut_refs)]
 pub unsafe fn client_request() -> Option<Vec<u8>> {
-    let mode = CLIENT_SEND.take()?;
+    let code = CLIENT_SEND.take()?;
     ASKED += 1;
-    let mut args = vec![ITEMS.iter().position(|i| i.0 == mode).unwrap_or(0) as u32, ASKED, UNAVAILABLE.len() as u32];
+    let mut args = vec![code, ASKED, UNAVAILABLE.len() as u32];
     args.extend(UNAVAILABLE.iter().map(|&s| s as u32));
     NOTE = b"Asking the assistant...".to_vec();
     Some(key(b'H', &args))
@@ -166,10 +178,12 @@ pub unsafe fn client_request() -> Option<Vec<u8>> {
 /// Host: a client's request 'H' (its words after the letter).
 #[allow(static_mut_refs)]
 pub unsafe fn remote_request(channel: i16, args: &[u32]) {
-    let (Some(&mode), Some(&number), Some(&n)) = (args.first(), args.get(1), args.get(2)) else { return };
-    let Some(&(mode, _)) = ITEMS.get(mode as usize) else { return };
+    let (Some(&code), Some(&number), Some(&n)) = (args.first(), args.get(1), args.get(2)) else { return };
+    if (code as usize) >= ITEMS.len() && crate::lineups::action(code).is_none() {
+        return;
+    }
     let unavailable = args.iter().skip(3).take(n.min(64) as usize).map(|&s| s as usize).filter(|&s| valid_staff(s)).collect();
-    REMOTE_PENDING = Some((channel, mode, unavailable, number));
+    REMOTE_PENDING = Some((channel, code, unavailable, number));
 }
 
 /// Host: the note of a client's pick ('J', its request number), None until it is made.
@@ -228,6 +242,7 @@ pub unsafe fn forget() {
     NOTE.clear();
     SQUAD_HERE = false;
     REPORT_OPEN = false;
+    crate::lineups::forget();
 }
 
 fn slot_label(t: &[u8]) -> bool {
@@ -294,7 +309,8 @@ pub unsafe fn flip(full_frame: bool) {
     rows.dedup();
     // (the boxes are not in slot order: each is a widget of kind 0xa whose +0x48 is its slot, as
     // the squad screen's drop reads it, 0x468b90)
-    let display = rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel());
+    // (not on a client: its slots are not needed there and this would read the host's display)
+    let display = if remote::CLIENT { 0 } else { rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel()) };
     let count = if mapped(display + 0x12e9a0, 2) { rd::<i16>(display + 0x12e9a0).clamp(0, 1200) as usize } else { 0 };
     let boxes: Vec<([i32; 4], usize)> = if mapped(display + 0xba95e, count * 0x18c) {
         (0..count)
@@ -326,7 +342,9 @@ pub unsafe fn flip(full_frame: bool) {
     // screen's boxes give the size of the bench, the labels come from its formation too: a box's
     // text can leave out the side of a wide DM or AM slot (0x5b7810 line only), and a box under
     // the mouse is drawn another way
-    let formation = match tactics_screen() {
+    // (not on a network client: the formation is the host's and its slot call would run in the
+    // client's empty world; the client's picks go to the host anyway; night 8 audit)
+    let formation = match tactics_screen().filter(|_| !remote::CLIENT) {
         Some(ts) => Some(ts + 0xe44),
         None if (SQUAD_HERE || SLOTS.len() < 11) && CLEAR_BUTTON.is_some() && !remote::CLIENT => {
             let humans = rd::<usize>(HUMAN_MANAGER);
@@ -380,6 +398,10 @@ pub unsafe fn flip(full_frame: bool) {
         fill(cx - 4 + i, cy - 2 + i, cx - 2 + i, cy + i, ink);
         fill(cx + 3 - i, cy - 2 + i, cx + 5 - i, cy + i, ink);
     }
+    // the saved line-ups' strip (before the menu: an open menu lies over it)
+    if on(SAVED_LINEUPS) && SQUAD_HERE {
+        crate::lineups::draw(font);
+    }
     if MENU_OPEN {
         for k in 0..menu_len() {
             let name = item_name(k);
@@ -421,26 +443,37 @@ fn item_rect(b: (i32, i32, i32, i32), k: usize) -> (i32, i32, i32, i32) {
     (b.0, b.3 + 2 + k as i32 * h, b.2, b.3 + 2 + (k as i32 + 1) * h)
 }
 
-/// The menu's items: the four picks, and on the squad screen the team report, and for a national
-/// team the national pool (`natpool.rs`, single player and host).
+/// The menu's items: the four picks, and on the squad screen the team report, for a national
+/// team the national pool (`natpool.rs`), and the season review card (the season so far, any
+/// day; night 8).
 unsafe fn menu_len() -> usize {
-    ITEMS.len() + report_item() as usize + pool_item() as usize
+    ITEMS.len() + extras().len()
 }
 
-unsafe fn report_item() -> bool {
-    SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS && on(TEAM_REPORT)
-}
+const POOL_ITEM: &str = "National pool";
+const SEASON_ITEM: &str = "Season review";
 
-unsafe fn pool_item() -> bool {
-    SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS && on(NATIONAL_POOL) && !remote::CLIENT && my_team().is_some_and(|t| national_team(t))
+/// The items after the four picks that this screen has, in order.
+unsafe fn extras() -> Vec<&'static str> {
+    let squad = SQUAD_HERE && !crate::TACTICS && !LIVE_TACTICS;
+    let mut out = Vec::new();
+    if squad && on(TEAM_REPORT) {
+        out.push(REPORT_ITEM);
+    }
+    if squad && on(NATIONAL_POOL) && my_team().is_some_and(|t| national_team(t)) {
+        out.push(POOL_ITEM);
+    }
+    if squad && on(SEASON_REVIEW) {
+        out.push(SEASON_ITEM);
+    }
+    out
 }
 
 /// The name of item `k` of the menu.
 unsafe fn item_name(k: usize) -> &'static str {
     match ITEMS.get(k) {
         Some(i) => i.1,
-        None if k == ITEMS.len() && report_item() => REPORT_ITEM,
-        None => "National pool",
+        None => extras().get(k - ITEMS.len()).copied().unwrap_or(""),
     }
 }
 
@@ -544,7 +577,7 @@ pub unsafe fn remote_scout(channel: i16, club: usize) -> Vec<u8> {
 }
 
 /// Who judges for a club: its best scout by Judging Ability (club +0x1b3: seven), else its assistant.
-unsafe fn best_judge(club: usize) -> Option<usize> {
+pub(crate) unsafe fn best_judge(club: usize) -> Option<usize> {
     if !readable(club, 0x1b3 + 28) {
         return None;
     }
@@ -661,6 +694,56 @@ pub(crate) unsafe fn scout_for(club: usize, own: usize) -> Vec<u8> {
     let mut lines = vec![head.join(&b'\t')];
     lines.extend(rows);
     lines.join(&b'\n')
+}
+
+/// A side for the match day card: its formation ("4-4-2"), the eleven (slot label, staff), the
+/// bench, and whether the eleven is a guess. The human's own: his active tactic's slots and his
+/// selection (club +0x1e0, 20 places); another club: its selection when it has eleven picked,
+/// else the eleven its manager's preferred formation gives as the human's best scout sees them
+/// (as the scout report's), marked a guess.
+pub(crate) unsafe fn lineup(club: usize, own: usize, manager: Option<usize>) -> Option<(String, Vec<(Vec<u8>, usize)>, Vec<usize>, bool)> {
+    if !readable(club, 0x1e0 + 80) {
+        return None;
+    }
+    let selection = ((club + 0x1e0) as *const [usize; 20]).read_unaligned();
+    let picked = selection[..11].iter().filter(|&&s| readable(s, 0x6e)).count();
+    let bench: Vec<usize> = selection[11..].iter().copied().filter(|&s| readable(s, 0x6e)).collect();
+    if let Some(m) = manager {
+        // (a client's club is the host's pointer: the game's tactics calls would crash, as
+        // form.rs did, night 7; the card falls back to the old layout there)
+        if remote::CLIENT {
+            return None;
+        }
+        let humans = rd::<usize>(HUMAN_MANAGER);
+        let formation = if mapped(humans, 4) { game::<extern "thiscall" fn(usize, usize) -> usize>(ACTIVE_TACTIC)(humans, m) } else { 0 };
+        if !mapped(formation, 0x200) {
+            return None;
+        }
+        let slots = formation_slots(formation);
+        let labels: Vec<&[u8]> = slots[..11].iter().map(|s| s.as_slice()).collect();
+        // (the human's selection is the Tactics store's, as the squad screen shows it; club
+        // +0x1e0 stayed empty for his own club: test note 2, 2026-11-07)
+        let own = selection_of(club);
+        let eleven = (0..11).filter(|&k| readable(own[k], 0x6e)).map(|k| (slots[k].clone(), own[k])).collect();
+        let bench = own[11..].iter().copied().filter(|&s| readable(s, 0x6e)).collect();
+        return Some((shape(&labels), eleven, bench, false));
+    }
+    let boss = [0xcf, 0xd3].into_iter().map(|at| rd::<usize>(club + at)).find(|&b| readable(b, 0x6e) && readable(rd::<usize>(b + 0x69), 68))?;
+    let np = rd::<usize>(boss + 0x69);
+    let (_, spots) = (rd::<i8>(np + 0x43) as usize).checked_sub(1).and_then(|k| FORMATIONS[..9].get(k)).unwrap_or(&FORMATIONS[2]);
+    let labels: Vec<&[u8]> = std::iter::once("GK").chain(spots.iter().copied()).map(str::as_bytes).collect();
+    if picked == 11 {
+        // (its own pick: the players in the preferred formation's order, as picked)
+        let eleven = (0..11).map(|k| (labels[k].to_vec(), selection[k])).collect();
+        return Some((shape(&labels), eleven, bench, false));
+    }
+    let judge = best_judge(own).or_else(|| assistant_of(own))?;
+    let eye = Eye { mode: Mode::Best, id: rd::<i32>(judge), reading: coaching(judge, 0x21), judge };
+    let pool = candidates_in(judge, club, rd::<usize>(club + 0x57), 0, &[], &[]);
+    ((club + 0x1e0) as *mut [usize; 20]).write_unaligned(selection); // (the ban check may take players out)
+    let first = eleven(&eye, &pool, &labels);
+    let eleven = (0..11).filter_map(|k| first[k].map(|i| (labels[k].to_vec(), pool[i].staff))).collect();
+    Some((shape(&labels), eleven, Vec::new(), true))
 }
 
 /// What a coach looks at most, by the coaching attribute he is best at (non-player offset, as the
@@ -1162,6 +1245,11 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         }
         return Some(released);
     }
+    if on(SAVED_LINEUPS) && !MENU_OPEN {
+        if let Some(redraw) = crate::lineups::input(mx, my, released) {
+            return Some(redraw);
+        }
+    }
     let b = BUTTON?;
     if MENU_OPEN {
         let hover = (0..menu_len()).find(|&k| inside(item_rect(b, k)));
@@ -1171,19 +1259,21 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             MENU_OPEN = false;
             HOVER = None;
             if let Some(k) = hover.filter(|&k| k >= ITEMS.len()) {
-                if item_name(k) == "National pool" {
-                    if let Some(team) = my_team() {
-                        crate::natpool::open(team);
+                match item_name(k) {
+                    POOL_ITEM => {
+                        if let Some(team) = my_team() {
+                            crate::natpool::open(team);
+                        }
                     }
-                } else {
-                    open_report();
+                    SEASON_ITEM => crate::season::open_now(),
+                    _ => open_report(),
                 }
                 return Some(true);
             }
             // (done by the club screen's input, which then has the screen built again; a
             // client's by the host's)
             if remote::CLIENT {
-                CLIENT_SEND = hover.map(|k| ITEMS[k].0);
+                CLIENT_SEND = hover.map(|k| k as u32);
             } else {
                 PENDING = hover.map(|k| ITEMS[k].0);
             }
@@ -1284,6 +1374,9 @@ struct Candidate {
     condition: i32,
     short_of_fitness: bool,
     started: bool,
+    /// one of the game's grey fill-in players (VIRTUAL_STAFF, made when a squad is short): his
+    /// id lies past the real staff (0x90d8f0 counts only ids below [0xae2364] as real)
+    fill_in: bool,
 }
 
 /// How an assistant rates players: for a mode, his id and how he reads position fit.
@@ -1332,7 +1425,11 @@ impl Eye {
         // 2026-11-07. Before, the game's own overall judgement 0x6e86d0 picked, so a worse
         // striker by the % could start)
         let slot = crate::scout::seen_score(c.staff, self.judge, Some(label)).map_or(c.judged, |s| s.max(0.1));
-        slot * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c) * if keeper_out { 0.001 } else { 1.0 }
+        let score = slot * fit_factor(self.seen_fit(c, label)) * self.condition_factor(c) * if keeper_out { 0.001 } else { 1.0 };
+        // (a fill-in only where no real player is left, the eleven filled first: so he goes on
+        // the bench before he starts; user, 2026-11-08. Below zero, as a real player out of
+        // position can score 0: a factor alone still started Arts at DMC)
+        if c.fill_in { score * 1e-6 - 1.0 } else { score }
     }
 }
 
@@ -1407,6 +1504,7 @@ unsafe fn candidates_in(a: usize, club: usize, comp: usize, fixture: usize, unav
             condition: condition(staff).unwrap_or(100),
             short_of_fitness: status == 1,
             started: before.contains(&staff),
+            fill_in: rd::<i32>(staff) >= rd::<i32>(crate::STAFF_COUNT),
         });
     }
     pool
@@ -1487,7 +1585,7 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
     let taken = |i: usize, bench: &Vec<usize>| chosen.contains(&Some(i)) || bench.contains(&i);
     let best_for = |labels: &[&[u8]], bench: &Vec<usize>| -> Option<usize> {
         (0..pool.len()).filter(|&i| !taken(i, bench)).max_by(|&x, &y| {
-            let s = |i: usize| labels.iter().map(|l| score(&pool[i], l)).fold(0.0, f64::max);
+            let s = |i: usize| labels.iter().map(|l| score(&pool[i], l)).fold(f64::MIN, f64::max);
             s(x).total_cmp(&s(y))
         })
     };
@@ -1549,7 +1647,7 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
         let mut kickers: Vec<usize> = pool.iter().map(|c| c.staff).collect();
         kickers.sort_by_key(|&s| {
             let p = ((s + 0x61) as *const usize).read_unaligned();
-            (rd::<i8>(p + GK) >= 15, -attribute(s, PENALTIES))
+            (rd::<i32>(s) >= rd::<i32>(crate::STAFF_COUNT), rd::<i8>(p + GK) >= 15, -attribute(s, PENALTIES))
         });
         for (place, &s) in kickers.iter().take(50).enumerate() {
             set_place(humans, place as i32, s, manager);
@@ -1586,7 +1684,13 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
     for (i, o) in ins.iter().zip(outs.iter()) {
         let out = latin1(&short_name(*o)).into_owned();
         if !explained.iter().any(|r| r.contains(&out)) {
-            reasons.push(format!("{} in for {out}", latin1(&short_name(*i))));
+            // (two players of one surname: full names, night 7 "Evers in for Evers")
+            let inn = latin1(&short_name(*i)).into_owned();
+            if inn == out {
+                reasons.push(format!("{} in for {}", latin1(&staff_name(*i)), latin1(&staff_name(*o))));
+            } else {
+                reasons.push(format!("{inn} in for {out}"));
+            }
         }
     }
     if mode == Mode::Rotation && reasons.is_empty() {
@@ -1617,6 +1721,153 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
     Some(to_latin1(&note))
 }
 
+/// The human's squad screen as the saved line-ups need it: the team, its slots' labels, the
+/// players marked not available. None: not his squad screen (or a network client).
+pub(crate) unsafe fn squad_now() -> Option<(usize, Vec<Vec<u8>>, Vec<usize>)> {
+    #[allow(static_mut_refs)]
+    (SQUAD_HERE && !remote::CLIENT && SLOTS.len() >= 11).then(|| my_team().map(|t| (t, SLOTS.clone(), UNAVAILABLE.clone()))).flatten()
+}
+
+/// The team whose squad screen shows the saved line-ups' strip: the human's own, here or on a
+/// network client (whose strip comes from the host, key 'l').
+pub(crate) unsafe fn strip_team() -> Option<usize> {
+    if SQUAD_HERE { my_team() } else { None }
+}
+
+/// Client: a request's note is still out: true twice a second for 15 s, so the screen is drawn
+/// and asks again ('J' asked before the host carried it out is answered "nothing yet", and
+/// nothing else drew the screen again: night 8, no note after Save).
+pub(crate) unsafe fn note_due() -> bool {
+    static mut LAST: Option<(u32, std::time::Instant, std::time::Instant)> = None; // request, since, last
+    if ASKED <= NOTE_FOR {
+        return false;
+    }
+    let now = std::time::Instant::now();
+    let (n, since, last) = LAST.filter(|l| l.0 == ASKED).unwrap_or((ASKED, now, now - std::time::Duration::from_secs(1)));
+    let due = since.elapsed().as_secs() < 15 && last.elapsed().as_millis() >= 500;
+    LAST = Some((n, since, if due { now } else { last }));
+    due
+}
+
+/// Client: the number of the last request whose note has come back (the host has carried it out).
+pub(crate) unsafe fn requests_done() -> u32 {
+    NOTE_FOR
+}
+
+/// Client: a saved line-up action for the host (request 'H' with a code past the four picks).
+pub(crate) unsafe fn client_lineup(code: u32) {
+    CLIENT_SEND = Some(code);
+}
+
+/// The selection now (20 places, 0 empty).
+pub(crate) unsafe fn selection(club: usize) -> [usize; 20] {
+    selection_of(club)
+}
+
+unsafe fn selection_of(club: usize) -> [usize; 20] {
+    let tactics = rd::<usize>(TACTICS);
+    let get = game::<extern "thiscall" fn(usize, usize, i32, i32) -> usize>(GET_SLOT);
+    std::array::from_fn(|k| if mapped(tactics, 4) { get(tactics, club, k as i32, 0) } else { 0 })
+}
+
+/// Saved line-ups and Fill subs (switch `saved_lineups`): `fixed` the places kept (0: empty).
+/// An empty starting place gets the assistant's best for that slot; then the empty bench places
+/// up to the number of substitutes the match allows (a keeper if there is none, then one for
+/// each line, then the best of the rest). Returns the staff put in a starting place (stand-ins)
+/// and on the bench by the assistant, and the note. Nothing is written when no assistant.
+#[allow(static_mut_refs)]
+/// (Any human's team: the host runs it for a network client's club as for its own.)
+pub(crate) unsafe fn fill_team(club: usize, slots: &[Vec<u8>], unavailable: &[usize], fixed: [usize; 20]) -> Option<(Vec<usize>, Vec<usize>, Vec<u8>)> {
+    if slots.len() < 11 {
+        return None;
+    }
+    let a = assistant_of(club)?;
+    let tactics = rd::<usize>(TACTICS);
+    if !mapped(tactics, 4) {
+        return None;
+    }
+    let _perfect = scout::perfect_if(national_team(club));
+    let reading = if scout::is_perfect() { 20.0 } else { coaching(a, 0x21) };
+    let fixture = next_fixture(None, club);
+    let before = selection(club);
+    let pool = candidates(a, club, fixture, unavailable, &before);
+    let eye = Eye { mode: Mode::Best, id: rd::<i32>(a), reading, judge: a };
+    let starters: Vec<&[u8]> = slots[..11].iter().map(|s| s.as_slice()).collect();
+    let used = |i: usize, extra: &[usize]| fixed.contains(&pool[i].staff) || extra.contains(&i);
+    let mut chosen: Vec<usize> = Vec::new(); // pool indices taken here
+    let mut eleven: [usize; 11] = std::array::from_fn(|k| fixed[k]);
+    let mut stand_ins = Vec::new();
+    for s in 0..11 {
+        if eleven[s] != 0 {
+            continue;
+        }
+        let best = (0..pool.len()).filter(|&i| !used(i, &chosen)).max_by(|&x, &y| eye.score(&pool[x], starters[s]).total_cmp(&eye.score(&pool[y], starters[s])));
+        if let Some(i) = best {
+            chosen.push(i);
+            eleven[s] = pool[i].staff;
+            stand_ins.push(pool[i].staff);
+        }
+    }
+    let named = if readable(fixture, 0x50) { (rd::<u8>(fixture + 0x4d) & 0xf) as usize } else { 0 };
+    let bench_slots = if (1..=9).contains(&named) { named } else { 9.min(slots.len().saturating_sub(11)) };
+    let mut bench: Vec<usize> = fixed[11..].iter().copied().filter(|&s| s != 0).take(bench_slots).collect();
+    let backs: Vec<&[u8]> = [&b"DC"[..], b"DL", b"DR"].into_iter().chain(starters.iter().copied().filter(|l| l.starts_with(b"WB"))).collect();
+    let lines: [&[&[u8]]; 4] = [&[b"GK"], &backs, &[b"MC", b"ML", b"MR", b"DMC", b"AMC"], &[b"FC", b"AMC"]];
+    let all: Vec<&[u8]> = starters.iter().copied().filter(|l| *l != b"GK").collect();
+    let keeper_on_bench = bench.iter().any(|&s| readable(s, 0x6e) && rd::<i8>(((s + 0x61) as *const usize).read_unaligned() + GK) >= 15);
+    let mut picked_subs = Vec::new();
+    let mut line = if keeper_on_bench { 1 } else { 0 };
+    while bench.len() < bench_slots {
+        let want: &[&[u8]] = if line < lines.len() { lines[line] } else { &all };
+        line += 1;
+        let taken = |i: usize| used(i, &chosen) || eleven.contains(&pool[i].staff) || bench.contains(&pool[i].staff);
+        let best = (0..pool.len()).filter(|&i| !taken(i)).max_by(|&x, &y| {
+            let s = |i: usize| want.iter().map(|l| eye.score(&pool[i], l)).fold(f64::MIN, f64::max);
+            s(x).total_cmp(&s(y))
+        });
+        match best {
+            Some(i) => {
+                chosen.push(i);
+                bench.push(pool[i].staff);
+                picked_subs.push(pool[i].staff);
+            }
+            None => break,
+        }
+    }
+    // written: cleared (the game keeps an undo copy), then place by place, the captain again
+    game::<extern "thiscall" fn(usize, usize, i32, i32, i32) -> i32>(CLEAR_SELECTION)(tactics, club, 0, 1, 0);
+    let set = game::<extern "thiscall" fn(usize, usize, i32, usize, i32) -> i32>(SET_SLOT);
+    for (s, &staff) in eleven.iter().enumerate().filter(|e| *e.1 != 0) {
+        set(tactics, club, s as i32, staff, 0);
+    }
+    for (k, &staff) in bench.iter().enumerate() {
+        set(tactics, club, 11 + k as i32, staff, 0);
+    }
+    if let Some(slot) = (0..11).filter(|&s| eleven[s] != 0).max_by_key(|&s| attribute(eleven[s], INFLUENCE)) {
+        game::<extern "thiscall" fn(usize, usize, i32, i32) -> i32>(SET_CAPTAIN_FROM_SLOT)(tactics, club, slot as i32, 0);
+    }
+    let taker = game::<extern "thiscall" fn(usize, usize, i32, i32, usize, i32) -> i32>(SET_TAKER);
+    for (role, &attr) in ROLES.iter().enumerate() {
+        let mut by: Vec<usize> = (0..11).filter(|&s| eleven[s] != 0 && starters[s] != b"GK").map(|s| eleven[s]).collect();
+        by.sort_by_key(|&s| -attribute(s, attr));
+        for (choice, &s) in by.iter().take(2).enumerate() {
+            taker(tactics, club, role as i32, choice as i32, s, 0);
+        }
+    }
+    let note = format!("{}: {} in, {} on the bench picked.", latin1(&staff_name(a)), stand_ins.len(), picked_subs.len());
+    Some((stand_ins, picked_subs, to_latin1(&note)))
+}
+
+/// Set the assistant's note (shown in the band's left part).
+pub(crate) unsafe fn set_note(note: Vec<u8>) {
+    NOTE = note;
+}
+
+/// The squad list's title band and the room right of its title (the strip's place).
+pub(crate) unsafe fn band() -> Option<((i32, i32, i32, i32), i32)> {
+    TITLE_BAND.map(|t| (t, TITLE_FREE))
+}
+
 /// The shape by lines, back to front: defenders, then DM / M / AM where the tactic has them
 /// ("2-3-4-1"), forwards.
 fn shape(starters: &[&[u8]]) -> String {
@@ -1628,7 +1879,13 @@ fn shape(starters: &[&[u8]]) -> String {
 }
 
 /// The name a player goes by (common name, else surname).
-unsafe fn short_name(staff: usize) -> Vec<u8> {
+/// Injured (out, not only short of fitness), as the pick reads it.
+pub(crate) unsafe fn injured(staff: usize) -> bool {
+    let injuries = rd::<usize>(INJURIES);
+    mapped(injuries, 4) && game::<extern "thiscall" fn(usize, usize) -> i32>(INJURY_STATUS)(injuries, staff) & 0xff == 2
+}
+
+pub(crate) unsafe fn short_name(staff: usize) -> Vec<u8> {
     let name = |at: usize| {
         let p = rd::<usize>(staff + at);
         if readable(p, 1) { game_text(p, 51) } else { Vec::new() }

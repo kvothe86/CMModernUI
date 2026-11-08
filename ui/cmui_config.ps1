@@ -42,7 +42,8 @@ $switches = @(
     @('form_timeline', 'Form', 'The last five results as W, D and L pills in the club header.'),
     @('match_card', 'Match Card', 'Before your match: both clubs, their places, last five and meetings this season.'),
     @('season_review', 'Season Review', 'On 1 July a card on your season just over: place, record, stars, signings.'),
-    @('national_pool', 'National Pool', 'National team: every player of the country in the Assistant menu, + to the Short List. Needs Assistant Pick.')
+    @('national_pool', 'National Pool', 'National team: every player of the country in the Assistant menu, + to the Short List. Needs Assistant Pick.'),
+    @('saved_lineups', 'Saved Line-ups', 'Squad screen: save line-ups 1 / 2 / 3, load them (stand-ins for who cannot play), Fill subs. Needs Assistant Pick.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),

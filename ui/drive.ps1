@@ -13,6 +13,14 @@ foreach ($a in $args) {
     if ($a -like "shot *") {
         $p = $a.Substring(5)
         $bmp = if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $game $p }
+        # the game writes the file a moment after it logs the shot (a slow client: the PNG was
+        # converted from nothing and stayed the old one, night 7): wait until it is there and whole
+        $size = -1
+        for ($w = 0; $w -lt 40; $w++) {
+            $now = if (Test-Path $bmp) { (Get-Item $bmp).Length } else { -1 }
+            if ($now -gt 0 -and $now -eq $size) { break }
+            $size = $now; Start-Sleep -Milliseconds 250
+        }
         python -I -c "import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[1][:-4] + '.png')" $bmp
         Remove-Item $bmp
     }

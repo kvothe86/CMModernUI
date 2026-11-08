@@ -1,6 +1,6 @@
 # cmui in a network game
 
-Background and plan: `..\NETWORK_PLAN.md`. Code: `src\remote.rs` (transport), `src\prefetch.rs` (answers sent with the screen) and, in `lib.rs`,
+Background and plan: `..\NETWORK_PLAN.md` (local only, not in the public repo; steps 4 and 6 are superseded by the prefetch). Code: `src\remote.rs` (transport), `src\prefetch.rs` (answers sent with the screen) and, in `lib.rs`,
 `host_answer`, `served_node`, `ask_host`, `screen_sent`, `display_reset`, `client_loop`, `send_click`,
 `client_rects_as_sent`, `contacting_box_lower`; `news.rs` / `comp.rs` for the block.
 
@@ -45,6 +45,12 @@ silences the client's questions (test switch).
 | `U` club | a club's three best by the intrinsic score | `scout::best_three`, staff pointers |
 | `E` n | the CM Challenge page for the channel's manager, read only (n: a new one each time) | `challenge::remote`, text; reads no screen parameter |
 | `p` height | sent with every click: its answer says the host is there; the client's screen height, for its table rows | `remote::clicked`, `comp::client_height`; no answer in 1.5 s: "Waiting for the host ..." |
+| `k` n | the coach's game data for the channel's manager | `coach::remote_data` |
+| `l` club | the three saved line-ups' shapes (the strip); the actions themselves go by `H` codes 100 Fill subs, 110+k load, 120+k save, 130+k clear | `lineups::remote_summary` |
+| `r` screen | scout ratings of the client's search screen | `scout::remote_rated` |
+| `n` team, number, adds... | a national team's pool as bytes; the players to add go onto the client's own Short List | `natpool::remote` |
+| `s` season | the season review card's texts (0 = any season) | `season::remote` |
+| `m` | the match day card's bytes, worked out on the host; only while the channel is served | `card::remote` |
 | `b` (not a key) | packet `[0x7c,'b', block]`, host to client, unasked | `remote::BLOCK` |
 
 Host-side checks: staff pointers must lie in the staff table (`valid_staff`), mapped memory only.
@@ -210,7 +216,37 @@ the menu bar items (rows 0x7fe162..0x7fe1b4). Dropdowns: the client redraws only
 
 | Works | Not yet / open |
 |---|---|
-| squad header + fit %, profile (strip, bars, CA/PA, panels), tactics pitch + list, search + squad Ability view, compare, match overview + live match, national team header, news crests / links / chips / clicks / Mark all read (confirmed 2026-10-29), Assistant on squad and tactics (checked), history title counts (block) | news: header badge click, initials ("M. Tel Aviv"), competition and staff links; live tactics need the match engine (too big to ask), see `..\NETWORK_PLAN.md` steps 4-6 (squad / tactics / profile from the block, traffic measure); dragging cannot be scripted |
+| squad header + fit %, profile (strip, bars, CA/PA, panels), tactics pitch + list, search + squad Ability view, compare, match overview + live match, national team header, news crests / links / chips / clicks / Mark all read (confirmed 2026-10-29), Assistant on squad and tactics (checked), history title counts (block) | news: header badge click, initials ("M. Tel Aviv"), competition and staff links; live tactics work on a client through the prefetch and the chunk reads (`..\NETWORK_PLAN.md` steps 4-6 are superseded by it); dragging cannot be scripted |
 
-Inconsistency: `NETWORK_PLAN.md` says history title counts (step 5) are open, but `history_block`
-is built and read (FIXES "History title count"); the plan was not updated.
+## What works where (2026-11-08, build after night 8)
+
+SP = single player. "Seen" = in a shot of a test game. Night 8 pairs: E:\CM0102_net + _net2
+(n6_VVV, VVV + Ajax, the user's exe at x4) and E:\CM25 + E:\CM25_c (Glory_v2, cm25 data,
+1680x1050: the host takes two of its managers, the client the third: Ivory Coast + Milan).
+
+| Feature (switch) | SP | Network host | Network client |
+|---|---|---|---|
+| Everything up to switch 28 (theme, squad, profile, tactics, search, compare, match, news, history...) | yes | yes | yes, as in the table above (client suites nights 4-7) |
+| CM Challenge (29), career goals (30) | career page | yes | yes (host's data) |
+| Coach (31) | yes | yes | seen night 8 (Milan's pre-match briefing); the answer shows once the mouse moves |
+| Weather icons (32) | yes | seen | seen |
+| Form strip in the club header (33) | yes | **off** (user, 2026-11-07: no unfair advantage) | **off** |
+| Match day card (34) | v2, seen night 8 | v2, seen | v2, seen night 8 (key 'm': the host works the card out) |
+| Season review card (35) | seen night 8 | seen (Dortmund) | seen night 8 (Milan; key 's'; the client keeps its own shown season) |
+| National pool (36) | yes | yes | seen night 8 (Ivory Coast; + puts him on the client's own Short List; key 'n') |
+| Saved XI 1 / 2 / 3, Fill subs (37) | seen night 8 | seen (on again: user, night 8) | seen night 8 (save, load, Fill subs; 'H' codes 100+, key 'l') |
+| Scout % column, Rec sort (15) | as built | not checked | seen night 8 (Milan's Scout #1; key 'r') |
+| Honours (no bars, the count after Winners) | seen night 8 | seen | seen (Milan, many titles) |
+| History medals, qualifiers story | yes | not checked | not checked |
+
+"Off in a network game" is `remote::network_game()`: the client flag or the session's Network
+object (SCREEN_MANAGER + 0x3840); cmui.log says "network game: true / false" on each change. Only
+the form strip uses it now. How a client gets a feature that needs the game: `ARCHITECTURE.md`
+section 5 (host keys).
+
+Test pairs: since night 7 E:\CM0102_net and _net2 run the user's exe (x4); the old x200 exes are
+kept beside them as cm0102_ui_before_night7.exe. E:\CM25_c is a copy of E:\CM25 without saves
+(night 8) for a cm25 client, in `install_all.ps1` since night 8.
+`ui\night8\pair.ps1` / `pair25.ps1` start a pair screen by screen.
+
+`NETWORK_PLAN.md` now marks history title counts (step 5) as done (`comp::history_block`).

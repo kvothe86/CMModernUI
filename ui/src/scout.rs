@@ -338,12 +338,17 @@ pub(crate) unsafe fn restar(session: usize) {
     };
     let (base, count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
     RATED.clear();
+    RATED_BY.clear();
+    // (Player Search and the Short List have no scout of their own: the known players there are
+    // rated by the club's sharpest scout among the session's searches, user 2026-11-07)
+    let scouts: Vec<usize> = (0..SEARCHES).map(|k| game::<extern "thiscall" fn(usize) -> usize>(GET_SCOUT)(session + 1 + k * SEARCH_SIZE)).collect();
+    // (no scout assigned to any search, night 7 on VVV: the club's best scout, as the scout
+    // report judges)
+    let sharpest = scouts.iter().copied().filter(|&s| readable(s, 0x6e)).max_by(|&a, &b| judging(a, false).unwrap_or(0.0).total_cmp(&judging(b, false).unwrap_or(0.0)))
+        .or_else(|| crate::human_club_ptr().and_then(|c| crate::assistant::best_judge(c)));
     for k in 0..SEARCHES {
         let search = session + 1 + k * SEARCH_SIZE;
-        let scout = game::<extern "thiscall" fn(usize) -> usize>(GET_SCOUT)(search);
-        if !readable(scout, 0x6e) {
-            continue;
-        }
+        let Some(scout) = Some(scouts[k]).filter(|&s| readable(s, 0x6e)).or(sharpest) else { continue };
         let (Some(eye_now), Some(eye_future)) = (judging(scout, false), judging(scout, true)) else { continue };
         // (against the scout's club, staff +0x39, as the game's own stars are; the whole game's
         // cut points when it has no squad of eleven)
@@ -365,11 +370,47 @@ pub(crate) unsafe fn restar(session: usize) {
             let seen_future = intrinsic(p, s, future_ability(p, s)) + error(scout_id, id, 1, eye_future);
             *now = stars(seen, &cuts);
             *future = stars(seen_future, &cuts).max(*now);
+            if RATED_BY.len() < 4096 {
+                RATED_BY.push((who, seen.clamp(0.0, 100.0).round() as i32));
+            }
             if RATED.len() < 2048 {
                 RATED.push((latin1(&staff_name(base + who as usize * 0x6e)).into_owned(), seen.clamp(0.0, 100.0).round() as i32, ((20.0 - eye_now).max(0.0) * EYE).round() as i32));
             }
         }
     }
+    // (kept for the channel this screen is built for: a network client reads it by key 'r')
+    let channel = rd::<i16>(crate::SCREEN_MANAGER + 0x382a);
+    RATED_FOR.retain(|r| r.0 != channel);
+    RATED_FOR.push((channel, RATED.clone()));
+}
+
+/// Host: the ratings of the last search screen built for each channel.
+static mut RATED_FOR: Vec<(i16, Vec<(String, i32, i32)>)> = Vec::new();
+
+/// Host: a client's key 'r': its ratings as lines "name \t % \t margin".
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn remote_rated(channel: i16) -> Vec<u8> {
+    let rated = RATED_FOR.iter().find(|r| r.0 == channel).map(|r| r.1.as_slice()).unwrap_or(&[]);
+    rated.iter().map(|(n, p, m)| format!("{n}\t{p}\t{m}")).collect::<Vec<_>>().join("\n").into_bytes()
+}
+
+/// Client: the host's ratings for this screen (asked once a screen; the list stays empty until
+/// they come, then the screen is drawn again).
+#[allow(static_mut_refs)]
+unsafe fn client_rated() {
+    static mut FOR: usize = usize::MAX;
+    if FOR == crate::CLIENT_SCREEN {
+        return;
+    }
+    let Some(v) = crate::ask_host(&crate::key(b'r', &[crate::CLIENT_SCREEN as u32])) else { return };
+    FOR = crate::CLIENT_SCREEN;
+    RATED = String::from_utf8_lossy(&v)
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            Some((f.first()?.to_string(), f.get(1)?.parse().ok()?, f.get(2)?.parse().ok()?))
+        })
+        .collect();
 }
 
 /// The rated players of the session's searches as their scouts see them: full name, the CM
@@ -384,7 +425,18 @@ static mut RATED_NAMES: Vec<((i32, i32, i32, i32), u32, Vec<u8>)> = Vec::new();
 pub(crate) unsafe fn note_name(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, t: &[u8]) {
     // (the search screen's lists only: a squad list's "Bertasius, D" of a scouted player is no
     // place for it, user 2026-11-07)
-    if RATED.is_empty() || RATED_NAMES.len() >= 64 || y2 - y1 > 40 || !t.contains(&b',') || !crate::comp::screen_ends_with(b"Search") {
+    if crate::remote::CLIENT && crate::comp::screen_ends_with(b"Search") {
+        client_rated();
+    }
+    if RATED.is_empty() || y2 - y1 > 40 || !crate::comp::screen_ends_with(b"Search") {
+        return;
+    }
+    // (the list's "Name" head: the column's head goes at its right end)
+    if t.trim_ascii() == b"Name" {
+        NAME_HEAD = Some(((x1, y1, x2, y2), font));
+        return;
+    }
+    if RATED_NAMES.len() >= 64 || !t.contains(&b',') {
         return;
     }
     if rating_of(t).is_some() {
@@ -405,22 +457,40 @@ unsafe fn rating_of(t: &[u8]) -> Option<(i32, i32)> {
     RATED.iter().find(|r| r.0 == full || (r.0.ends_with(surname) && r.0.contains(first))).map(|r| (r.1, r.2))
 }
 
-/// The flip pass: "78%" (and "±6" for a scout who can be off) after each rated name of this frame.
+/// This frame's "Name" head of a search list (cell, font).
+static mut NAME_HEAD: Option<((i32, i32, i32, i32), u32)> = None;
+
+/// The flip pass: a "Scout %" column at the right end of the Name cell, the % white and
+/// right-aligned so the numbers line up (user, 2026-11-07; it was coloured after the name), a
+/// head over it. The score as the scout sees him, his error in it but not shown ("that makes it
+/// fun").
 #[allow(static_mut_refs)]
 pub(crate) unsafe fn flip() {
-    for ((x1, y1, x2, y2), font, t) in std::mem::take(&mut RATED_NAMES) {
-        // (the score as the scout sees him, his error in it but not shown: user, 2026-11-07, "that
-        // makes it fun")
+    let names = std::mem::take(&mut RATED_NAMES);
+    let head = NAME_HEAD.take();
+    let font_of = names.first().map(|n| n.1);
+    if let (Some(((_, hy1, hx2, hy2), hfont)), Some(_)) = (head, font_of) {
+        text_at(hx2 - 8, hy1, hy2, hfont, [0xf4, 0xf6, 0xf8], b"Scout %", 2);
+    }
+    for ((x1, y1, x2, y2), font, t) in names {
         let Some((pct, _)) = rating_of(&t) else { continue };
         let bytes = format!("{pct}%").into_bytes();
-        let x = x1 + 2 + text_width(font, &t) + 10;
-        if x + text_width(font, &bytes) > x2 - 4 {
+        // (a long name keeps its room: the % only where it clears the name)
+        if x1 + 2 + text_width(font, &t) + 10 + text_width(font, &bytes) > x2 - 8 {
             continue;
         }
-        let c = if pct >= 75 { [0x4c, 0xc0, 0x7a] } else if pct >= 60 { crate::GOLD } else { [0xe0, 0x88, 0x58] };
-        text_at(x, y1, y2, font, c, &bytes, 0);
+        text_at(x2 - 8, y1, y2, font, [0xf4, 0xf6, 0xf8], &bytes, 2);
     }
 }
+
+/// A rated player's % by his staff index (the sort's key): None for a player no scout rated.
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn rating_by_index(who: i32) -> Option<i32> {
+    RATED_BY.iter().find(|r| r.0 == who).map(|r| r.1)
+}
+
+/// The rated players by staff index and %, for the sort.
+static mut RATED_BY: Vec<(i32, i32)> = Vec::new();
 
 #[cfg(all(test, feature = "save_check"))] // needs a save and a crate that are not in the repository
 mod tests {

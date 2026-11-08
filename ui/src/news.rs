@@ -318,7 +318,8 @@ pub unsafe fn row(x1: i32, y1: i32, _x2: i32, y2: i32, font: u32, colour: u32, t
     if d.1 != y1 || x1 <= d.2 || t.is_empty() || y2 - y1 > 40 {
         return false;
     }
-    let (unread_c, read_c) = (rd::<u16>(UNREAD_COLOUR), rd::<u16>(READ_COLOUR));
+    // (this process's own palette slots, not the host's: night 8 audit)
+    let (unread_c, read_c) = ((UNREAD_COLOUR as *const u16).read_unaligned(), (READ_COLOUR as *const u16).read_unaligned());
     let unread = unread_c != read_c && colour as u16 == unread_c;
     let (h, cy) = (y2 - y1, (y1 + y2) / 2);
     let mut x = x1 + 10;
@@ -1020,6 +1021,85 @@ unsafe fn word_links(words: &mut [Word], links: &mut Vec<Link>) {
     }
 }
 
+/// "2029/30 European qualifiers decided" (and other continents' "... qualifiers decided").
+pub fn qualifiers(head: &[u8]) -> bool {
+    head.ends_with(b"qualifiers decided")
+}
+
+/// A qualifiers story: its first paragraph as text, then a block a competition ("Champions
+/// League: Arsenal, Man City."): the competition's logo and name at the left, a tile a club at
+/// the right (crest, name, league place; the human's own club gold), each opening its link; no
+/// chip row (it ran out of room, Everton cut off: user 2026-11-07).
+#[allow(static_mut_refs)]
+unsafe fn qualifier_blocks(words: &[Word], links: &[Link], lines: &[((i32, i32, i32, i32), u32, Vec<u8>)], (left, right, bottom): (i32, i32, i32), shift: i32, row: i32, lf: u32, small: u32) {
+    let lh = lines[0].0 .3 - lines[0].0 .1;
+    let pitch = lh + (lh / 10).max(2);
+    let space = text_width(lf, b" ").max(4).max(lh / 4);
+    // the intro: the words before the second paragraph
+    let split = words.iter().skip(1).position(|w| w.para).map_or(words.len(), |p| p + 1);
+    let (mut x, mut y) = (left, lines[0].0 .1 + shift);
+    for w in &words[..split] {
+        let ww = text_width(lf, &w.text);
+        if x > left && x + ww > right {
+            (x, y) = (left, y + pitch);
+        }
+        text_at(x, y, y + lh, lf, TEXT, &w.text, 0);
+        x += ww + space;
+    }
+    y += 2 * pitch;
+    // the list: "Comp: a, b. Comp: c."
+    let list: Vec<u8> = words[split..].iter().map(|w| w.text.as_slice()).collect::<Vec<_>>().join(&b' ');
+    let link_of = |name: &[u8]| links.iter().find(|l| l.shown() == name || l.name == name);
+    let own = human_club_ptr();
+    let size = row - 14;
+    let lw = (right - left) / 4;
+    for part in list.split(|&c| c == b'.').map(|p| p.trim_ascii()).filter(|p| !p.is_empty()) {
+        let Some(colon) = part.iter().position(|&c| c == b':') else { continue };
+        let (comp, clubs) = (part[..colon].trim_ascii(), &part[colon + 1..]);
+        if y + row > bottom {
+            break;
+        }
+        // the competition
+        let mut cx = left;
+        if draw_crest(link_of(comp).map_or(comp, |l| l.key.as_slice()), cx, y + (row - size) / 2, size) {
+            cx += size + 10;
+        }
+        text_at(cx, y, y + row, lf, WHITE, comp, 0);
+        if let Some(l) = link_of(comp) {
+            click_at(l, (left, y, left + lw - 8, y + row));
+        }
+        // the clubs, wrapping under each other in the right part
+        let (mut tx, mut ty) = (left + lw, y);
+        for name in clubs.split(|&c| c == b',').map(|n| n.trim_ascii()).filter(|n| !n.is_empty()) {
+            let l = link_of(name);
+            let place = l.filter(|l| l.club()).and_then(|l| challenge::league_place(l.object)).map(|p| p.0).filter(|&p| p > 0);
+            let place_text = place.map(card::ordinal).unwrap_or_default();
+            let w = 8 + size + 8 + text_width(small, name) + if place_text.is_empty() { 0 } else { 10 + text_width(small, place_text.as_bytes()) } + 12;
+            if tx + w > right && tx > left + lw {
+                (tx, ty) = (left + lw, ty + row + 6);
+            }
+            if ty + row > bottom {
+                break;
+            }
+            pill(tx, ty + 2, tx + w, ty + row - 2, CHIP);
+            if !draw_crest(l.map_or(name, |l| l.key.as_slice()), tx + 8, ty + (row - size) / 2, size) {
+                dot(tx + 8 + size / 2, ty + row / 2, size / 3, GREY);
+            }
+            let mine = l.is_some_and(|l| Some(l.object) == own);
+            text_at(tx + 16 + size, ty, ty + row, small, if mine { GOLD } else { LIGHT }, name, 0);
+            if !place_text.is_empty() {
+                text_at(tx + w - 12, ty, ty + row, small, GREY, place_text.as_bytes(), 2);
+            }
+            if let Some(l) = l {
+                click_at(l, (tx, ty + 2, tx + w, ty + row - 2));
+            }
+            tx += w + 8;
+        }
+        y = ty + row + 10;
+        fill(left, y - 6, right, y - 5, [0x2e, 0x34, 0x3d]);
+    }
+}
+
 /// The story under the header: its text across the panel (links in colour), a card for its kind,
 /// and a row of chips for its crest's club and the links the card does not show. `shift`: how
 /// far the header moved the text down; `row`: the chips' height.
@@ -1068,6 +1148,11 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     // (a client: the host's block, else the story's words looked up one by one)
     if remote::CLIENT && links.is_empty() && !block_words(&mut words, &mut links) {
         word_links(&mut words, &mut links);
+    }
+
+    if qualifiers(head) {
+        qualifier_blocks(&words, &links, &lines, (left, right, by2 - 10), shift, row, lf, smaller(font, 2));
+        return;
     }
 
     // the chips' row at the bottom, the card over it

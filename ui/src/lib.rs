@@ -42,6 +42,7 @@ mod form;
 mod card;
 mod season;
 mod natpool;
+mod lineups;
 
 /// Whether `len` bytes at `addr` are committed, readable memory of this process.
 fn mapped(addr: usize, len: usize) -> bool {
@@ -675,7 +676,8 @@ unsafe fn story_crest(head: &[u8], body: &[u8]) -> Option<Vec<u8>> {
     if own {
         key = human_club().map(|(club, _)| club).filter(|c| has_crest(c));
     }
-    if about_comp && key.is_none() {
+    // ("European qualifiers decided": the first competition's logo, not the first club's crest)
+    if (about_comp || news::qualifiers(head)) && key.is_none() {
         key = [head, body].iter().find_map(|t| crests_named(t).into_iter().find(|k| is_comp(k)));
     }
     if key.is_none() {
@@ -1779,6 +1781,8 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 let white = rgb([0xf0, 0xf2, 0xf4]) as u32;
                 let kind = match cell(s) {
                     Cell::Bar(_) if !on(ATTRIBUTE_BARS) => Cell::Plain,
+                    // a club's Honours: the years after "Winners" are no attribute values
+                    Cell::Bar(_) if comp::view_is(b"Honours") => Cell::Plain,
                     Cell::Form(_) if !on(STATUS_BARS) => Cell::Plain,
                     k => k,
                 };
@@ -1892,6 +1896,10 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
         };
         let own_title = alone && HEADER_CLUB.is_some_and(|h| h.1 == (x1, y1, x2, y2));
         let font = if in_title { font } else { roomier_font(x1, y1, x2, y2, flags, font, text, caret) };
+        // a sentence the game measured as one line but drawn wider: a size down until it fits
+        // (800x600 Team Selection: "...unavailable for this" lost "match.", night 8). Wide one-line
+        // boxes only, left or centred; a text that fits is left alone.
+        let font = if !in_title && !text.is_null() && caret < 0 && matches!(flags & 0x7, 0x1 | 0x4) && x2 - x1 > 300 && y2 - y1 < 60 { fit_font(font, text, x2 - x1 - 2) } else { font };
         let colour = if on(THEME_ON) && colour & 0xffff == rgb(AZURE_SLOT) as u32 & 0xffff { rgb(AZURE_TEXT) as u32 } else { colour };
         // (flags bit 0x20: a disabled button's text, dim instead of the game's embossed look)
         let disabled = on(MODERN_BUTTONS) && flags & 0x20 != 0;
@@ -2322,14 +2330,26 @@ unsafe fn options_pointer(mx: i32, my: i32) -> Option<(i32, i32)> {
     (s > 0 && (o.0..=o.2).contains(&mx) && (o.1 + s..=o.3 + s).contains(&my)).then_some((mx, my - s))
 }
 
+/// This process's own Display: the served channel's on the host; a network client's is the one
+/// its poll hook is given (CHANNEL_DISPLAY there would be read from the host, night 8 audit).
+static mut OWN_DISPLAY: usize = 0;
+unsafe fn own_display() -> usize {
+    if remote::CLIENT { OWN_DISPLAY } else { rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel()) }
+}
+
+/// A widget's box, read from this process (its own widget table, also on a client).
+unsafe fn widget_box(w: usize) -> [i32; 4] {
+    [0, 1, 2, 3].map(|i| ((w + 0x10 + 4 * i) as *const i32).read_unaligned())
+}
+
 /// The widget of the screen with box `r`.
 unsafe fn widget_at(r: Rect) -> Option<usize> {
-    let display = rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel());
-    let count = if mapped(display + 0x12e9a0, 2) { rd::<i16>(display + 0x12e9a0).clamp(0, 1200) as usize } else { 0 };
-    if !mapped(display + 0xba95e, count * 0x18c) {
+    let display = own_display();
+    let count = if display != 0 && mapped(display + 0x12e9a0, 2) { ((display + 0x12e9a0) as *const i16).read_unaligned().clamp(0, 1200) as usize } else { 0 };
+    if count == 0 || !mapped(display + 0xba95e, count * 0x18c) {
         return None;
     }
-    (0..count).map(|k| display + 0xba95e + k * 0x18c).find(|&w| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i)) == [r.0, r.1, r.2, r.3])
+    (0..count).map(|k| display + 0xba95e + k * 0x18c).find(|&w| widget_box(w) == [r.0, r.1, r.2, r.3])
 }
 
 /// The flip pass: Game Options' box from this frame; after cmui's buttons are placed (full frame),
@@ -2363,8 +2383,7 @@ unsafe fn options_flip(full_frame: bool, placed: bool) {
     let s = extra * (home.3 - home.1 + 4);
     let target = (home.0, home.1 + s, home.2, home.3 + s);
     // (a widget table built again since: its widget back in its own box)
-    let box_of = |w: usize| [0, 1, 2, 3].map(|i| rd::<i32>(w + 0x10 + 4 * i));
-    if OPTIONS_MOVED.is_some_and(|(w, t)| box_of(w) != [t.0, t.1, t.2, t.3]) {
+    if OPTIONS_MOVED.is_some_and(|(w, t)| !mapped(w, 0x20) || widget_box(w) != [t.0, t.1, t.2, t.3]) {
         OPTIONS_MOVED = None;
     }
     let now = OPTIONS_MOVED.map_or(home, |m| m.1);
@@ -2639,13 +2658,14 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 37] = [
+const FEATURES: [&str; 38] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
     "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
+    "saved_lineups",
 ];
 /// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
 /// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
@@ -2670,6 +2690,7 @@ const FORM_TIMELINE: usize = 33; // the club screen's last 10 results and league
 const MATCH_CARD: usize = 34; // the pre-match card: both sides' form, head-to-head, places
 const SEASON_REVIEW: usize = 35; // the season's review card on 1 July
 const NATIONAL_POOL: usize = 36; // a national team's every player of the country, + to the Short List
+const SAVED_LINEUPS: usize = 37; // line-ups 1 / 2 / 3 saved and loaded, Fill subs (`lineups.rs`)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -2807,6 +2828,7 @@ pub(crate) fn BUTTON_DOWN_NOW() -> bool {
 /// switches CA/PA, keeps the choice in cmui.ini and redraws the screen.
 extern "thiscall" fn poll_input(display: usize) -> i16 {
     unsafe {
+        OWN_DISPLAY = display;
         // (a quiet screen draws no frames: the trace switch is looked at here too, at most every
         // 200 ms, so a click's handlers are traced)
         static mut LOOKED: Option<std::time::Instant> = None;
@@ -2864,6 +2886,9 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // not see what they take)
         if on(ASSISTANT_PICK) || on(SCOUT_SCREEN) {
             if let Some(redraw) = assistant::input(mx, my, released) {
+                // (a client's answers drawn when they come, also with the mouse resting on the
+                // button or strip just clicked: this returns before the redraw further down, night 8)
+                let redraw = redraw || (remote::CLIENT && (std::mem::take(&mut remote::ARRIVED) | assistant::note_due()));
                 // a network client: the choice to the host, then a click its club screen input takes
                 if let Some(request) = assistant::client_request() {
                     remote::send_now(&request);
@@ -2941,7 +2966,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             }
         }
         // (a network client: the host's answers came, drawn with them)
-        REDRAW |= remote::CLIENT && (std::mem::take(&mut remote::ARRIVED) | remote::hold_over() | remote::silence_changed());
+        REDRAW |= remote::CLIENT && (std::mem::take(&mut remote::ARRIVED) | remote::hold_over() | remote::silence_changed() | assistant::note_due());
         // (a click while a dropdown counts as open: one full frame, which draws an open menu
         // again and none that closed, so news::MENU_OPEN is right again; without it the flag
         // stayed on after a menu and the story's links went without their remaps)
@@ -3194,6 +3219,108 @@ unsafe fn save_back_buffer(path: &str) {
         Ok(()) => log(&format!("shot: {path} {w}x{h}")),
         Err(e) => log(&format!("shot: {path}: {e}")),
     }
+}
+
+/// The back buffer's pixels in a rectangle as RGB rows (top first): (width, height, bytes).
+unsafe fn grab(x1: i32, y1: i32, x2: i32, y2: i32) -> Option<(u32, u32, Vec<u8>)> {
+    let surface = *(BACK_BUFFER as *const *mut usize);
+    let f565 = screen_format()?;
+    if surface.is_null() {
+        return None;
+    }
+    let vtable = *surface as *const usize;
+    let lock: extern "system" fn(*mut usize, usize, *mut u8, u32, usize) -> i32 = std::mem::transmute(*vtable.add(25));
+    let unlock: extern "system" fn(*mut usize, usize) -> i32 = std::mem::transmute(*vtable.add(32));
+    let mut desc = [0u8; 108];
+    desc[0] = 108;
+    if lock(surface, 0, desc.as_mut_ptr(), 1, 0) != 0 {
+        return None;
+    }
+    let field = |at: usize| i32::from_le_bytes(desc[at..at + 4].try_into().unwrap());
+    let (h, w, pitch, bits) = (field(8), field(0xc), field(0x10), field(0x24) as usize);
+    let (x1, y1, x2, y2) = (x1.clamp(0, w), y1.clamp(0, h), x2.clamp(0, w), y2.clamp(0, h));
+    let mut out = Vec::with_capacity(((x2 - x1) * (y2 - y1) * 3).max(0) as usize);
+    for y in y1..y2 {
+        for x in x1..x2 {
+            let p = *((bits + (y * pitch + x * 2) as usize) as *const u16) as u32;
+            out.extend(unpack(p, f565).map(|c| c as u8));
+        }
+    }
+    unlock(surface, 0);
+    (x2 > x1 && y2 > y1).then(|| ((x2 - x1) as u32, (y2 - y1) as u32, out))
+}
+
+/// A PNG of RGB rows, without a compression library: zlib "stored" blocks (an image a few MB in
+/// size; any viewer opens it).
+fn png(w: u32, h: u32, rgb: &[u8]) -> Vec<u8> {
+    fn crc(data: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+        }
+        !c
+    }
+    let chunk = |out: &mut Vec<u8>, kind: &[u8], data: &[u8]| {
+        out.extend((data.len() as u32).to_be_bytes());
+        let start = out.len();
+        out.extend(kind);
+        out.extend(data);
+        let c = crc(&out[start..]);
+        out.extend(c.to_be_bytes());
+    };
+    // the rows, each with filter byte 0
+    let mut raw = Vec::with_capacity(rgb.len() + h as usize);
+    for row in rgb.chunks((w * 3) as usize) {
+        raw.push(0);
+        raw.extend(row);
+    }
+    let mut z = vec![0x78, 0x01];
+    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+    for (k, b) in blocks.iter().enumerate() {
+        z.push((k + 1 == blocks.len()) as u8);
+        z.extend((b.len() as u16).to_le_bytes());
+        z.extend((!(b.len() as u16)).to_le_bytes());
+        z.extend(*b);
+    }
+    let (mut a, mut b) = (1u32, 0u32);
+    for &v in &raw {
+        a = (a + v as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    z.extend((b << 16 | a).to_be_bytes());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut head = w.to_be_bytes().to_vec();
+    head.extend(h.to_be_bytes());
+    head.extend([8, 2, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &head);
+    chunk(&mut out, b"IDAT", &z);
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+#[cfg(test)]
+#[test]
+fn png_bytes() {
+    let p = png(2, 1, &[255, 0, 0, 0, 0, 255]);
+    assert_eq!(&p[..8], b"\x89PNG\r\n\x1a\n");
+    // (IEND's CRC is fixed: AE 42 60 82)
+    assert_eq!(&p[p.len() - 4..], &[0xae, 0x42, 0x60, 0x82]);
+    // (IHDR: 2 x 1, 8 bits, RGB)
+    assert_eq!(&p[16..29], &[0, 0, 0, 2, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+}
+
+/// A part of the screen as a PNG in the game folder's Screenshots (made if missing): the path
+/// written, or None.
+unsafe fn save_png(x1: i32, y1: i32, x2: i32, y2: i32, name: &str) -> Option<String> {
+    let (w, h, rgb) = grab(x1, y1, x2, y2)?;
+    let _ = std::fs::create_dir_all("Screenshots");
+    let path = format!("Screenshots\\{name}.png");
+    std::fs::write(&path, png(w, h, &rgb)).ok()?;
+    log(&format!("saved {path} {w}x{h}"));
+    Some(path)
 }
 
 /// mike_appguy's ability block in the third column: header with a Hide button, then CA in green
@@ -3715,6 +3842,16 @@ fn in_star(x: f32, y: f32) -> bool {
 /// Takes the place of the flip at the end of Display::draw_screen: overlays first.
 extern "C" fn flip(left: i32, top: i32, right: i32, bottom: i32) {
     let start = std::time::Instant::now();
+    // note 4 (2026-11-07, grey flash while continuing, U21 days): a full frame shown with nothing
+    // drawn after the background fill. Logged, at most 200 a run, to see whether they come and when.
+    unsafe {
+        static mut BARE: u32 = 0;
+        #[allow(static_mut_refs)]
+        if FULL_FRAME && PANELS.is_empty() && LABELS.is_empty() && BARE < 200 {
+            BARE += 1;
+            log(&format!("bare frame {left},{top}-{right},{bottom} on day {} {} (screen node {LAST_NODE:#x})", rd::<i16>(0xae2c90), rd::<i16>(0xae2c92)));
+        }
+    }
     flip_hooked(left, top, right, bottom);
     unsafe {
         let (text, calls) = std::mem::take(&mut TEXT_TIME);
@@ -3859,13 +3996,15 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             challenge::flip(full_frame);
             challenge::overlay();
         }
-        if on(SEASON_REVIEW) {
-            season::flip();
-        }
         if on(COACH) {
             coach::flip(full_frame);
         }
         options_flip(full_frame, true);
+        // (last: the card covers the whole screen; drawn before the coach the menu bar's Coach
+        // button stood on it, night 8)
+        if on(SEASON_REVIEW) {
+            season::flip();
+        }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
             static mut SAID: bool = false;
@@ -4376,7 +4515,7 @@ unsafe fn league_line() {
     game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(left - 2, top, left + width + 2, top + h, 0xc, font, colour, c.as_ptr(), -1);
     // the club's last five as small pills under this line (user's wish, 2026-11-07, slimmed the
     // same day); a club screen's own title only (not History, Tactics, Training)
-    if on(FORM_TIMELINE) && HEADER_PLAIN {
+    if on(FORM_TIMELINE) && !remote::network_game() && HEADER_PLAIN {
         let (py1, py2) = (top + h + 3, (top + h + 3 + bar * 15 / 106).min(t.3 - 3));
         form::mini(club, (x1 + x2) / 2, py1, py2);
     }
@@ -5611,6 +5750,14 @@ extern "C" fn by_potential(a: usize, b: usize) -> i32 {
     unsafe { compare_by(a, b, 7) }
 }
 
+/// The scout's %, best first; players no scout rated last (`scout::restar` ran just before).
+extern "C" fn by_scout(a: usize, b: usize) -> i32 {
+    unsafe {
+        let pct = |e: usize| if readable(e, 0x10) { scout::rating_by_index(rd::<i32>(e + 0xc)).unwrap_or(-1) } else { -1 };
+        pct(b) - pct(a)
+    }
+}
+
 /// The result list of the search screen: in the Ability view the Current / Potential heads (the
 /// Form / Morale sort keys 0x10000 / 0x20000) sort by ability instead.
 extern "thiscall" fn get_results(this: usize, list: usize, count: usize, compare: usize) -> u32 {
@@ -5621,6 +5768,11 @@ extern "thiscall" fn get_results(this: usize, list: usize, count: usize, compare
         scout::restar(this);
         if trace() && readable(bits, 8) {
             log(&format!("get_results: view {:#x} sort {:#x} compare {compare:#x} count {count}", rd::<u32>(bits), rd::<u32>(bits + 4)));
+        }
+        // the Rec head (sort key 1) and the Scout % head over the Name cell's end sort by the
+        // scout's % (the stars are the same rating, the % breaks their ties), unrated last
+        if on(SCOUT_STARS) && readable(bits, 8) && *((bits + 4) as *const u32) == 1 {
+            compare = by_scout as usize;
         }
         if on(SEARCH_ABILITY) && readable(bits, 8) && *(bits as *const u32) & ABILITY_VIEW != 0 {
             match *((bits + 4) as *const u32) {
@@ -5831,6 +5983,10 @@ static mut DRAG: Option<(i16, i32, i32, i32, i32, std::time::Instant)> = None;
 extern "C" fn drag_save(x1: i32, y1: i32, x2: i32, y2: i32, a5: u32) -> usize {
     unsafe {
         let save = game::<extern "C" fn(i32, i32, i32, i32, u32) -> usize>(SAVE_SCREEN_IMAGE);
+        // (a client first: the line below would ask the host for its display, night 8 audit)
+        if remote::CLIENT {
+            return save(x1, y1, x2, y2, a5);
+        }
         let display = rd::<usize>(CHANNEL_DISPLAY + 0x300 * channel());
         let at = display + 0x12f511;
         if remote::CLIENT || !mapped(at, 0x22) || [0, 1, 2, 3].map(|i| rd::<i32>(at + 4 * i)) != [x1, y1, x2, y2] {
@@ -6620,6 +6776,16 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         // ('K' is taken: a club's page)
         b'k' => Some(coach::remote_data(channel)),
         b'U' => prefetch::valid_club(staff).then(|| scout::best_three(staff).iter().flat_map(|&s| (s as u32).to_le_bytes()).collect()),
+        // a club's saved line-ups (its index): the three shapes for a client's strip
+        b'l' => lineups::remote_summary(arg(0)),
+        // the scout ratings of the client's search screen (its screen number keeps it fresh)
+        b'r' => Some(scout::remote_rated(channel)),
+        // a national team's pool for a client (team, number, players to add to its Short List)
+        b'n' => served_node(channel).map(|_| natpool::remote(&(0..key.len().saturating_sub(1) / 4).map(arg).collect::<Vec<_>>())),
+        // the season review card of a client's manager (a season, 0 any)
+        b's' => season::remote(channel, arg(0) as i32),
+        // the match-day card of a client's manager (its screen number keeps it fresh)
+        b'm' => served_node(channel).map(|_| card::remote(channel)),
         _ => None,
     }
 }
@@ -6773,6 +6939,26 @@ unsafe fn export_button() {
 /// Sends `func` to `hook` when it starts with `moved` (position-independent instructions) or
 /// with another mod's jump (cmfix hooks some of the same functions); returns a stub that runs
 /// the moved bytes and carries on in `func`, or goes on to the other mod's hook. 0 when left alone.
+/// The game's own bug (plain exe too, luton1 2026-11-08): a news item of kind 12 whose competition
+/// has no object any more (`[0xadadfc][id]` null) raised "news.cpp 1567" every time a news list
+/// was drawn (another database than the save was started with). NewsItem::write_text 0x77bc80
+/// now goes from 0x77deaa straight to what follows the error box (0x782ac4: returns 0, the text
+/// empty), as before but without the box. Same stack depth at both.
+unsafe fn news_without_competition() {
+    const AT: usize = 0x77deaa;
+    const TO: usize = 0x782ac4;
+    // lea eax, [esp + 0x94]
+    if std::slice::from_raw_parts(AT as *const u8, 7) != [0x8d, 0x84, 0x24, 0x94, 0x00, 0x00, 0x00] {
+        log(&format!("{AT:#x}: not the 3.9.68 code, news.cpp 1567 guard left out"));
+        return;
+    }
+    let mut old = 0;
+    VirtualProtect(AT as *mut u8, 5, 0x40, &mut old);
+    *(AT as *mut u8) = 0xe9;
+    ((AT + 1) as *mut i32).write_unaligned(TO as i32 - (AT as i32 + 5));
+    VirtualProtect(AT as *mut u8, 5, old, &mut old);
+}
+
 unsafe fn hook_entry(func: usize, moved: &[u8], hook: usize) -> usize {
     let code = std::slice::from_raw_parts(func as *const u8, moved.len());
     let stub = VirtualAlloc(0, 16, 0x3000, 0x40);
@@ -6980,6 +7166,7 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             CLUB_INPUT_ORIG = hook_entry(CLUB_INPUT, &[0x6a, 0xff, 0x64, 0xa1, 0x00, 0x00, 0x00, 0x00], club_input as usize);
             // push -1; push 0x9635fe
             TACTICS_INPUT_ORIG = hook_entry(TACTICS_INPUT, &[0x6a, 0xff, 0x68, 0xfe, 0x35, 0x96, 0x00], tactics_input as usize);
+            news_without_competition();
             // sub esp, 0x10; movsx eax, word [0xb77c7a]
             NEWS_INPUT_ORIG = hook_entry(NEWS_INPUT, &[0x83, 0xec, 0x10, 0x0f, 0xbf, 0x05, 0x7a, 0x7c, 0xb7, 0x00], news_input as usize);
             // sub esp, 0x794

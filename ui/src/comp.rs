@@ -573,6 +573,14 @@ unsafe fn trophy(x: i32, y: i32, s: i32, c: [u8; 3]) {
     fill(x + s / 4, y + s * 4 / 5, x + s * 3 / 4, y + s * 9 / 10, c);
 }
 
+/// A small medal: a ribbon (two straps) and a disc in the place's colour.
+unsafe fn medal(x: i32, y: i32, s: i32, c: [u8; 3]) {
+    let w = (s / 6).max(1);
+    fill(x + s / 4, y, x + s / 4 + w, y + s * 2 / 5, [0x3a, 0x5a, 0xa8]);
+    fill(x + s * 3 / 4 - w, y, x + s * 3 / 4, y + s * 2 / 5, [0xc8, 0x40, 0x40]);
+    dot(x + s / 2, y + s * 2 / 3, s / 3, c);
+}
+
 /// An arrow `s` high, up or down, around cx.
 unsafe fn arrow(cx: i32, top: i32, s: i32, up: bool, c: [u8; 3]) {
     for row in 0..s {
@@ -708,13 +716,23 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
     }
     // the table's header and the history's: flat, grey
     let more = (t == b"Third Place" || t == b"Hosts") && w > 100 && SCREEN.ends_with(b"History");
-    if (HEADERS.contains(&t) && w < 160) || ((t == b"Winners" || t == b"Runners-up") && w > 300) || more {
+    // (never a club's Honours: a club with many titles gets a "Winners" cell over 300 wide there,
+    // and it was taken for this header, a second cup and the text moved over the count, Ajax)
+    let more = more || ((t == b"Winners" || t == b"Runners-up") && w > 300 && VIEW != b"Honours");
+    if (HEADERS.contains(&t) && w < 160) || more {
         let had = HEADS.len();
         HEADS.retain(|c| c.0 != t);
         START[1] = START[1].saturating_sub(had - HEADS.len());
         HEADS.push((t.to_vec(), x1, x2, y1, y2));
         fill(x1, y1, x2 + 1, y2 + 1, AREA);
         text_at((x1 + x2) / 2, y1, y2, font, GREY, t, 1);
+        // a History's places: a cup for the winners, silver and bronze medals after them
+        let place = [&b"Winners"[..], b"Runners-up", b"Third Place"].iter().position(|p| *p == t);
+        if let Some(p) = place.filter(|_| SCREEN.ends_with(b"History")) {
+            let size = (y2 - y1) * 80 / 100;
+            let (x, y) = ((x1 + x2) / 2 - text_width(font, t) / 2 - size - 6, y1 + (y2 - y1 - size) / 2);
+            if p == 0 { trophy(x, y, size, GOLD) } else { medal(x, y, size, [[0xb8, 0xbc, 0xc4], [0xc0, 0x80, 0x4c]][p - 1]) }
+        }
         if t == b"Pld" {
             text_at(gd_right(x1), y1, y2, font, GREY, b"GD", 2);
             if !nation_column() && !live_table() {

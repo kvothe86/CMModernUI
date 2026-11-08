@@ -28,6 +28,19 @@ const SEND_PACKET: usize = 0x77ac30; // Network::send_packet(this, data, length,
 
 /// This process is a network client (in ScreenManager::run_network_client).
 pub static mut CLIENT: bool = false;
+
+/// A network game, host or client: the session has a Network object. Single-player-only
+/// features (saved line-ups, the form strip: no unfair advantage, user 2026-11-07) check this.
+/// ponytail: the pointer is taken as 0 in single player; the log line on each change shows it.
+pub unsafe fn network_game() -> bool {
+    static mut WAS: Option<bool> = None;
+    let now = CLIENT || *(NETWORK as *const usize) != 0;
+    if WAS != Some(now) {
+        WAS = Some(now);
+        crate::log(&format!("network game: {now}"));
+    }
+    now
+}
 /// The client's channel on the host (its seat in the host's screen manager), from the answers.
 pub static mut CHANNEL: i16 = 0;
 /// Something new arrived: the screen is drawn again.
