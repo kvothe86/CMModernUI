@@ -41,6 +41,7 @@ mod weather;
 mod form;
 mod card;
 mod season;
+mod finreport;
 mod natpool;
 mod lineups;
 mod export;
@@ -1020,6 +1021,7 @@ extern "C" fn background(x: i32, y: i32, picture: usize) {
             SEARCH = false;
             SQUAD_ABILITY = false;
             assistant::forget();
+            finreport::forget();
             RATING_X = 0;
             #[allow(static_mut_refs)]
             {
@@ -1443,6 +1445,9 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             }
             if on(ASSISTANT_PICK) {
                 assistant::note_text(x1, y1, x2, y2, font, flags, t);
+            }
+            if on(PL_REPORT) && on(CRESTS_ON) {
+                finreport::note_text(x1, y1, x2, y2, font, t);
             }
             if on(COACH) {
                 coach::note_text(x1, y1, t);
@@ -1974,7 +1979,18 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                     }
                 }
             }
-            // (player pictures right of the crest: shelved, ui\shelved\player_pictures)
+            // a person's screens ("23. Rafael van der Vaart (Ajax)"): his picture right of the
+            // crest, found by the name the title shows (so a network client needs no host); not
+            // where the title text would run into it (small bars)
+            if on(PROFILE) && !own_title && !MATCH && !key.is_empty() {
+                if let Some(name) = profile_name(title) {
+                    let (fx, shown) = (cx + size + size / 5, title.trim_ascii());
+                    let text_left = if flags & 0x4 != 0 { (x1 + x2 - text_width(font, shown)) / 2 } else { x1 };
+                    if fx + size + size / 8 < text_left {
+                        draw_face(name, fx, cy, size);
+                    }
+                }
+            }
         }
     }
 }
@@ -2707,14 +2723,14 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 39] = [
+const FEATURES: [&str; 40] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
     "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
-    "saved_lineups", "flat_buttons",
+    "saved_lineups", "flat_buttons", "pl_report",
 ];
 /// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
 /// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
@@ -2741,6 +2757,7 @@ const SEASON_REVIEW: usize = 35; // the season's review card on 1 July
 const NATIONAL_POOL: usize = 36; // a national team's every player of the country, + to the Short List
 const SAVED_LINEUPS: usize = 37; // line-ups 1 / 2 / 3 saved and loaded, Fill subs (`lineups.rs`)
 const FLAT_BUTTONS: usize = 38; // the buttons flat and rounded, the tabs a gold bar, list cells without a box (user 2026-11-09, styles B + D; needs modern_buttons)
+const PL_REPORT: usize = 39; // a signed profit and loss report on the Finances & Info tab (`finreport.rs`, the wording in accountants_notes.tsv)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -2905,6 +2922,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // the season review card (over everything while it is open, on 1 July)
         if on(SEASON_REVIEW) {
             if let Some(redraw) = season::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
+        // the P&L report (the Finances tab's button, then the report over everything)
+        if on(PL_REPORT) {
+            if let Some(redraw) = finreport::input(mx, my, released) {
                 if redraw {
                     game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
                 }
@@ -4054,6 +4081,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         // button stood on it, night 8)
         if on(SEASON_REVIEW) {
             season::flip();
+        }
+        if on(PL_REPORT) {
+            finreport::flip(full_frame);
         }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
@@ -6357,6 +6387,53 @@ unsafe fn pack_pixels(crests: &'static mut Crests, key: &[u8]) -> Option<(&'stat
         crests.last.insert(at, Box::new(px));
     }
     Some((&**crests.last.get(&at)?, side))
+}
+
+static mut FACES: Option<Option<Crests>> = None;
+
+/// Data\cmui_faces.bin (`footy.py faces` + shelved\player_pictures\faces.py, 'CMU2', 160): player
+/// pictures by the name a profile's title shows, "?" a generic one for players without one.
+fn load_faces() -> Option<Crests> {
+    load_pack("Data\\cmui_faces.bin")
+}
+
+/// A player's picture with a thin black line round it, its top left at (x, y); without a pack of
+/// pictures nothing is drawn (this is the switch: no cmui_faces.bin, no pictures). A player the pack
+/// has none of gets its "?" (a default face "?0".."?n" picked by his name if the pack has those).
+#[allow(static_mut_refs)]
+unsafe fn draw_face(name: &[u8], x: i32, y: i32, size: i32) -> bool {
+    if !on(CRESTS_ON) {
+        return false;
+    }
+    let Some(faces) = FACES.get_or_insert_with(load_faces).as_mut() else { return false };
+    let pool = faces.index.keys().filter(|k| k.len() > 1 && k[0] == b'?').count();
+    let fallback = if pool > 0 {
+        // FNV-1a of the name: the same default face for him every time
+        let hash = name.iter().fold(0x811c9dc5u32, |h, &c| (h ^ c as u32).wrapping_mul(0x01000193));
+        format!("?{}", hash as usize % pool).into_bytes()
+    } else {
+        b"?".to_vec()
+    };
+    let Some((px, side)) = pack_pixels(faces, name).or_else(|| pack_pixels(FACES.as_mut().unwrap().as_mut().unwrap(), &fallback)) else { return false };
+    // the thin black frame, then the picture inside it
+    let line = (size / 40).max(1);
+    let black = rgb565([0, 0, 0]);
+    blend(x - line, y - line, size + 2 * line, size + 2 * line, |col, row| {
+        let edge = col < line || row < line || col >= size + line || row >= size + line;
+        (black, if edge { 255 } else { 0 })
+    });
+    blend_picture(px, side as i32, x, y, size, false);
+    true
+}
+
+/// "23. Rafael van der Vaart (Ajax)" -> "Rafael van der Vaart".
+fn profile_name(title: &[u8]) -> Option<&[u8]> {
+    let name = title[..title.iter().rposition(|&c| c == b'(')?].trim_ascii();
+    let name = match name.iter().position(|&c| c == b' ') {
+        Some(p) if p > 1 && name[p - 1] == b'.' && name[..p - 1].iter().all(u8::is_ascii_digit) => name[p + 1..].trim_ascii_start(),
+        _ => name,
+    };
+    (!name.is_empty()).then_some(name)
 }
 
 /// The rows of a picture that hold anything (a flag's own height in its square): first, end.

@@ -44,7 +44,8 @@ $switches = @(
     @('season_review', 'Season Review', 'On 1 July a card on your season just over: place, record, stars, signings.'),
     @('national_pool', 'National Pool', 'National team: every player of the country in the Assistant menu, + to the Short List. Needs Assistant Pick.'),
     @('saved_lineups', 'Saved Line-ups', 'Squad screen: save line-ups 1 / 2 / 3, load them (stand-ins for who cannot play), Fill subs. Needs Assistant Pick.'),
-    @('flat_buttons', 'Flat Buttons', 'Buttons flat with soft corners, tabs a bar with the open tab in gold, list cells without a box. Needs Modern Buttons.')
+    @('flat_buttons', 'Flat Buttons', 'Buttons flat with soft corners, tabs a bar with the open tab in gold, list cells without a box. Needs Modern Buttons.'),
+    @('pl_report', 'P&L Report', 'Finances tab: a button for a signed profit and loss report (Accountants & Co), notes from how the club is doing. Needs Crests and Profile.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),

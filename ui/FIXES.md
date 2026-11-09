@@ -349,6 +349,16 @@ Risks for the test: a row redrawn alone (a hover) without its box drawn first co
 | Qualifier story tiles all "1st" (user 2026-11-09) | the tile read the live table, reset before the story is shown | `news.rs` `finishing_place`: club +0x5f (last season's position) while the new season has no match played | "2002/03 European qualifiers decided" in late June | built; +0x5f being set by then not checked |
 | Season card without the RAD points (user 2026-11-09: 7 points, the RADs came on 1 July) | the card shows before 1 July, RADs are settled at the season turn | `challenge::summary`: a RAD the game's last reading passes (`track::passed`) counts on the card and in the total | the card at the last league match day with an end-of-season RAD kept | built |
 
+## Built 2026-11-10 (night; the user asleep, tests run by Claude)
+
+| What | Cause | Code | How to see it | Status |
+|---|---|---|---|---|
+| Finances were dull (wish, user 2026-11-09: a P&L report with invented texts, signed by "Accountants & Co" with a fake logo) | - | new switch `pl_report` (index 39): `finreport.rs` (button right of View on the money views, paper over the screen, Back, Save image), wording `accountants_notes.tsv` | club screen, Finances & Info, View > Finances, "P&L report" | seen on the tes save (PSV) at 1680x1050: figures equal the game's screen, "looks better" (user); 800x600 / 1280x800 (the paper and fonts are measured, a smaller font tier is the fallback) and a network client (no button there) not seen |
+| P&L button crashed the game on the click (user 2026-11-10) | the transfer funds were run through the game's Cash::convert 0x43f460 with two arguments: it takes one (`ret 4`; the screen's second pushed 6 stays on the stack) | `finreport.rs` `CASH_CONVERT` thiscall(Cash*, flags) | click "P&L report" | fixed, clicked again in the game, no crash |
+| Player pictures shelved for want of a face pack by name (user 2026-11-09: footylogos.com has headshots by player) | - | `footy.py faces`, `draw_face` + `profile_name` in `lib.rs` (right of the badge, a thin black frame; the generic grey avatar without a picture) | a player's profile | see the report of the night |
+| Club crests: the other logo set (user 2026-11-09: footylogos.com, "a smooth logo pack") | - | `footy.py logos` -> `badge_match.tsv` (preferred over football-logos.cc by `logos.py pack`), a 404 falls back to the preview picture | any club screen | cm25 packed (8,588 names, 4,682 pictures; the old pack kept as `cmui_crests.bin.before_footy`) |
+| `import logos` ran its command line (re-scraped the index) | no `__main__` guard | `logos.py` end | `python -c "import logos"` | fixed |
+
 ## Open (noted, not fixed)
 
 | Seen | Cause | Where | Check | Status |

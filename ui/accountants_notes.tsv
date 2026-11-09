@@ -1,0 +1,86 @@
+# Accountants & Co: text library for the cmui profit and loss report. KEY<TAB>TEXT; same KEY = variants picked by club id.
+VERDICT_STRONG	{club} closes the period with a surplus of {result} on income of {income}, and the bank is in credit. These are, by any measure, a sound set of accounts.
+VERDICT_STRONG	A strong year: income of {income_m} has yielded a surplus of {result_m}, a margin the board may regard with quiet satisfaction. The bank balance stands at {balance_m}.
+VERDICT_STRONG	We are pleased to report a surplus of {result} for the year to date and a bank balance in credit. Few clubs of our acquaintance are so fortunately placed.
+VERDICT_STRONG	The year shows a surplus of {result_m}, at least a tenth of income, with the bank in credit at {balance_m}. We have no material concerns to raise.
+VERDICT_PROFIT	{club} has traded at a modest surplus of {result} for the year, and the bank remains in credit. The margin is narrow but honest.
+VERDICT_PROFIT	The year to date shows a surplus of {result_m} on income of {income_m}. It is a slim margin, and the board will wish to guard it.
+VERDICT_PROFIT	Income has covered expenditure with a little to spare: a surplus of {result} and a bank balance of {balance}. Respectable, if not yet comfortable.
+VERDICT_PROFIT	We report a small surplus of {result_m} and a positive bank balance. A modest result, but the club is paying its way, which is more than many can say.
+VERDICT_PROFIT_OVERDRAWN	The year shows a surplus of {result}, yet the bank account remains overdrawn at {balance}. The club is climbing out of its hole; it is not yet out of it.
+VERDICT_PROFIT_OVERDRAWN	A surplus of {result_m} this year is welcome news, though a bank balance of {balance_m} reminds us that earlier shortfalls have yet to be made good.
+VERDICT_PROFIT_OVERDRAWN	{club} is trading at a surplus of {result}, and the overdraft should narrow if this continues. We counsel patience rather than celebration.
+VERDICT_PROFIT_OVERDRAWN	We note with approval a surplus of {result_m} for the year. The balance, at {balance_m}, remains below zero, and the board should treat this surplus as repayment, not spending money.
+VERDICT_LOSS_FUNDED	The year shows a deficit of {result}, met for now from the club's reserves; the bank balance stands at {balance}. Reserves, we would observe, are spent only once.
+VERDICT_LOSS_FUNDED	{club} has incurred a deficit of {result_m} this year. The bank remains in credit at {balance_m}, but it is being drawn down to pay for it.
+VERDICT_LOSS_FUNDED	Expenditure of {expenditure} has exceeded income of {income}, leaving a deficit of {result}. The balance is still positive; the trend is not one we would wish to see continue.
+VERDICT_LOSS_FUNDED	A deficit of {result_m} has been absorbed by the club's cash at bank, which stands at {balance_m}. We recommend the board consider how long that cushion is to last.
+VERDICT_LOSS_OVERDRAWN	The year shows a deficit of {result} and the bank account is overdrawn at {balance}. The board will wish to give these figures its early attention.
+VERDICT_LOSS_OVERDRAWN	{club} is spending more than it earns, with a deficit of {result_m} for the year and a bank balance of {balance_m}. There is no cushion left to absorb further losses.
+VERDICT_LOSS_OVERDRAWN	Expenditure of {expenditure} against income of {income} leaves a deficit of {result}, funded by an overdraft. We note that a bank's patience is not unlimited.
+VERDICT_LOSS_OVERDRAWN	A deficit of {result_m} on the year and a bank balance of {balance_m}. We would be failing in our duty were we not to describe the position as unsatisfactory.
+VERDICT_DEEP	The year shows a deficit of {result} on income of only {income}, and the club is overdrawn at {balance}. In our professional opinion the position is serious and calls for immediate action by the board.
+VERDICT_DEEP	We must report plainly: a deficit of {result_m} against income of {income_m}, with no cash at bank to meet it. The club's standing as a going concern must now be the board's first consideration.
+VERDICT_DEEP	Expenditure has exceeded income by {result}, more than a quarter of everything the club earned, and the bank balance stands at {balance}. We draw the board's attention to the matter in the strongest terms.
+VERDICT_DEEP	These accounts disclose a deficit of {result_m} and a bank balance of {balance_m}. We regret that we must ask the board to treat the club's finances as its first and most pressing concern.
+NOTE_WAGES_HIGH	Wages absorbed {wages_pct}% of income this year. At this level, very little remains for anything else the club may need.
+NOTE_WAGES_HIGH	The wage bill of {wages_m} takes {wages_pct}% of income. We would gently remind the board that players are paid whether or not the gates hold up.
+NOTE_WAGES_HIGH	Wages stand at {wages_pct}% of income, a ratio we regard as unsustainable for more than a season or two. New contracts should be negotiated with this in mind.
+NOTE_WAGES_HIGH	We note that wages of {wages} consume {wages_pct}% of everything the club earns. The manager may wish to know this before offering his next contract.
+NOTE_WAGES_MODEST	Wages took a modest {wages_pct}% of income this year, well within prudent limits.
+NOTE_WAGES_MODEST	The wage bill of {wages_m} represents {wages_pct}% of income. The board has kept a firm hand on contracts, and it shows.
+NOTE_WAGES_MODEST	At {wages_pct}% of income, wages are comfortably under control. There is room, should the manager make a sound case, for a carefully chosen addition to the squad.
+NOTE_WAGES_FELL	Wages absorbed {wages_pct}% of income this year, against {wages_pct_last}% last year. A welcome improvement.
+NOTE_WAGES_FELL	The wage ratio has fallen from {wages_pct_last}% of income last year to {wages_pct}% this year. We commend whoever is responsible.
+NOTE_WAGES_FELL	Wages now take {wages_pct}% of income, down from {wages_pct_last}% a year ago. The board should resist any temptation to give the gain straight back.
+NOTE_WAGES_ROSE	Wages absorbed {wages_pct}% of income this year, against {wages_pct_last}% last year. The trend merits watching.
+NOTE_WAGES_ROSE	The wage ratio has risen from {wages_pct_last}% of income last year to {wages_pct}% this year. Pay is growing faster than the club's earnings.
+NOTE_WAGES_ROSE	Wages now take {wages_pct}% of income, up from {wages_pct_last}% a year ago. We would ask that each new contract be weighed against this figure.
+NOTE_SALES_RELIANT	Player sales of {sales_m} made up {sales_pct}% of this year's income. Excluding sales, the year would show a result of {profit_ex_sales_m}.
+NOTE_SALES_RELIANT	The club has relied on the transfer market for {sales_pct}% of its income, some {sales_m} in all. Excluding sales the year would show a result of {profit_ex_sales_m}, the truer measure of everyday trading.
+NOTE_SALES_RELIANT	We note that {sales_pct}% of income came from selling players. A squad can be sold only once; excluding sales, the year would show a result of {profit_ex_sales_m}.
+NOTE_SALES_RELIANT	Player sales brought in {sales_m}, {sales_pct}% of the year's income. Excluding sales the year would show a result of {profit_ex_sales_m}; the board should not budget on another such year.
+NOTE_NO_SALES	No players were sold this year; all of the income was earned from the club's ordinary football business.
+NOTE_NO_SALES	The club has made no player sales this year, so the figures above reflect its everyday trading alone.
+NOTE_BOUGHT_HEAVY	Players bought account for {bought_m}, or {bought_pct}% of expenditure. The board will wish to see that investment repaid on the pitch.
+NOTE_BOUGHT_HEAVY	Transfer spending of {bought} made up {bought_pct}% of the year's expenditure. We take it the manager has his reasons.
+NOTE_BOUGHT_HEAVY	Purchases of players took {bought_pct}% of expenditure this year, some {bought_m} in all. Such outlays are best judged by results, and in time by resale value.
+NOTE_TICKETS_STRONG	Season tickets provided {tickets_pct}% of income, a loyal and dependable base for which the supporters deserve the board's thanks.
+NOTE_TICKETS_STRONG	Season ticket sales made up {tickets_pct}% of income. Money paid in advance is the best kind, and the club is fortunate in its supporters.
+NOTE_TICKETS_STRONG	At {tickets_pct}% of income, season tickets give the club a steady foundation. We advise against testing that loyalty with sharp rises in price.
+NOTE_MONTH_BETTER	The month shows a result of {month_result}, against {month_result_last} last month. A move in the right direction.
+NOTE_MONTH_BETTER	This month's result of {month_result} improves on last month's {month_result_last}.
+NOTE_MONTH_BETTER	Trading has improved month on month: {month_result} this month, compared with {month_result_last} last month. One month is not a trend, but it is a start.
+NOTE_MONTH_WORSE	The month shows a result of {month_result}, against {month_result_last} last month. A step back, which we trust is temporary.
+NOTE_MONTH_WORSE	This month's result of {month_result} falls short of last month's {month_result_last}. Monthly figures move with the fixture list, but the board should keep an eye on it.
+NOTE_MONTH_WORSE	Trading weakened month on month: {month_result} this month, compared with {month_result_last} last month. We shall comment further should the pattern repeat.
+NOTE_FUNDS_NONE	Transfer funds stand at {funds}. Any new signing would have to be paid for by a sale first.
+NOTE_FUNDS_NONE	The manager has no transfer funds at his disposal ({funds}). We would advise the board not to sanction purchases until this changes.
+NOTE_FUNDS_NONE	With transfer funds at {funds}, the club is not in a position to buy. The manager will need to work with the squad he has, or sell before he buys.
+NOTE_FUNDS_AVAILABLE	Transfer funds of {funds} are available. We advise that they be spent on need rather than reputation, and that wages be counted alongside the fee.
+NOTE_FUNDS_AVAILABLE	The manager has {funds} to spend. A fee is paid once; a contract is paid every week, and the board should weigh both.
+NOTE_FUNDS_AVAILABLE	Transfer funds stand at {funds}. Money left unspent is not wasted, and we would not regard it as a failure if some of it remained at the year end.
+NOTE_OVERDRAWN_ADVICE	The club is overdrawn, with a bank balance of {balance}. We advise the board to hold off new signing-on fees until the balance improves.
+NOTE_OVERDRAWN_ADVICE	With the bank balance at {balance}, we recommend that no new long contracts be agreed until the overdraft is reduced.
+NOTE_OVERDRAWN_ADVICE	The account stands at {balance}. The board may wish to consider a sale or two, or a word with the chairman, before the bank raises the matter itself.
+NOTE_OVERDRAWN_ADVICE	We note the bank balance of {balance}. Interest on an overdraft buys no points, and we urge the board to make its reduction a priority.
+NOTE_RESERVES	Cash reserves of {balance_m} give the club a sound cushion against a poor season.
+NOTE_RESERVES	The bank balance of {balance_m} is a credit to the board's stewardship. Reserves of this kind are best kept for the day they are needed.
+NOTE_RESERVES	With {balance_m} at bank, the club is well provided for. We would counsel against letting a healthy balance become an argument for loose spending.
+BASIS	Basis of preparation: compiled from the club's records without audit. Figures may differ by a small sum through rounding, and from the game's own screens in small particulars.
+BASIS	Basis of preparation: these management accounts are unaudited and drawn from the club's own books. Rounding may cause small differences, and the game's own finance screens may differ slightly.
+BASIS	Basis of preparation: unaudited; compiled from information supplied by the club. Totals may not cast exactly through rounding, and minor differences from the game's own screens are to be expected.
+BASIS	Basis of preparation: compiled without audit from the club's records as they stood on {date}. Amounts are rounded, so a small sum may go astray; the game's own screens may show slightly different figures.
+CLOSING	We are, as ever, at the board's disposal.
+CLOSING	We should be pleased to discuss these accounts with the chairman at his earliest convenience.
+CLOSING	Should the board require any further explanation, we remain entirely at its service.
+CLOSING	We thank the club's staff for their kind assistance and look forward to the next set of figures.
+PARTNER	Marcus Hartwell FCA|M. Hartwell
+PARTNER	Priya Raman ACA|P. Raman
+PARTNER	Oluwaseun Adeyemi FCA|O. Adeyemi
+PARTNER	Margaret Lindqvist FCCA|M. Lindqvist
+PARTNER	Tomasz Wierzbicki ACA|T. Wierzbicki
+PARTNER	Siobhan Fairclough FCA|S. Fairclough
+FOOTER	Accountants & Co is a fictional practice. Registered in nowhere. Member of no institute.
+FOOTER	Accountants & Co exists only in this game. No real firm, partner or client is depicted, and no fee will be charged.
+FOOTER	A made-up firm since 1891. Regulated by no one, insured against nothing, and not to be relied upon outside the game.

@@ -46,6 +46,7 @@
 | 36 | `national_pool` | `NATIONAL_POOL` | a "National pool" item in a national team's Assistant menu (squad screen, single player / host): every player whose first nationality is the country, by group (GK / DEF / MID / ATT), best 100 a group by the assistant's % (`scout::seen_score`, his error in it); + per row and "Add top 10 here" put players on the game's Short List (SCOUT_MANAGER `*0xb74448`, add_to_shortlist 0x7f75f0, is_player_shortlisted 0x7f7490); filters, pages, Back (`natpool.rs`) |
 | 37 | `saved_lineups` | `SAVED_LINEUPS` | squad screen, single player / host: a strip right of the list's title (the assistant's note keeps the left): line-ups 1 / 2 / 3 (eleven + bench by staff id and the shape, `cmui_lineups.txt`), a floppy saves (a full slot asks with a second click), a click loads (a starter gone, injured, banned or under 75 % condition is replaced for his slot by the assistant's pick, `assistant::fill_team`), right click clears; Fill subs fills only the empty bench places up to the match's allowed number; In / Ast tags by the names (`lineups.rs`) |
 | 38 | `flat_buttons` | `FLAT_BUTTONS` | (needs `modern_buttons`; user 2026-11-09, styles B + D of four mockups) the game's grey buttons drawn by cmui flat with 6 px corners, 2 px in at each side (gaps), no bevel, lighter when pressed (`panel`, `rounded`); the tab rows one dark bar with soft corners and the open tab a gold block with dark text (`news::flat_tabs`; a row with a disabled tab keeps the old look); a list's clickable 0x39e8 cells (positions, dates) without a box, the row's background, their text light blue (`FLAT_CELL`) |
+| 39 | `pl_report` | `PL_REPORT` | (needs `crests`; user 2026-11-09) a "P&L report" button right of the View dropdown on the money views of a club's Finances & Info tab (Finances, Income, Expenditure): a full profit and loss account on a sheet of paper over the screen, signed by the made-up firm "Accountants & Co" (a logo drawn in code), notes picked by how the club is doing from `accountants_notes.tsv`; Back and Save image (a PNG in `Screenshots\`). The figures are the club's finance record (`finreport.rs`), money shown the game's way (its currency and rate, read off its own formatter). Single player and host only |
 
 Check in code with `on(CONST)`. `load_features` (called from `DllMain`) turns a feature off where
 the exe's byte is 0 (`exe_switches`), then reads `cmui.ini`: `name=0` off, missing names written
@@ -96,6 +97,6 @@ same seven game folders as `install_all.ps1`, hash-checks each. FIXES "Network c
 
 - `..\README.md`'s switch byte count and switch list now point here; its "15 hook sites" /
   "all 16 not detected" are from the patcher test of 2026-10-27 (count of 2026-10-27) and were not re-run.
-  `FEATURES` has 38 entries (indices 0-37) in `lib.rs`, `make_exe.py`, `make_patches.py`,
+  `FEATURES` has 40 entries (indices 0-39) in `lib.rs`, `make_exe.py`, `make_patches.py`,
   `install.py` and `cmui_config.ps1` (the window: three columns of thirteen); the test
   `every_switch_list_agrees` keeps them in step.

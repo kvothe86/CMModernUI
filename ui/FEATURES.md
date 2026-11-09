@@ -193,3 +193,35 @@ Honours list (`comp.rs` `honours`, about line 526) already draws a cup in the pl
 reuse that for the trophy, add a round medal for 2nd / 3rd, shift the header text right by
 the icon's width. Check the club-history and nation-history variants of the screen too, and
 800x600.
+
+## P&L report on the Finances tab (2026-11-09/10, asked by the user)
+
+A "P&L report" button right of the View dropdown on the money views (Finances, Income, Expenditure) of a
+club's Finances & Info tab. It opens a sheet of paper over the screen: letterhead of the made-up firm
+"Accountants & Co" (a logo drawn in code, est. 1891), the club, the date, the account in the game's four
+columns (this month, last month, this year, last year), the closing balance and the transfer funds, a
+verdict paragraph, up to five notes picked by how the club is doing, a basis line, a closing line, a
+signing partner and a small-print footer. Back closes it; Save image writes the paper to Screenshots\.
+
+- Code: `src/finreport.rs` (pure `build` / `column` / `Money` plus the page `paint`, unit tests in the file),
+  the wording in `accountants_notes.tsv` (drafted ahead, four variants per key, picked by the club's index).
+  Switch `pl_report` (index 39, needs `crests`).
+- Figures: the club's finance record, four blocks of 0x50 bytes (offsets in the module header).
+  Money goes through the game's own formatter once (symbol and rate: a save showing pounds at 2.5 per unit
+  read "£2,500,000" for 1,000,000) and is cut, not rounded, as the game does; the transfer funds go
+  through the game's Cash::convert 0x43f460 (one argument; the screen's second pushed 6 is left on the
+  stack). Checked against the game's Finances screen on the tes save (PSV): income, expenditure,
+  profit, balance and funds the same (profit differs by a unit in places: the game converts floats).
+- Not on a network client (the finance record is the host's).
+- The first build called Cash::convert with two arguments and crashed on the click (a guessed call
+  signature: always read the callee's `ret` before calling a game function).
+
+## Player pictures and footylogos.com logos (2026-11-09/10)
+
+`footy.py` (see `docs/ARCHITECTURE.md`): the site's catalogue (11,356 players, 3,392 football logos) matched to
+the game folder's database. Logos: `logos` writes `badge_match.tsv` (the fuzzy matches 0.8 and up, as for the
+other logo source) and downloads only the matched files (a 404 falls back to the preview picture).
+Players: `faces` matches by nation, name and club (exact words first, then one name inside the other with
+the club agreeing), takes the headshot kinds first (ucl_head 324, portugal_head, head), then portraits,
+and names each picture by the name the game shows. Header: `draw_face` in `lib.rs` draws it right of the
+club badge in a thin black frame when `Data\cmui_faces.bin` exists. Nothing from the site is committed.

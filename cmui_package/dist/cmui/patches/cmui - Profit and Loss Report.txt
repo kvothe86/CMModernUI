@@ -1,0 +1,2 @@
+A P&L report button on a club's Finances & Info tab: a full profit and loss account on a page signed by the made-up firm Accountants & Co, with notes written from how the club is doing. Needs Crests and Profile.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: pl_report=0 switches it off again.

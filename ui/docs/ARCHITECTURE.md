@@ -237,6 +237,13 @@ Rules of thumb:
 | 36 | `national_pool` | `NATIONAL_POOL` | `natpool.rs` |
 | 37 | `saved_lineups` | `SAVED_LINEUPS` | `lineups.rs` |
 | 38 | `flat_buttons` | `FLAT_BUTTONS` | `lib.rs` `panel` (+ `rounded`, `FLAT_CELL`), `news.rs` `flat_tabs` |
+| 39 | `pl_report` | `PL_REPORT` | `finreport.rs` (+ `accountants_notes.tsv`) |
+
+Club logos and player pictures from footylogos.com: `footy.py` (`index`, `logos`, `faces`) matches the
+site's catalogue to a game folder's database and downloads only what matches (a polite 0.15 s per
+file); the pictures never go into the repo. Logos feed `logos.py pack` (`badge_match.tsv`), faces
+feed `shelved\player_pictures\faces.py` (`Data\cmui_faces.bin`, drawn by `draw_face` in `lib.rs`).
+`test_footy.py` checks its pure parts.
 
 Settings that are not switches live in the same ini (`setting` / `set_setting`): `hide_ca_pa`,
 `profile_details`, `background_opacity`, `claude_api_key` and `claude_model` (never logged, never

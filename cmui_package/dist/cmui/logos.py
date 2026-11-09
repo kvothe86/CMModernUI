@@ -713,7 +713,8 @@ def gui():
     root.mainloop()
 
 
-sys.stdout.reconfigure(encoding='utf-8')
-{'index': index, 'match': match, 'why': lambda: match(sys.argv[2]), 'fetch': fetch, 'pack': pack, 'comps': comps, 'comp_names': comp_names,
- 'flags': flags, 'badges': lambda: badges(*sys.argv[2:4]), 'find': lambda: find(sys.argv[2]),
- 'swap': lambda: swap(*sys.argv[2:4]), 'restore': restore, 'gui': gui}[(sys.argv[1:] or ['gui'])[0]]()
+if __name__ == '__main__':  # (footy.py imports this file)
+    sys.stdout.reconfigure(encoding='utf-8')
+    {'index': index, 'match': match, 'why': lambda: match(sys.argv[2]), 'fetch': fetch, 'pack': pack, 'comps': comps, 'comp_names': comp_names,
+     'flags': flags, 'badges': lambda: badges(*sys.argv[2:4]), 'find': lambda: find(sys.argv[2]),
+     'swap': lambda: swap(*sys.argv[2:4]), 'restore': restore, 'gui': gui}[(sys.argv[1:] or ['gui'])[0]]()
