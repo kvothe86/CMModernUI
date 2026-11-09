@@ -821,6 +821,29 @@ unsafe fn best_player(club: usize) -> Option<i32> {
     rated.max_by(|a, b| a.0.total_cmp(&b.0)).map(|p| ((p.1 - base) / 0x6e) as i32)
 }
 
+/// Which club a manager's season of challenges is read from (user 2026-11-09, a move to Twente
+/// after the season was played): `held` the club kept so far, `club` his club now, `was_frozen`
+/// the season already frozen, `played_out` the kept club's league has played all its matches.
+/// (frozen, the club to keep): a move once the league is played out freezes the readings at the
+/// old club; a move during the season goes on at the new club, as before.
+fn season_club(held: Option<i32>, club: i32, was_frozen: bool, played_out: bool) -> (bool, i32) {
+    match held {
+        None => (false, club),
+        Some(h) if h == club => (was_frozen, h),
+        Some(h) if was_frozen || played_out => (true, h),
+        Some(_) => (false, club),
+    }
+}
+
+#[test]
+fn a_move_after_the_season_freezes() {
+    assert_eq!(season_club(None, 7, false, false), (false, 7));
+    assert_eq!(season_club(Some(7), 7, false, true), (false, 7));
+    assert_eq!(season_club(Some(7), 9, false, true), (true, 7), "moved after the last league match");
+    assert_eq!(season_club(Some(7), 9, false, false), (false, 9), "moved during the season");
+    assert_eq!(season_club(Some(7), 11, true, false), (true, 7), "frozen stays frozen");
+}
+
 /// This season's rows read again, and rows of a season gone settled.
 pub unsafe fn update() {
     let l = league();
@@ -829,6 +852,20 @@ pub unsafe fn update() {
     for (staff, name) in humans() {
         let open = |r: &&Rad| r.year == now && same_manager(&r.name, &name) && !r.manual;
         let club = rd::<usize>(staff + 0x39);
+        // the season's club (`season_club`): kept in the season's stats, "rad_club" / "rad_frozen"
+        let index = if readable(club, 4) { ((club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE) as i32 } else { -1 };
+        let held = l.stat(&name, now, "rad_club");
+        let played_out = held.filter(|&h| h >= 0 && h != index).is_some_and(|h| standing(rd::<usize>(CLUB_TABLE) + h as usize * CLUB_SIZE).is_some_and(|s| s.played >= s.full));
+        let (frozen, keep) = season_club(held, index, l.stat(&name, now, "rad_frozen") == Some(1), played_out);
+        if held != Some(keep) {
+            changed |= l.set_stat(&name, now, "rad_club", keep);
+        }
+        if frozen && l.stat(&name, now, "rad_frozen") != Some(1) {
+            changed |= l.set_stat(&name, now, "rad_frozen", 1);
+            if trace() {
+                log(&format!("challenge {name}: moved after the season was played, the readings stay those of club {keep}"));
+            }
+        }
         // career goals: the first division's leaders in his squad, the last reading of a season stands
         if on(CAREER_GOALS) && readable(club, 0xd7 + 200) && l.marks.iter().any(|m| same_manager(&m.name, &name) && goals::LEADS.contains(&m.goal.as_str())) {
             let own = squad(club);
@@ -860,8 +897,12 @@ pub unsafe fn update() {
         }
         // the formation of every league match, whatever challenges he has (one drawn later in the
         // season finds the matches already counted)
-        if readable(club, 0x60) {
+        if readable(club, 0x60) && !frozen {
             changed |= watch_tactics(l, &name, staff, club, now);
+        }
+        // (a season frozen by a move: its rows keep the old club's last readings until it is settled)
+        if frozen {
+            continue;
         }
         let rows: Vec<u32> = l.rads.iter().filter(open).filter(|r| rule(&r.text).is_some()).map(|r| r.id).collect();
         if rows.is_empty() {
