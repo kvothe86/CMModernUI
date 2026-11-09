@@ -38,7 +38,7 @@ fn judge(way: Way, value: i32, old: u8) -> u8 {
 }
 
 /// Whether the challenge is met when the season is over.
-fn passed(way: Way, value: i32, state: u8) -> bool {
+pub(super) fn passed(way: Way, value: i32, state: u8) -> bool {
     match way {
         Way::Most(n) => state != BAD && value <= n,
         Way::Least(_) => state == GOOD,

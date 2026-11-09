@@ -29,6 +29,20 @@ pub struct Result_ {
     pub against: i32,
     pub home: bool,
     pub day: i32, // year * 366 + day of the year
+    pub friendly: bool, // a friendly (not a league or cup match): the season card's biggest win leaves it out
+}
+
+const COMPS: usize = 0xae23d0; // the competition table (as challenge/mod.rs reads it): 0x6b a row, +4 the name
+const COMP_COUNT: usize = 0xae2378;
+
+/// The competition (id, fixture +0) is a friendly: the last 0x7f competitions are the friendly
+/// mini leagues and cups (the rebuild's `is_friendly_competition`), or it is named Friendly.
+unsafe fn is_friendly(comp: i32) -> bool {
+    let (table, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if comp < 0 || count <= 0 || comp >= count || !readable(table, count as usize * 0x6b) {
+        return false;
+    }
+    comp >= count - 0x7f || latin1(&game_text(table + comp as usize * 0x6b + 4, 51)).to_lowercase().starts_with("friendly")
 }
 
 impl Result_ {
@@ -99,6 +113,7 @@ pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year)
                 against: if home { ag } else { hg } as i32,
                 home,
                 day: rd::<i16>(f + 0x28) as i32 * 366 + rd::<i16>(f + 0x2a) as i32,
+                friendly: is_friendly(rd::<i32>(f)),
             });
             if out.len() >= max {
                 break;

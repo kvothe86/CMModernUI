@@ -1,2 +1,2 @@
-Needs Stats Table. The league table's C, P, Pl and R boxes as a cup, a green arrow up, two amber arrows and a red arrow down.
+Needs Stats Table. The league table's C, P, Pl and R boxes as a cup, a green arrow up, two amber arrows and a red arrow down; in a continental league phase Q as a green tick and Pl as a blue PO pill.
 Needs the "cmui Loader" patch and cmui.dll. cmui.ini: table_icons=0 switches it off again.

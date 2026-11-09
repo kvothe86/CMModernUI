@@ -36,6 +36,7 @@ struct Card {
     signings: [Vec<u8>; 4],        // in / out, spent, received, net
     chal: Option<Chal>,            // CM Challenge: only with the challenge on
     last: Vec<(i32, i32, u8)>,     // the last six results, oldest first: for, against, letter
+    trophies: Vec<Vec<u8>>,        // the competitions won (`challenge::trophies_won`)
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -132,6 +133,9 @@ impl Card {
         }
         let last: Vec<Vec<u8>> = self.last.iter().map(|r| format!("{}-{}-{}", r.0, r.1, r.2 as char).into_bytes()).collect();
         line([b"L".as_slice()].into_iter().chain(last.iter().map(|s| s.as_slice())).collect());
+        if !self.trophies.is_empty() {
+            line([b"W".as_slice()].into_iter().chain(self.trophies.iter().map(|s| s.as_slice())).collect());
+        }
         o
     }
 
@@ -151,6 +155,7 @@ impl Card {
                         c.lists[k].push((f[1].to_vec(), num(f[2])));
                     }
                 }
+                (b"W", _) => card.trophies = f[1..].iter().map(|t| t.to_vec()).collect(),
                 (b"L", _) => {
                     card.last = f[1..].iter().filter_map(|r| {
                         let p: Vec<&[u8]> = r.split(|&c| c == b'-').collect();
@@ -168,7 +173,9 @@ impl Card {
 #[test]
 fn card_bytes() {
     let snap = Snap { season: 2028, club: 1808, place: 5, teams: 24, league: b"League One".to_vec(), row: [46, 24, 10, 12, 70, 50, 82], scorer: (b"Wright".to_vec(), 21), assists: (b"Wellens".to_vec(), 9), rating: (b"Ball".to_vec(), 712), manager: b"Test Manager".to_vec(), last_place: 3, shown: 2027 };
-    let mut c = Card { snap, biggest: (b"5-0".to_vec(), b"v Bury".to_vec()), signings: [b"3 / 2".to_vec(), b"1.5M".to_vec(), b"2M".to_vec(), b"+500K".to_vec()], chal: None, last: vec![(2, 1, b'W'), (0, 0, b'D')] };
+    let mut c = Card { snap, biggest: (b"5-0".to_vec(), b"v Bury".to_vec()), signings: [b"3 / 2".to_vec(), b"1.5M".to_vec(), b"2M".to_vec(), b"+500K".to_vec()], chal: None, last: vec![(2, 1, b'W'), (0, 0, b'D')], trophies: Vec::new() };
+    assert_eq!(Card::read(&c.bytes()), Some(c.clone()));
+    c.trophies = vec![b"Dutch Premier Division".to_vec(), b"KNVB Beker".to_vec()];
     assert_eq!(Card::read(&c.bytes()), Some(c.clone()));
     c.chal = Some(Chal { season: 2028, total: 90, rank: b"Pro".to_vec(), lists: [vec![(b"Title".to_vec(), 20)], vec![], vec![(b"Cup \xe9".to_vec(), -5)]] });
     assert_eq!(Card::read(&c.bytes()), Some(c));
@@ -259,7 +266,7 @@ unsafe fn save() {
 /// What the card shows for `snap` of the manager `staff` (the game is called: not in a client).
 unsafe fn card(staff: usize, snap: &Snap) -> Card {
     let all = form::played(snap.club, (181, snap.season), (180, snap.season + 1), 120);
-    let biggest = all.iter().filter(|r| r.goals_for > r.against).max_by_key(|r| (r.goals_for - r.against, r.goals_for));
+    let biggest = all.iter().filter(|r| r.goals_for > r.against && !r.friendly).max_by_key(|r| (r.goals_for - r.against, r.goals_for));
     let opponent = |r: &form::Result_| {
         let c = rd::<usize>(CLUB_TABLE) + r.opponent.max(0) as usize * CLUB_SIZE;
         if readable(c, 0x40) { game_text(c + 4, 51) } else { Vec::new() }
@@ -279,7 +286,9 @@ unsafe fn card(staff: usize, snap: &Snap) -> Card {
     });
     let mut last: Vec<(i32, i32, u8)> = all.iter().take(6).map(|r| (r.goals_for, r.against, r.letter())).collect();
     last.reverse();
-    Card { snap: snap.clone(), biggest, signings, chal, last }
+    let club = rd::<usize>(CLUB_TABLE) + snap.club.max(0) as usize * CLUB_SIZE;
+    let trophies = if readable(club, 0x40) { challenge::trophies_won(club, snap.season) } else { Vec::new() };
+    Card { snap: snap.clone(), biggest, signings, chal, last, trophies }
 }
 
 /// The card of the latest snapshot of a channel's manager's club for a network client; `season`
@@ -515,35 +524,52 @@ unsafe fn draw() {
     // CM CHALLENGE: what the season gave (items green, RAD challenges blue, career goals gold),
     // the season's points, the career total and rank; only with the challenge on (read once a
     // card: the league's seasons are worked out from the game and its file)
-    if let Some(c) = card.chal.as_ref() {
-        let mut y = ctop + line + 8 + 4 * (line + 6) + 14;
-        text_at(x1 + m, y, y + line, f2, GOLD, b"CM CHALLENGE", 0);
-        let head = format!("+{} this season \u{b7} {} total \u{b7} {}", c.season, c.total, latin1(&c.rank));
-        text_at(x2 - m, y, y + line, f2, white, &to_latin1(&head), 2);
-        y += line + 8;
-        let (mut x, ph) = (x1 + m, line);
-        let kinds = [(&c.lists[0], [0x2e, 0x8a, 0x58]), (&c.lists[1], [0x2c, 0x5a, 0x96]), (&c.lists[2], [0xa8, 0x82, 0x2c])];
-        // (no row left above Last six, a small screen: the header line says it all; at 800x600
-        // "Nothing gained" and the pills ran into Last six, night 8)
-        let room = y + ph <= by - line - 10;
-        if room && c.lists.iter().all(|l| l.is_empty()) {
-            text_at(x, y, y + ph, f2, muted, b"Nothing gained this season", 0);
-        }
-        for (list, colour) in kinds.into_iter().filter(|_| room) {
-            for (name, points) in list.iter() {
-                let label = to_latin1(&format!("{}  {points:+}", latin1(name)));
-                let w = text_width(f1, &label) + 24;
-                if x + w > x2 - m {
-                    (x, y) = (x1 + m, y + ph + 6);
-                }
-                if y + ph > by - line - 10 {
-                    break; // (no room left above Last six)
-                }
-                pill(x, y, x + w, y + ph, colour);
-                text_at(x + w / 2, y, y + ph, f1, white, &label, 1);
-                x += w + 8;
+    // as text, two columns (user 2026-11-09, was a row of pills): HONOURS, the competitions won,
+    // a cup each; CM CHALLENGE, what the season gave a line each (a mark in its kind's colour:
+    // items green, RAD challenges blue, career goals gold; the points at the right). As many lines
+    // as fit above Last six, then "+N more" (at 800x600 the pills once ran into Last six, night 8)
+    let htop = ctop + line + 8 + 4 * (line + 6) + 14;
+    let row = line + 4;
+    let rows = ((by - line - 10 - (htop + line + 8)) / row).max(0) as usize;
+    let fs = if small_screen() { f2 } else { f3 };
+    // the lines of a column: (mark, text, points); the mark draws itself at (x, y)
+    let column = |x: i32, w: i32, start: i32, lines: &[(Option<[u8; 3]>, Vec<u8>, Option<i32>)], none: &[u8], room: usize| {
+        let mut y = start;
+        if lines.is_empty() {
+            if room > 0 {
+                text_at(x, y, y + line, f2, muted, none, 0);
             }
+            return;
         }
+        let shown = if lines.len() > room { room.saturating_sub(1) } else { lines.len() };
+        let mark = line * 8 / 10;
+        for (colour, text, points) in lines.iter().take(shown) {
+            match colour {
+                None => comp::trophy(x, y + (line - mark) / 2, mark, GOLD),
+                Some(c) => pill(x + mark / 4, y + line / 3, x + mark * 3 / 4, y + line * 2 / 3, *c),
+            }
+            let pts = points.map(|p| format!("{p:+}")).unwrap_or_default();
+            let room_x = w - mark - 10 - if pts.is_empty() { 0 } else { text_width(fs, pts.as_bytes()) + 12 };
+            text_at(x + mark + 10, y, y + line, fs, white, &clip_text(fs, text, room_x.max(40)), 0);
+            if !pts.is_empty() {
+                text_at(x + w, y, y + line, fs, GOLD, pts.as_bytes(), 2);
+            }
+            y += row;
+        }
+        if shown < lines.len() {
+            text_at(x, y, y + line, f2, muted, format!("+{} more", lines.len() - shown).as_bytes(), 0);
+        }
+    };
+    text_at(x1 + m, htop, htop + line, f2, GOLD, b"HONOURS", 0);
+    let won: Vec<(Option<[u8; 3]>, Vec<u8>, Option<i32>)> = card.trophies.iter().map(|t| (None, t.clone(), None)).collect();
+    column(x1 + m, colw - 10, htop + line + 8, &won, b"No trophies this season", rows);
+    if let Some(c) = card.chal.as_ref() {
+        text_at(sx, htop, htop + line, f2, GOLD, b"CM CHALLENGE", 0);
+        let head = format!("+{} this season \u{b7} {} total \u{b7} {}", c.season, c.total, latin1(&c.rank));
+        text_at(sx, htop + line + 4, htop + 2 * line + 4, f1, muted, &to_latin1(&head), 0);
+        let kinds = [[0x2e, 0x8a, 0x58], [0x2c, 0x5a, 0x96], [0xa8, 0x82, 0x2c]];
+        let got: Vec<(Option<[u8; 3]>, Vec<u8>, Option<i32>)> = c.lists.iter().zip(kinds).flat_map(|(list, k)| list.iter().map(move |(n, p)| (Some(k), n.clone(), Some(*p)))).collect();
+        column(sx, colw - 10, htop + 2 * line + 12, &got, b"Nothing gained this season", rows.saturating_sub(1));
     }
     // the last six results at the bottom
     text_at(x1 + m, by - line - 4, by - 4, f2, GOLD, b"LAST SIX", 0);

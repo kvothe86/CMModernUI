@@ -558,8 +558,8 @@ unsafe fn honours() {
     }
 }
 
-/// A small cup.
-unsafe fn trophy(x: i32, y: i32, s: i32, c: [u8; 3]) {
+/// A small cup (also the season card's Honours).
+pub(crate) unsafe fn trophy(x: i32, y: i32, s: i32, c: [u8; 3]) {
     let (cx, stem) = (x + s / 2, (s / 10).max(1));
     fill(x + s / 5, y, x + s * 4 / 5, y + s * 2 / 5, c); // the bowl
     dot(cx, y + s * 2 / 5, s * 3 / 10, c);
@@ -719,7 +719,10 @@ pub unsafe fn text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, co
     // (never a club's Honours: a club with many titles gets a "Winners" cell over 300 wide there,
     // and it was taken for this header, a second cup and the text moved over the count, Ajax)
     let more = more || ((t == b"Winners" || t == b"Runners-up") && w > 300 && VIEW != b"Honours");
-    if (HEADERS.contains(&t) && w < 160) || more {
+    // ("Lst" is also a squad list's status, transfer listed: a head only in the row of the
+    // table's "Pld", user 2026-11-09 "only Lst is still blue")
+    let head = HEADERS.contains(&t) && w < 160 && (t != b"Lst" || HEADS.iter().any(|h| h.0 == b"Pld" && h.3 == y1));
+    if head || more {
         let had = HEADS.len();
         HEADS.retain(|c| c.0 != t);
         START[1] = START[1].saturating_sub(had - HEADS.len());

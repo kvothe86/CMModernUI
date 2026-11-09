@@ -26,7 +26,7 @@
 | 16 | `assistant_pick` | `ASSISTANT_PICK` | Assistant button |
 | 17 | `team_report` | `TEAM_REPORT` | Team report item in that button's menu (squad screen; needs `assistant_pick`); a % pill under each slot, the slot's intrinsic score as the assistant sees it |
 | 18 | `honours` | `HONOURS` | cups and counts on a club's Honours list (needs `stats_table`) |
-| 19 | `export_button` | `EXPORT_BUTTON` | Print called Export, clear of the crest, always to a file |
+| 19 | `export_button` | `EXPORT_BUTTON` | Print called Export, clear of the crest, always to a file; the file also as an HTML dashboard (`export.rs`), opened in the browser in single player |
 | 20 | `injury_history` | `INJURY_HISTORY` | last injuries and bans on Injuries & Bans |
 | 21 | `transfer_history` | `TRANSFER_HISTORY` | moves on the Transfer tab |
 | 22 | `compare_report` | `COMPARE_REPORT` | staff lines on Compare Players (needs `compare_screen`) |

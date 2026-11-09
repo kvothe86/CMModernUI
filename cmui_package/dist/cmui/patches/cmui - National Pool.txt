@@ -1,0 +1,2 @@
+Needs Assistant Pick. A National pool item in a national team's Assistant menu: every player of the country (the first nationality), rated by the assistant, best 100 a position group for a big country; + puts one on the Short List.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: national_pool=0 switches it off again.

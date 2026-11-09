@@ -1,0 +1,2 @@
+Needs Assistant Pick. Three line-up slots and Fill subs on the squad screen: save your eleven and bench, load them back with the assistant standing in for whoever cannot play, and let him fill only the empty bench places.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: saved_lineups=0 switches it off again.

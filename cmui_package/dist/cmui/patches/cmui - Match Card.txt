@@ -1,0 +1,2 @@
+Before a match of the human manager: a card with both clubs, their last five results, their league places and the last meetings.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: match_card=0 switches it off again.

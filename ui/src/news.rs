@@ -1021,6 +1021,21 @@ unsafe fn word_links(words: &mut [Word], links: &mut Vec<Link>) {
     }
 }
 
+/// The place a qualifier finished: the game's own last-season position (club +0x5f, the table is
+/// reset by then: everyone read "1st", user 2026-11-09) while the new season has no match played,
+/// else the live table. ponytail: a story read after the next season's first match shows that
+/// table, as before; unverified against the game that +0x5f is already set when the story posts.
+unsafe fn finishing_place(club: usize) -> Option<i32> {
+    let fresh = challenge::league_row(club).is_some_and(|(row, _)| row[0] == 0);
+    if fresh && mapped(club, 0x60) {
+        let last = rd::<u8>(club + 0x5f) as i8 as i32;
+        if last > 0 {
+            return Some(last);
+        }
+    }
+    challenge::league_place(club).map(|p| p.0)
+}
+
 /// "2029/30 European qualifiers decided" (and other continents' "... qualifiers decided").
 pub fn qualifiers(head: &[u8]) -> bool {
     head.ends_with(b"qualifiers decided")
@@ -1072,7 +1087,7 @@ unsafe fn qualifier_blocks(words: &[Word], links: &[Link], lines: &[((i32, i32, 
         let (mut tx, mut ty) = (left + lw, y);
         for name in clubs.split(|&c| c == b',').map(|n| n.trim_ascii()).filter(|n| !n.is_empty()) {
             let l = link_of(name);
-            let place = l.filter(|l| l.club()).and_then(|l| challenge::league_place(l.object)).map(|p| p.0).filter(|&p| p > 0);
+            let place = l.filter(|l| l.club()).and_then(|l| finishing_place(l.object)).filter(|&p| p > 0);
             let place_text = place.map(card::ordinal).unwrap_or_default();
             let w = 8 + size + 8 + text_width(small, name) + if place_text.is_empty() { 0 } else { 10 + text_width(small, place_text.as_bytes()) } + 12;
             if tx + w > right && tx > left + lw {

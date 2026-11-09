@@ -1,0 +1,2 @@
+Needs Stats Table. An icon for the match's weather (sun, cloud, rain, snow) by the weather the game names on fixtures, results and the match screen.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: weather_icons=0 switches it off again.

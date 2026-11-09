@@ -275,6 +275,33 @@ unsafe fn won_details(items: &[String], club: usize, nation: usize, year: i32) -
     }).collect()
 }
 
+/// The competitions `club` won in the season starting `year`, by the game's winners (comp::HISTORY
+/// as `won_details`): a league or cup by the year it ends, a supercup (played at the start) by the
+/// year it starts. The season card's Honours (user 2026-11-09), challenge switch or not.
+pub(crate) unsafe fn trophies_won(club: usize, year: i32) -> Vec<Vec<u8>> {
+    use_game();
+    let (base, count) = (rd::<usize>(comp::HISTORY), rd::<i32>(comp::HISTORY_COUNT));
+    if club == 0 || count <= 0 || !readable(base, count as usize * 26) {
+        return Vec::new();
+    }
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    for r in (0..count as usize).map(|k| base + k * 26) {
+        let (comp, y, winner) = (rd::<usize>(r + 4), rd::<i16>(r + 8) as i32, rd::<usize>(r + 0xa));
+        if comp == 0 || winner != club || !readable(comp, COMP_SIZE) {
+            continue;
+        }
+        let name = game_text(comp + 4, 51);
+        let nation = rd::<usize>(comp + COMP_NATION);
+        let domestic = nation != 0 && nation != usize::MAX - 1;
+        // (families 2 and 7: the European and the national supercups)
+        let supercup = matches!(family(&latin1(&name).to_lowercase(), domestic, false), Some(2 | 7));
+        if y == if supercup { year } else { year + 1 } && !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
 /// A nation's main cup: no cup of the nation has a higher reputation (as `facts_of` decides `top`).
 unsafe fn first_division_cup(comp: usize) -> bool {
     let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
@@ -1059,7 +1086,11 @@ pub(crate) unsafe fn summary(staff: usize, year: i32) -> Option<Summary> {
     let mine: Vec<&Season> = rows.iter().filter(|s| same_manager(&s.name, &name)).collect();
     let points_of = |i: &String| l.points.iter().find(|p| p.0 == *i).map_or(0, |p| p.1);
     let items: Vec<(String, i32)> = mine.iter().filter(|s| s.year == year).flat_map(|s| s.items.iter()).map(|i| (i.clone(), points_of(i))).collect();
-    let rads: Vec<(String, i32)> = l.rads.iter().filter(|r| r.done && r.year == year && same_manager(&r.name, &name)).map(|r| (r.text.clone(), r.points)).collect();
+    // (the card is shown before 1 July, when the season's RADs are settled: one the game's last
+    // reading already passes counts, user 2026-11-09 "7 points, RAD never added")
+    let counts = |r: &Rad| r.done || (!r.closed && !r.manual && r.value.zip(track::rule(&r.text)).is_some_and(|(v, (_, way, _))| track::passed(way, v, r.state)));
+    let rads: Vec<(String, i32)> = l.rads.iter().filter(|r| counts(r) && r.year == year && same_manager(&r.name, &name)).map(|r| (r.text.clone(), r.points)).collect();
+    let pending: i32 = l.rads.iter().filter(|r| !r.done && counts(r) && same_manager(&r.name, &name)).map(|r| r.points).sum();
     let mut goals = Vec::new();
     let mut goal_total = 0;
     if on(CAREER_GOALS) {
@@ -1078,7 +1109,7 @@ pub(crate) unsafe fn summary(staff: usize, year: i32) -> Option<Summary> {
         }
     }
     let season = items.iter().chain(&rads).chain(&goals).map(|i| i.1).sum();
-    let total = mine.iter().map(|s| l.item_points(&s.items)).sum::<i32>() + l.rad_points(&name, None) + goal_total;
+    let total = mine.iter().map(|s| l.item_points(&s.items)).sum::<i32>() + l.rad_points(&name, None) + pending + goal_total;
     Some(Summary { items, rads, goals, season, total, rank: l.rank(total).0 })
 }
 

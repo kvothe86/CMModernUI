@@ -43,6 +43,7 @@ mod card;
 mod season;
 mod natpool;
 mod lineups;
+mod export;
 
 /// Whether `len` bytes at `addr` are committed, readable memory of this process.
 fn mapped(addr: usize, len: usize) -> bool {
@@ -1759,6 +1760,18 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             }
             if on(MODERN_BUTTONS) && (t == b"----" || t == b"---") {
                 colour = rgb(GREY) as u32;
+            }
+            // a player's status (Inj, Lst, Unh...): the game's box (its own panel, the same rect,
+            // just before) painted over with the row's background and a flat badge of the
+            // status's own colour instead (user 2026-11-09: no grey / steel blue boxes)
+            if on(THEME_ON) && on(MODERN_BUTTONS) && head.is_none() && LAST_FRAME == (x1, y1, x2, y2) && x2 - x1 < sx(120) {
+                if let Some((bg, ink)) = status_badge(t.trim_ascii()) {
+                    let row = pixel_at(x2 + 2, y1 + 1).unwrap_or(AREA);
+                    fill(x1, y1, x2 + 1, y2 + 1, row);
+                    let (cx, half) = ((x1 + x2) / 2, ((text_width(font, t.trim_ascii()) + 14) / 2).min((x2 - x1) / 2 - 1));
+                    pill(cx - half, y1 + 2, cx + half, y2 - 2, bg);
+                    colour = rgb(ink) as u32;
+                }
             }
             // mike_appguy keeps form, morale and condition out of the grid, in a panel of their own:
             // their rows are not drawn, the values are kept for the panel
@@ -6908,6 +6921,49 @@ fn event_text_colours() {
     assert_eq!(event_colour(b"Smith"), [0x4c, 0xc0, 0x7a]);
 }
 
+/// The squad lists' status codes, all 21 of the exe's table at 0x98e8c0 (meanings from its
+/// translator comments and the game): a flat badge colour of its own and its text colour.
+/// Availability reds / ambers / greys, transfer business violets / greens / teals, the rest
+/// their own (white text at 4.5:1 or more, dark text on the light ones).
+fn status_badge(code: &[u8]) -> Option<([u8; 3], [u8; 3])> {
+    const W: [u8; 3] = [0xff, 0xff, 0xff];
+    const D: [u8; 3] = [0x11, 0x18, 0x27];
+    Some(match code {
+        b"Inj" => ([0xdc, 0x26, 0x26], W), // injured
+        b"Sus" => ([0x7f, 0x1d, 0x1d], W), // suspended
+        b"Yel" => ([0xfa, 0xcc, 0x15], D), // a yellow card from a ban
+        b"Tir" => ([0xf5, 0x9e, 0x0b], D), // tired
+        b"Abs" => ([0x25, 0x63, 0xeb], W), // away (international duty)
+        b"Ine" => ([0x47, 0x55, 0x69], W), // ineligible
+        b"Cup" => ([0x94, 0xa3, 0xb8], D), // ineligible for the cup match
+        b"Wpm" => ([0x0e, 0x74, 0x90], W), // work permit
+        b"Fgn" => ([0xa1, 0x62, 0x07], W), // foreigner (the foreign player rule)
+        b"Unh" => ([0xbe, 0x12, 0x3c], W), // unhappy
+        b"Ret" => ([0x57, 0x53, 0x4e], W), // retiring
+        b"Lst" => ([0x7c, 0x3a, 0xed], W), // transfer listed by the club
+        b"Req" => ([0xc2, 0x41, 0x0c], W), // transfer request
+        b"Bid" => ([0x15, 0x80, 0x3d], W), // a bid in
+        b"Wnt" => ([0x10, 0xb9, 0x81], D), // wanted by another club
+        b"Trn" => ([0x0f, 0x76, 0x6e], W), // a transfer agreed
+        b"Fut" => ([0x43, 0x38, 0xca], W), // joins / leaves at a later date
+        b"Loa" => ([0xa2, 0x1c, 0xaf], W), // on loan
+        b"Bos" => ([0xdb, 0x27, 0x77], W), // Bosman: free at the end of his contract
+        b"Ctr" => ([0x03, 0x69, 0xa1], W), // contract talks
+        b"Sct" => ([0x4d, 0x7c, 0x0f], W), // scouted by the human manager
+        _ => return None,
+    })
+}
+
+#[test]
+fn status_badges() {
+    let all = ["Fut", "Unh", "Bos", "Ret", "Ctr", "Loa", "Lst", "Req", "Sct", "Wnt", "Trn", "Bid", "Yel", "Tir", "Fgn", "Abs", "Inj", "Sus", "Ine", "Cup", "Wpm"];
+    let colours: Vec<[u8; 3]> = all.iter().map(|c| status_badge(c.as_bytes()).expect(c).0).collect();
+    for (k, c) in colours.iter().enumerate() {
+        assert!(!colours[..k].contains(c), "{} shares a colour", all[k]);
+    }
+    assert!(status_badge(b"DC").is_none() && status_badge(b"SB1").is_none());
+}
+
 /// The Print dropdown of the club screens as Export (switch `export_button`).
 const EXPORT_LABEL: &[u8] = b"Export";
 /// (at, what is there, what goes there): the label's pointer in the club and competition screens,
@@ -6934,6 +6990,10 @@ unsafe fn export_button() {
         std::ptr::copy_nonoverlapping(new.as_ptr(), at as *mut u8, new.len());
         VirtualProtect(at as *mut u8, new.len(), was, &mut was);
     }
+    // the printout to a file, then as an HTML dashboard (`export.rs`): the club screen's call and
+    // the competition screen's (the printer calls 0x4675f5 / 0x46760a / 0x496863 left alone)
+    patch_call(0x4672f0, 8, 0x7d4460, export::club as usize);
+    patch_call(0x496650, 9, 0x7d7c80, export::comp as usize);
 }
 
 /// Sends `func` to `hook` when it starts with `moved` (position-independent instructions) or

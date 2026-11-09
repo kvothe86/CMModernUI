@@ -1,0 +1,2 @@
+On 1 July a card on the human manager's season: final place, record, goals, biggest win, cup run, top scorer, assists, best average, signings, CM Challenge points and the last six results.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: season_review=0 switches it off again.

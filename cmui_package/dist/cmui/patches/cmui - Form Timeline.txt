@@ -1,0 +1,2 @@
+A strip on a club's screen: its last ten results as W, D and L pills with the opponent's crest, and its league place week by week as a line.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: form_timeline=0 switches it off again.
