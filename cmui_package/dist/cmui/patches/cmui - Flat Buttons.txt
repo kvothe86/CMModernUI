@@ -1,0 +1,2 @@
+Needs Modern Buttons. The buttons flat with soft corners and small gaps, no bevel; the tabs one dark bar with the open tab in gold; the clickable cells of a list (positions, dates) without a box, their text light blue.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: flat_buttons=0 switches it off again.

@@ -1,0 +1,3 @@
+# cmui feature switch flat_buttons (needs the cmui Loader patch)
+EXPANDEXE
+006E5046: 00 01

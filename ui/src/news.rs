@@ -437,6 +437,22 @@ unsafe fn flat_tabs(tabs: &[((i32, i32, i32, i32), bool, Vec<u8>, u32)]) {
             continue;
         }
         let y2 = row[0].0 .3;
+        // switch `flat_buttons` (user 2026-11-09, style D): one dark bar with soft corners, the
+        // open tab a gold block with dark text (not with a disabled tab in the row: its label is
+        // the game's, cmui does not know it)
+        if on(FLAT_BUTTONS) && row.iter().all(|t| !t.2.is_empty()) {
+            let (bx1, bx2) = (row.iter().map(|t| t.0 .0).min().unwrap_or(0), row.iter().map(|t| t.0 .2).max().unwrap_or(0));
+            fill(bx1, y, bx2 + 2, y2 + 1, pixel_at((bx1 + bx2) / 2, y - 3).unwrap_or(AREA));
+            rounded(bx1, y + 2, bx2 + 1, y2 - 1, [0x23, 0x27, 0x2e], 10);
+            for t in &row {
+                let (a, b) = (t.0 .0, t.0 .2);
+                if t.1 {
+                    rounded(a + 4, y + 6, b - 3, y2 - 5, GOLD, 8);
+                }
+                text_at((a + b) / 2, y, y2, t.3, if t.1 { [0x1a, 0x1c, 0x20] } else { LIGHT }, &t.2, 1);
+            }
+            continue;
+        }
         for (k, t) in row.iter().enumerate() {
             let (a, b) = (t.0 .0, t.0 .2);
             // (a tab without a label of its own is a disabled one: left as the game greys it)

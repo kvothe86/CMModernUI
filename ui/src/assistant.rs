@@ -243,6 +243,7 @@ pub unsafe fn forget() {
     SQUAD_HERE = false;
     REPORT_OPEN = false;
     crate::lineups::forget();
+    crate::legend_forget();
 }
 
 fn slot_label(t: &[u8]) -> bool {
@@ -401,6 +402,10 @@ pub unsafe fn flip(full_frame: bool) {
     // the saved line-ups' strip (before the menu: an open menu lies over it)
     if on(SAVED_LINEUPS) && SQUAD_HERE {
         crate::lineups::draw(font);
+    }
+    // the status badges' legend at the band's left, where the note goes when there is one
+    if let (true, Some(t)) = (NOTE.is_empty(), TITLE_BAND) {
+        crate::status_legend(t, TITLE_FREE, font);
     }
     if MENU_OPEN {
         for k in 0..menu_len() {
@@ -1244,6 +1249,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             open_scout(club, font);
         }
         return Some(released);
+    }
+    // the status legend's "?": the screen drawn again as the mouse comes onto it and leaves
+    if !MENU_OPEN && crate::legend_hover(mx, my) {
+        return Some(true);
     }
     if on(SAVED_LINEUPS) && !MENU_OPEN {
         if let Some(redraw) = crate::lineups::input(mx, my, released) {

@@ -364,6 +364,13 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // (not the scrollbars' narrow parts: `news::scrollbars` draws those)
         if theme && on(MODERN_BUTTONS) && flags & !0x40 == 0x30 {
             if is_colour(colour & 0xffff, 0x39e8) {
+                // (switch `flat_buttons`: a list's clickable cell, a position, a date, has no box:
+                // the row's background, its text light blue in the text hook)
+                if on(FLAT_BUTTONS) && y2 - y1 < sy(40) {
+                    fill(x1, y1, x2 + 1, y2 + 1, pixel_at(x2 + 3, y1 + 1).unwrap_or(AREA));
+                    FLAT_CELL = Some((x1, y1, x2, y2));
+                    return;
+                }
                 colour = colour & !0xffff | rgb([0x2a, 0x3a, 0x4c]) as u32;
             }
             if is_colour(low, 0x31a7) {
@@ -377,7 +384,18 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
                     fill(x1, y2, x2 + 1, y2 + 1, [0x3a, 0x3f, 0x47]);
                     return;
                 }
-                colour = colour & !0xffff | rgb(if flags & 0x40 != 0 { [0x3a, 0x5c, 0x82] } else { [0x2b, 0x47, 0x66] }) as u32;
+                let face = if flags & 0x40 != 0 { [0x3a, 0x5c, 0x82] } else { [0x2b, 0x47, 0x66] };
+                if on(FLAT_BUTTONS) {
+                    // flat and rounded (user 2026-11-09, style B): what is behind the button
+                    // (just above its middle) under its corners, 2 px in at each side so buttons
+                    // that touch get a gap; no bevel (the game's own panel is not drawn, its
+                    // label still is)
+                    fill(x1, y1, x2 + 1, y2 + 1, pixel_at((x1 + x2) / 2, y1 - 2).unwrap_or(AREA));
+                    rounded(x1 + 2, y1 + 1, x2 - 1, y2, face, 6);
+                    note_title(x1, y1, x2, y2);
+                    return;
+                }
+                colour = colour & !0xffff | rgb(face) as u32;
             }
         }
         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1, x2, y2, flags, colour, extra);
@@ -1761,11 +1779,20 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             if on(MODERN_BUTTONS) && (t == b"----" || t == b"---") {
                 colour = rgb(GREY) as u32;
             }
+            // a list cell whose box `flat_buttons` left out (a position, a date): light blue text
+            #[allow(static_mut_refs)]
+            if FLAT_CELL == Some((x1, y1, x2, y2)) {
+                colour = rgb(CELL_TEXT) as u32;
+            }
             // a player's status (Inj, Lst, Unh...): the game's box (its own panel, the same rect,
             // just before) painted over with the row's background and a flat badge of the
             // status's own colour instead (user 2026-11-09: no grey / steel blue boxes)
             if on(THEME_ON) && on(MODERN_BUTTONS) && head.is_none() && LAST_FRAME == (x1, y1, x2, y2) && x2 - x1 < sx(120) {
                 if let Some((bg, ink)) = status_badge(t.trim_ascii()) {
+                    #[allow(static_mut_refs)]
+                    if let Some(s) = STATUSES.iter().find(|s| s.0.as_bytes() == t.trim_ascii()).filter(|s| !STATUS_SEEN.contains(&s.0)) {
+                        STATUS_SEEN.push(s.0); // (for the legend)
+                    }
                     let row = pixel_at(x2 + 2, y1 + 1).unwrap_or(AREA);
                     fill(x1, y1, x2 + 1, y2 + 1, row);
                     let (cx, half) = ((x1 + x2) / 2, ((text_width(font, t.trim_ascii()) + 14) / 2).min((x2 - x1) / 2 - 1));
@@ -2569,7 +2596,16 @@ unsafe fn draw_icon(code: u32, cx: i32, top: i32, size: i32, colour: [u8; 3]) {
 
 /// A box with rounded corners.
 unsafe fn pill(x1: i32, y1: i32, x2: i32, y2: i32, c: [u8; 3]) {
-    let (w, h, r, colour) = (x2 - x1, y2 - y1, 4.0f32, rgb565(c));
+    rounded(x1, y1, x2, y2, c, 4);
+}
+
+/// The list cell (`flat_buttons`) whose box was left out: its text in light blue.
+static mut FLAT_CELL: Option<(i32, i32, i32, i32)> = None;
+const CELL_TEXT: [u8; 3] = [0x8f, 0xb3, 0xd9];
+
+/// A box with corners of radius `r` (the flat buttons' 6, the tab bar's 8 / 10).
+unsafe fn rounded(x1: i32, y1: i32, x2: i32, y2: i32, c: [u8; 3], r: i32) {
+    let (w, h, r, colour) = (x2 - x1, y2 - y1, r as f32, rgb565(c));
     blend(x1, y1, w, h, |col, row| {
         let dx = (r - col as f32 - 0.5).max(col as f32 + 0.5 - (w as f32 - r)).max(0.0);
         let dy = (r - row as f32 - 0.5).max(row as f32 + 0.5 - (h as f32 - r)).max(0.0);
@@ -2671,14 +2707,14 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 38] = [
+const FEATURES: [&str; 39] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
     "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
-    "saved_lineups",
+    "saved_lineups", "flat_buttons",
 ];
 /// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
 /// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
@@ -2704,6 +2740,7 @@ const MATCH_CARD: usize = 34; // the pre-match card: both sides' form, head-to-h
 const SEASON_REVIEW: usize = 35; // the season's review card on 1 July
 const NATIONAL_POOL: usize = 36; // a national team's every player of the country, + to the Short List
 const SAVED_LINEUPS: usize = 37; // line-ups 1 / 2 / 3 saved and loaded, Fill subs (`lineups.rs`)
+const FLAT_BUTTONS: usize = 38; // the buttons flat and rounded, the tabs a gold bar, list cells without a box (user 2026-11-09, styles B + D; needs modern_buttons)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -6925,38 +6962,104 @@ fn event_text_colours() {
 /// translator comments and the game): a flat badge colour of its own and its text colour.
 /// Availability reds / ambers / greys, transfer business violets / greens / teals, the rest
 /// their own (white text at 4.5:1 or more, dark text on the light ones).
+const STATUSES: [(&str, [u8; 3], bool, &str); 21] = [
+    // (code, badge colour, dark text on it, what it means; the legend's order)
+    ("Inj", [0xdc, 0x26, 0x26], false, "injured"),
+    ("Sus", [0x7f, 0x1d, 0x1d], false, "suspended"),
+    ("Yel", [0xfa, 0xcc, 0x15], true, "one card from a ban"),
+    ("Tir", [0xf5, 0x9e, 0x0b], true, "tired"),
+    ("Abs", [0x25, 0x63, 0xeb], false, "away on international duty"),
+    ("Ine", [0x47, 0x55, 0x69], false, "ineligible"),
+    ("Cup", [0x94, 0xa3, 0xb8], true, "ineligible for the cup match"),
+    ("Wpm", [0x0e, 0x74, 0x90], false, "work permit"),
+    ("Fgn", [0xa1, 0x62, 0x07], false, "foreigner (foreign player rule)"),
+    ("Unh", [0xbe, 0x12, 0x3c], false, "unhappy"),
+    ("Ret", [0x57, 0x53, 0x4e], false, "retiring"),
+    ("Lst", [0x7c, 0x3a, 0xed], false, "transfer listed"),
+    ("Req", [0xc2, 0x41, 0x0c], false, "asked for a transfer"),
+    ("Bid", [0x15, 0x80, 0x3d], false, "a bid received"),
+    ("Wnt", [0x10, 0xb9, 0x81], true, "wanted by another club"),
+    ("Trn", [0x0f, 0x76, 0x6e], false, "transfer agreed"),
+    ("Fut", [0x43, 0x38, 0xca], false, "moves at a later date"),
+    ("Loa", [0xa2, 0x1c, 0xaf], false, "on loan"),
+    ("Bos", [0xdb, 0x27, 0x77], false, "free at the end of his contract"),
+    ("Ctr", [0x03, 0x69, 0xa1], false, "contract talks"),
+    ("Sct", [0x4d, 0x7c, 0x0f], false, "scouted by you"),
+];
+
 fn status_badge(code: &[u8]) -> Option<([u8; 3], [u8; 3])> {
-    const W: [u8; 3] = [0xff, 0xff, 0xff];
-    const D: [u8; 3] = [0x11, 0x18, 0x27];
-    Some(match code {
-        b"Inj" => ([0xdc, 0x26, 0x26], W), // injured
-        b"Sus" => ([0x7f, 0x1d, 0x1d], W), // suspended
-        b"Yel" => ([0xfa, 0xcc, 0x15], D), // a yellow card from a ban
-        b"Tir" => ([0xf5, 0x9e, 0x0b], D), // tired
-        b"Abs" => ([0x25, 0x63, 0xeb], W), // away (international duty)
-        b"Ine" => ([0x47, 0x55, 0x69], W), // ineligible
-        b"Cup" => ([0x94, 0xa3, 0xb8], D), // ineligible for the cup match
-        b"Wpm" => ([0x0e, 0x74, 0x90], W), // work permit
-        b"Fgn" => ([0xa1, 0x62, 0x07], W), // foreigner (the foreign player rule)
-        b"Unh" => ([0xbe, 0x12, 0x3c], W), // unhappy
-        b"Ret" => ([0x57, 0x53, 0x4e], W), // retiring
-        b"Lst" => ([0x7c, 0x3a, 0xed], W), // transfer listed by the club
-        b"Req" => ([0xc2, 0x41, 0x0c], W), // transfer request
-        b"Bid" => ([0x15, 0x80, 0x3d], W), // a bid in
-        b"Wnt" => ([0x10, 0xb9, 0x81], D), // wanted by another club
-        b"Trn" => ([0x0f, 0x76, 0x6e], W), // a transfer agreed
-        b"Fut" => ([0x43, 0x38, 0xca], W), // joins / leaves at a later date
-        b"Loa" => ([0xa2, 0x1c, 0xaf], W), // on loan
-        b"Bos" => ([0xdb, 0x27, 0x77], W), // Bosman: free at the end of his contract
-        b"Ctr" => ([0x03, 0x69, 0xa1], W), // contract talks
-        b"Sct" => ([0x4d, 0x7c, 0x0f], W), // scouted by the human manager
-        _ => return None,
-    })
+    STATUSES.iter().find(|s| s.0.as_bytes() == code).map(|s| (s.1, if s.2 { [0x11, 0x18, 0x27] } else { [0xff, 0xff, 0xff] }))
+}
+
+/// The codes the squad list drew a badge for since its screen was built (the legend's; a row
+/// redrawn alone adds nothing new, so the legend does not shrink on a hover).
+static mut STATUS_SEEN: Vec<&'static str> = Vec::new();
+/// The legend's "?" as drawn, and whether the mouse is on it (then all 21 are shown).
+static mut LEGEND_Q: Option<(i32, i32, i32, i32)> = None;
+static mut LEGEND_OPEN: bool = false;
+
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn legend_forget() {
+    STATUS_SEEN.clear();
+    LEGEND_Q = None;
+    LEGEND_OPEN = false;
+}
+
+/// The mouse on the legend's "?" or off it: true when that changed (the screen is drawn again,
+/// the panel comes or goes with the list under it).
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn legend_hover(mx: i32, my: i32) -> bool {
+    let on_q = LEGEND_Q.is_some_and(|r| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my));
+    std::mem::replace(&mut LEGEND_OPEN, on_q) != on_q
+}
+
+/// The squad list's status legend (user 2026-11-09): a "?" at the right of the title band's left
+/// part (where the assistant's note goes when it has one); on the "?" a panel with all 21 under
+/// the band. (The badges of the list's own statuses beside it were dropped the same day: the
+/// user liked the button alone best.)
+#[allow(static_mut_refs)]
+pub(crate) unsafe fn status_legend(band: (i32, i32, i32, i32), free: i32, font: u32) {
+    LEGEND_Q = None;
+    if STATUS_SEEN.is_empty() || !on(MODERN_BUTTONS) {
+        return;
+    }
+    let small = smaller(font, 0);
+    let mid = (band.1 + band.3) / 2;
+    let bh = ((band.3 - band.1) * 45 / 100).clamp(16, 26);
+    let right = band.0 + free.max(0);
+    let qs = bh;
+    let badge_w = |s: &(&str, [u8; 3], bool, &str)| text_width(small, s.0.as_bytes()) + 14;
+    // the "?": all 21 while the mouse is on it
+    let q = (right - qs, mid - qs / 2, right, mid + qs / 2);
+    LEGEND_Q = Some(q);
+    pill(q.0, q.1, q.2, q.3, if LEGEND_OPEN { GOLD } else { [0x3a, 0x3f, 0x47] });
+    text_at((q.0 + q.2) / 2, q.1, q.3, small, if LEGEND_OPEN { [0x11, 0x18, 0x27] } else { LIGHT }, b"?", 1);
+    if LEGEND_OPEN {
+        let row = bh + 8;
+        let col = STATUSES.iter().map(|s| badge_w(s) + 10 + text_width(small, s.3.as_bytes())).max().unwrap_or(200) + 28;
+        // (three columns, fewer where the band is narrower: 800x600)
+        let cols = (1..=3).rev().find(|&c| c * col + 20 <= band.2 - band.0 - 16).unwrap_or(1);
+        let per = (STATUSES.len() as i32 + cols - 1) / cols;
+        let (px1, py1) = (band.0 + 8, band.3 + 4);
+        let (px2, py2) = (px1 + cols * col + 20, py1 + per * row + 20);
+        fill(px1, py1, px2, py2, [0x3a, 0x3f, 0x47]);
+        fill(px1 + 2, py1 + 2, px2 - 2, py2 - 2, [0x1d, 0x21, 0x27]);
+        for (k, s) in STATUSES.iter().enumerate() {
+            let (cx, cy) = (px1 + 12 + (k as i32 / per) * col, py1 + 10 + (k as i32 % per) * row);
+            let (bg, ink) = status_badge(s.0.as_bytes()).unwrap_or((GREY, WHITE));
+            let bw = badge_w(s);
+            pill(cx, cy + 4, cx + bw, cy + 4 + bh, bg);
+            text_at(cx + bw / 2, cy + 4, cy + 4 + bh, small, ink, s.0.as_bytes(), 1);
+            text_at(cx + bw + 10, cy, cy + row, small, LIGHT, s.3.as_bytes(), 0);
+        }
+    }
 }
 
 #[test]
 fn status_badges() {
+    // (the exe's table, 0x98e8c0: every code once in STATUSES)
     let all = ["Fut", "Unh", "Bos", "Ret", "Ctr", "Loa", "Lst", "Req", "Sct", "Wnt", "Trn", "Bid", "Yel", "Tir", "Fgn", "Abs", "Inj", "Sus", "Ine", "Cup", "Wpm"];
+    assert!(all.iter().all(|c| STATUSES.iter().filter(|s| s.0 == *c).count() == 1));
     let colours: Vec<[u8; 3]> = all.iter().map(|c| status_badge(c.as_bytes()).expect(c).0).collect();
     for (k, c) in colours.iter().enumerate() {
         assert!(!colours[..k].contains(c), "{} shares a colour", all[k]);

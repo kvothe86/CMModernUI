@@ -236,6 +236,7 @@ Rules of thumb:
 | 35 | `season_review` | `SEASON_REVIEW` | `season.rs` |
 | 36 | `national_pool` | `NATIONAL_POOL` | `natpool.rs` |
 | 37 | `saved_lineups` | `SAVED_LINEUPS` | `lineups.rs` |
+| 38 | `flat_buttons` | `FLAT_BUTTONS` | `lib.rs` `panel` (+ `rounded`, `FLAT_CELL`), `news.rs` `flat_tabs` |
 
 Settings that are not switches live in the same ini (`setting` / `set_setting`): `hide_ca_pa`,
 `profile_details`, `background_opacity`, `claude_api_key` and `claude_model` (never logged, never
