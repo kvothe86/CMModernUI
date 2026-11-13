@@ -490,7 +490,8 @@ pub(crate) fn line_rank_of(positions: &[u8]) -> usize {
 /// The report's Back button.
 fn back_rect() -> (i32, i32, i32, i32) {
     let (sw, sh) = screen();
-    let m = report_margin(sh);
+    // (1680: in from the corner by 20 px, user 2026-11-13 polish)
+    let m = if small_screen() { report_margin(sh) } else { 20 };
     (sw - m - sw / 8, sh - m - sh / 20, sw - m, sh - m)
 }
 
@@ -1089,7 +1090,12 @@ pub unsafe fn report() {
     fill(0, 0, sw - 1, bar, [0x22, 0x26, 0x2c]);
     fill(0, bar - 3, sw - 1, bar, GOLD);
     let b = back_rect();
-    pill(b.0, b.1, b.2, b.3, if REPORT_HOVER { SELECTED } else { [0x3a, 0x40, 0x4a] });
+    let face = if REPORT_HOVER { SELECTED } else { [0x3a, 0x40, 0x4a] };
+    if small_screen() {
+        pill(b.0, b.1, b.2, b.3, face);
+    } else {
+        rounded(b.0, b.1, b.2, b.3, face, 6); // (user 2026-11-13 polish)
+    }
     text_at((b.0 + b.2) / 2, b.1, b.3, f(3), if REPORT_HOVER { GOLD } else { WHITE }, b"Back", 1);
     let mut lines = REPORT.split(|&c| c == b'\n');
     let head: Vec<&[u8]> = lines.next().unwrap_or(b"").split(|&c| c == b'\t').collect();
@@ -1191,6 +1197,12 @@ pub unsafe fn report() {
             let (ny1, ny2) = (cy + s + 2, cy + s + 2 + name_h);
             pill(nx - half, ny1, nx + half, ny2, [0x14, 0x18, 0x1c]);
             text_at(nx, ny1, ny2, name_font, WHITE, &name, 1);
+            if !small_screen() {
+                // (a dark backing like the name's: the centre circle and halfway line ran through the
+                // position text, user 2026-11-13 polish)
+                let half = text_width(label_font, row[5]) / 2 + 6;
+                pill(nx - half, ny2, nx + half, ny2 + label_h, [0x14, 0x18, 0x1c]);
+            }
             text_at(nx, ny2, ny2 + label_h, label_font, GOLD, row[5], 1);
             // the CM intrinsic rating as the assistant sees him, in a small box under the slot:
             // exact for a perfect judge, with his margin for a poorer one (user, 2026-11-07)

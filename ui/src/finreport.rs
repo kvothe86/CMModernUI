@@ -449,7 +449,7 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
 
 fn back_rect() -> (i32, i32, i32, i32) {
     let (sw, sh) = screen();
-    let m = (sh / 88).max(6);
+    let m = if small_screen() { (sh / 88).max(6) } else { 20 }; // (user 2026-11-13 polish)
     (sw - m - sw / 8, sh - m - sh / 20, sw - m, sh - m)
 }
 
@@ -516,10 +516,20 @@ unsafe fn draw() {
         SAVED = Some((save_png(x0, top, x0 + pw + 1, bottom + 1, &name).map_or("Could not save the picture".to_string(), |p| format!("Saved: {p}")), std::time::Instant::now()));
     }
     let b = back_rect();
-    fill(b.0, b.1, b.2, b.3, if HOVER { [0x3a, 0x5a, 0x86] } else { [0x2c, 0x46, 0x6a] });
+    // (user 2026-11-13 polish: at 1680 rounded, in from the corner)
+    let (bc, sc) = (if HOVER { [0x3a, 0x5a, 0x86] } else { [0x2c, 0x46, 0x6a] }, if SAVE_HOVER { [0x3a, 0x5a, 0x86] } else { [0x24, 0x28, 0x30] });
+    if small_screen() {
+        fill(b.0, b.1, b.2, b.3, bc);
+    } else {
+        rounded(b.0, b.1, b.2, b.3, bc, 6);
+    }
     text_at((b.0 + b.2) / 2, b.1, b.3, f3, WHITE, b"Back", 1);
     let sv = save_rect();
-    fill(sv.0, sv.1, sv.2, sv.3, if SAVE_HOVER { [0x3a, 0x5a, 0x86] } else { [0x24, 0x28, 0x30] });
+    if small_screen() {
+        fill(sv.0, sv.1, sv.2, sv.3, sc);
+    } else {
+        rounded(sv.0, sv.1, sv.2, sv.3, sc, 6);
+    }
     text_at((sv.0 + sv.2) / 2, sv.1, sv.3, f3, WHITE, b"Save image", 1);
     if let Some((note, _)) = SAVED.as_ref().filter(|s| s.1.elapsed().as_secs() < 6) {
         text_at(sv.0 - 12, sv.1, sv.3, f2, GOLD, &to_latin1(note), 2);

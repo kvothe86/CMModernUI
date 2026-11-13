@@ -446,10 +446,15 @@ unsafe fn draw() {
     let (sw, sh) = screen();
     fill(0, 0, sw - 1, sh - 1, BACKGROUND);
     // (a small screen: more of its height, the CM Challenge line and Last six touched at 800x600)
-    let (cw, ch) = ((sw * 70 / 100).max(600), (sh * if small_screen() { 86 } else { 78 } / 100).max(420));
+    // (user 2026-11-13 polish: 86 % at 1680 too, the honours line had no room at 78 %)
+    let (cw, ch) = ((sw * 70 / 100).max(600), (sh * 86 / 100).max(420));
     let (x1, y1) = ((sw - cw) / 2, (sh - ch) / 2 - sh / 30);
     let (x2, y2) = (x1 + cw, y1 + ch);
-    fill(x1, y1, x2, y2, AREA);
+    if small_screen() {
+        fill(x1, y1, x2, y2, AREA);
+    } else {
+        rounded(x1, y1, x2, y2, AREA, 8); // (user 2026-11-13 polish: rounded card)
+    }
     let m = cw / 30;
     let (f1, f2, f3, f5) = (0xffff0001u32, 0xffff0002u32, 0xffff0003u32, 0xffff0005u32);
     let white = [0xf4, 0xf6, 0xf8];
@@ -482,7 +487,11 @@ unsafe fn draw() {
     ];
     for (k, (label, big, small)) in tiles.iter().enumerate() {
         let tx = x1 + m + k as i32 * (tw + 12);
-        fill(tx, top, tx + tw, top + th, [0x24, 0x28, 0x30]);
+        if small_screen() {
+            fill(tx, top, tx + tw, top + th, [0x24, 0x28, 0x30]);
+        } else {
+            rounded(tx, top, tx + tw, top + th, [0x24, 0x28, 0x30], 6);
+        }
         text_at(tx + 14, top + 6, top + 6 + th / 5, f1, muted, label.as_bytes(), 0);
         text_at(tx + 14, top + th / 5 + 4, top + th * 7 / 10, f5, white, big, 0);
         text_at(tx + 14, top + th * 7 / 10, top + th - 4, f1, muted, small, 0);
@@ -490,7 +499,8 @@ unsafe fn draw() {
     // two columns: STARS, SIGNINGS
     let ctop = top + th + 20;
     let colw = (cw - 2 * m - 20) / 2;
-    let line = (ch / 18).max(18);
+    // (1680: a slimmer line so HONOURS gets a row or two above LAST SIX, user 2026-11-13 polish)
+    let line = (ch / if small_screen() { 18 } else { 21 }).max(18);
     text_at(x1 + m, ctop, ctop + line, f2, GOLD, b"STARS", 0);
     let stars = [
         ("Top scorer", latin1(&s.scorer.0).into_owned(), format!("{} goals", s.scorer.1)),
@@ -576,7 +586,8 @@ unsafe fn draw() {
     for (k, r) in card.last.iter().enumerate() {
         let px = x1 + m + k as i32 * (line * 3 + 8);
         pill(px, by, px + line * 3, by + line, form::colour(r.2));
-        text_at(px + line * 3 / 2, by, by + line, f1, white, format!("{}-{}", r.0, r.1).as_bytes(), 1);
+        // (1680: f3, f1 was tiny in these pills; user 2026-11-13 polish)
+        text_at(px + line * 3 / 2, by, by + line, if small_screen() { f1 } else { f3 }, white, format!("{}-{}", r.0, r.1).as_bytes(), 1);
     }
     // the card as a picture to share (friends' league): taken now, before the buttons and the
     // note, the card's own area only
@@ -587,10 +598,19 @@ unsafe fn draw() {
     }
     // Back, and Save image left of it
     let b = back_rect();
-    fill(b.0, b.1, b.2, b.3, if HOVER { [0x3a, 0x5a, 0x86] } else { [0x2c, 0x46, 0x6a] });
+    let (bc, sc) = (if HOVER { [0x3a, 0x5a, 0x86] } else { [0x2c, 0x46, 0x6a] }, if SAVE_HOVER { [0x3a, 0x5a, 0x86] } else { [0x24, 0x28, 0x30] });
+    if small_screen() {
+        fill(b.0, b.1, b.2, b.3, bc);
+    } else {
+        rounded(b.0, b.1, b.2, b.3, bc, 6); // (user 2026-11-13 polish)
+    }
     text_at((b.0 + b.2) / 2, b.1, b.3, f3, white, b"Back", 1);
     let sv = save_rect();
-    fill(sv.0, sv.1, sv.2, sv.3, if SAVE_HOVER { [0x3a, 0x5a, 0x86] } else { [0x24, 0x28, 0x30] });
+    if small_screen() {
+        fill(sv.0, sv.1, sv.2, sv.3, sc);
+    } else {
+        rounded(sv.0, sv.1, sv.2, sv.3, sc, 6);
+    }
     text_at((sv.0 + sv.2) / 2, sv.1, sv.3, f3, white, b"Save image", 1);
     if let Some((note, at)) = SAVED.as_ref().filter(|s| s.1.elapsed().as_secs() < 6) {
         let _ = at;
@@ -611,7 +631,7 @@ static mut SAVED: Option<(String, std::time::Instant)> = None;
 
 fn back_rect() -> (i32, i32, i32, i32) {
     let (sw, sh) = screen();
-    let m = (sh / 88).max(6);
+    let m = if small_screen() { (sh / 88).max(6) } else { 20 }; // (user 2026-11-13 polish: in from the corner)
     (sw - m - sw / 8, sh - m - sh / 20, sw - m, sh - m)
 }
 

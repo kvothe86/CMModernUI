@@ -223,6 +223,8 @@ const PANEL_FILL: u32 = 0x10;
 const PANEL_CIRCLE: u32 = 0x10000;
 
 static mut PANEL_ORIG: usize = 0;
+/// The title band's small dropdown drawn as a flat widget: its text (black in the game) goes light.
+static mut HEADER_WIDGET: (i32, i32, i32, i32) = (0, 0, 0, 0);
 
 /// gui_draw_panel with the theme's rules: no gradients; the vertical one (the left menu bar)
 /// becomes the flat sidebar colour.
@@ -363,6 +365,19 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // pressed, lighter), the clickable cells of a list (dates, positions, numbers) a quieter
         // blue, column heads go flat, a stats cell without a value goes altogether
         // (not the scrollbars' narrow parts: `news::scrollbars` draws those)
+        if theme && on(MODERN_BUTTONS) && on(FLAT_BUTTONS) && flags & !0x40 == 0x30 && !small_screen() && y1 < sy(70) && x1 > sw / 2
+            && y2 - y1 < sy(60) && x2 - x1 < sw / 4 && (low == 0 || is_colour(low, 0xffe0))
+        {
+            // the title band's small dropdown (Export, Funds, the profile's Action): black with half
+            // a bevel, or pure yellow, in the game; the flat rounded widget of the other buttons
+            // (user 2026-11-13 polish), light text (HEADER_WIDGET, the text hook)
+            let face = if flags & 0x40 != 0 { [0x3a, 0x5c, 0x82] } else { [0x2b, 0x47, 0x66] };
+            fill(x1, y1, x2 + 1, y2 + 1, pixel_at(x1 - 3, (y1 + y2) / 2).unwrap_or(AREA));
+            rounded(x1, y1, x2, y2, face, 6);
+            HEADER_WIDGET = (x1, y1, x2, y2);
+            note_title(x1, y1, x2, y2);
+            return;
+        }
         if theme && on(MODERN_BUTTONS) && flags & !0x40 == 0x30 {
             if is_colour(colour & 0xffff, 0x39e8) {
                 // (switch `flat_buttons`: a list's clickable cell, a position, a date, has no box:
@@ -458,6 +473,21 @@ unsafe fn menu_row(x1: i32, y1: i32, x2: i32, y2: i32, colour: &mut u32) {
         fill(f.0, f.1, f.2 + 1, f.3 + 1, [0x26, 0x29, 0x2f]);
     }
     fill(x1, y1, x2 + 1, y2 + 1, if MENU_INDEX % 2 == 0 { [0x2a, 0x2e, 0x35] } else { [0x30, 0x34, 0x3b] });
+    // a 1 px edge so the menu does not melt into the list under it (user 2026-11-13 polish):
+    // the frame's outline when it comes, each row's sides
+    if !small_screen() {
+        let edge = [0x4e, 0x56, 0x63];
+        if fresh && f.0 <= x1 && f.2 >= x2 && f.1 <= y1 && f.3 >= y2 {
+            fill(f.0, f.1, f.2 + 1, f.1 + 1, edge);
+            fill(f.0, f.3, f.2 + 1, f.3 + 1, edge);
+        }
+        // (the frame's sides when it is this menu's: a few px wider than its rows; another
+        // menu's frame is not)
+        let own = f.0 <= x1 && f.2 >= x2 && (f.2 - f.0) - (x2 - x1) < 12;
+        let (l, r) = if own { (f.0, f.2) } else { (x1, x2) };
+        fill(l, y1, l + 1, y2 + 1, edge);
+        fill(r, y1, r + 1, y2 + 1, edge);
+    }
     MENU_ROW = (x1, y1, x2, y2);
     if *colour & 0xffff == 0 {
         *colour = rgb(LIGHT) as u32;
@@ -984,6 +1014,7 @@ extern "C" fn background(x: i32, y: i32, picture: usize) {
             log(&format!("timing: {calls} texts {:.1} ms before a full frame, panels {panels:.1}, glyphs {glyphs:.1}, results {results:.1}", text.as_secs_f64() * 1e3));
         }
         FULL_FRAME = true;
+        HEADER_WIDGET = (0, 0, 0, 0); // (a new screen: its header widget, if any, is drawn again)
         ROOMY_ROWS = false; // (the line "Born ..." comes before a profile tab's rows)
         #[allow(static_mut_refs)]
         NATION_HIT.clear(); // (the strip, if this screen has one, sets it again)
@@ -1507,6 +1538,10 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                     MATCH_TAB = t.to_vec();
                     REDRAW = true;
                 }
+            }
+            // (text inside the header widget: light on its blue face, user 2026-11-13 polish)
+            if HEADER_WIDGET.2 > HEADER_WIDGET.0 && !small_screen() && x1 >= HEADER_WIDGET.0 && x2 <= HEADER_WIDGET.2 + 2 && y1 >= HEADER_WIDGET.1 - 2 && y2 <= HEADER_WIDGET.3 + 2 && !dropdown {
+                colour = rgb(LIGHT) as u32;
             }
             if on(THEME_ON) && (x1, y1, x2, y2) == ROW_PANEL && s.starts_with(b"     ") {
                 menu_row(x1, y1, x2, y2, &mut colour);
@@ -3947,7 +3982,24 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         // before the frame is shown (the info strip over the Action menu, the news story over the
         // manager's menu, user's shots 2026-11-04; skipping overlays instead left tables without
         // their grid and lists)
-        let menu = menu_box().map(|b| (b, buffer_box(b, None)));
+        let mut menu = menu_box().map(|b| (b, buffer_box(b, None)));
+        // a 1 px edge round the open menu (user 2026-11-13 polish), inside its own box: the pixels
+        // put back below carry it, and the game's restore on closing takes it away with the menu
+        // (a shadow outside the box would stay behind, so none)
+        if let (Some(((bx1, by1, bx2, by2), pixels)), true) = (menu.as_mut(), !small_screen() && on(THEME_ON)) {
+            let (w, h) = ((*bx2 - *bx1) as usize, (*by2 - *by1) as usize);
+            if w > 4 && h > 4 && pixels.len() == w * h {
+                let edge = rgb([0x4e, 0x56, 0x63]);
+                for x in 0..w {
+                    pixels[x] = edge;
+                    pixels[(h - 1) * w + x] = edge;
+                }
+                for y in 0..h {
+                    pixels[y * w] = edge;
+                    pixels[y * w + w - 1] = edge;
+                }
+            }
+        }
         #[allow(static_mut_refs)]
         if !std::mem::take(&mut STATS_SEEN) {
             STATS_COLS.clear();
@@ -4770,11 +4822,14 @@ unsafe fn event_icon(cx: i32, cy: i32, r: i32, name: &[u8]) -> [u8; 3] {
     c
 }
 
-/// The colour an event's text goes in, by the game's words: a goal green, a missed penalty grey, a
-/// red card the card's red, an injury salmon.
+/// The colour an event's text goes in, by the game's words: a goal green, an own goal lavender
+/// ("og" before its minute: a goal against, user 2026-11-10), a missed penalty grey, a red card the
+/// card's red, an injury salmon.
 fn event_colour(name: &[u8]) -> [u8; 3] {
     let has = |w: &[u8]| name.windows(w.len()).any(|x| x == w);
-    if has(b" sent off") {
+    if has(b" og ") || name.ends_with(b" og") {
+        OWN_GOAL
+    } else if has(b" sent off") {
         [0xd8, 0x30, 0x30]
     } else if has(b" m/pen") || has(b" missed") {
         [0xa0, 0xa6, 0xae]
@@ -4843,6 +4898,22 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
     if y1 <= h / 30 + 20 && !t.is_empty() && t.iter().all(|c| c.is_ascii_digit()) && ((x2 - x1) - (y2 - y1)).abs() < (y2 - y1) / 3 {
         MATCH_SCORES.retain(|s| s.0 != (x1, y1, x2, y2));
         MATCH_SCORES.push(((x1, y1, x2, y2), t.to_vec()));
+        if !small_screen() {
+            // dark rounded tile, white digits (user 2026-11-13 polish): over the game's light grey
+            // panel, drawn just before this text; the tile is that panel's box when one is known
+            let (px1, py1, px2, py2) = PANELS
+                .iter()
+                .filter(|p| p.0 <= x1 && p.1 <= y1 && p.2 >= x2 && p.3 >= y2 && p.2 - p.0 <= (x2 - x1) * 3 / 2 && p.3 - p.1 <= (y2 - y1) * 3 / 2)
+                .min_by_key(|p| (p.2 - p.0) * (p.3 - p.1))
+                .copied()
+                .unwrap_or((x1, y1, x2, y2));
+            let under = pixel_at(px1 - 3, (py1 + py2) / 2).or_else(|| pixel_at(px2 + 3, (py1 + py2) / 2)).unwrap_or(SIDEBAR);
+            fill(px1, py1, px2 + 1, py2 + 1, under);
+            rounded(px1, py1, px2, py2, [0x3a, 0x40, 0x4a], 8);
+            rounded(px1 + 1, py1 + 1, px2 - 1, py2 - 1, [0x14, 0x17, 0x1c], 7);
+            text_at((x1 + x2) / 2, y1, y2, font, WHITE, t, 1);
+            return true;
+        }
         return false;
     }
     // the Latest Scores tab: the day's matches in the game's own rows (a client's friends saw its
@@ -4903,6 +4974,10 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
     }
     // (an event's name comes with two leading spaces; its minute on the same row after it)
     if indented && y2 - y1 < 40 && !digits && !t.is_empty() {
+        #[allow(static_mut_refs)]
+        if EVENT_ROW != y1 {
+            EVENT_NAMES.clear();
+        }
         EVENT_ROW = y1;
         let small = smaller(font, 1);
         let name = t.trim_ascii();
@@ -4912,9 +4987,24 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
         let r = (y2 - y1) * 30 / 100;
         let c = event_icon(x1 + 14 + r, (y1 + y2) / 2, r, name);
         text_at(x1 + 28 + 2 * r, y1, y2, small, c, name, 0);
+        #[allow(static_mut_refs)]
+        EVENT_NAMES.push(((x1, y1, x2, y2), small, name.to_vec(), r));
         return true;
     }
     if y1 == EVENT_ROW && y2 - y1 < 40 && digits {
+        // an own goal ("og 30", every minute of the cell): its name, left of this cell, again in
+        // the own goal's colour
+        let own = t.split(|&c| c == b',').map(<[u8]>::trim_ascii).filter(|p| !p.is_empty()).all(|p| p.starts_with(b"og"));
+        #[allow(static_mut_refs)]
+        if own {
+            if let Some(((nx1, ny1, nx2, ny2), small, name, r)) = EVENT_NAMES.iter().filter(|e| e.0 .0 < x1).max_by_key(|e| e.0 .0).cloned() {
+                fill(nx1, ny1, nx2 + 2, ny2, [0x26, 0x2b, 0x31]);
+                let mut said = name.clone();
+                said.extend_from_slice(b" og");
+                let c = event_icon(nx1 + 14 + r, (ny1 + ny2) / 2, r, &said);
+                text_at(nx1 + 28 + 2 * r, ny1, ny2, small, c, &name, 0);
+            }
+        }
         let lift = event_lift(x1, x2, y1);
         fill(x1 - 2, y1 - lift, x2, y2 - lift, [0x26, 0x2b, 0x31]);
         text_at(x2 - 14, y1 - lift, y2 - lift, minutes_font(font, x2 - x1 - 12, t.trim_ascii()), GOLD, t.trim_ascii(), 2);
@@ -5120,6 +5210,11 @@ unsafe fn match_record() -> Option<(usize, bool, usize)> {
 
 /// The row of the last match event's name (its minute follows on the same row).
 static mut EVENT_ROW: i32 = i32::MIN;
+/// The event names drawn on that row (both sides can have one): rect as drawn, font, name, icon
+/// radius; an own goal's minutes ("og 30") come after its name, which is then drawn again.
+static mut EVENT_NAMES: Vec<((i32, i32, i32, i32), u32, Vec<u8>, i32)> = Vec::new();
+/// An own goal's text: not the goal's green, nor a card's red or an injury's salmon.
+const OWN_GOAL: [u8; 3] = [0xa8, 0x8c, 0xf0];
 /// The last event row's minute cell, its minutes and the bottom of the rows they span.
 static mut LAST_MINUTES: Vec<((i32, i32, i32, i32), Vec<u8>, i32)> = Vec::new();
 /// The game's minutes rows emptied this frame (their minutes joined onto the scorer's row): side
@@ -7033,6 +7128,13 @@ fn event_text_colours() {
     assert_eq!(event_colour(b"Smith m/pen"), [0xa0, 0xa6, 0xae]);
     assert_eq!(event_colour(b"Smith missed"), [0xa0, 0xa6, 0xae]);
     assert_eq!(event_colour(b"Smith"), [0x4c, 0xc0, 0x7a]);
+    // an own goal: its own colour, not a goal's, a card's or an injury's
+    assert_eq!(event_colour(b"Smith og"), OWN_GOAL);
+    assert_eq!(event_colour(b"  Smith og 22"), OWN_GOAL);
+    assert_eq!(event_colour(b"Bogarde 12"), [0x4c, 0xc0, 0x7a]);
+    for other in [b"Smith".as_slice(), b"Smith sent off", b"Smith injured", b"Smith missed"] {
+        assert_ne!(event_colour(b"Smith og"), event_colour(other));
+    }
 }
 
 /// The squad lists' status codes, all 21 of the exe's table at 0x98e8c0 (meanings from its

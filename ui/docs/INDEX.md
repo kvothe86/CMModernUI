@@ -54,6 +54,7 @@ changing code. Add a row in the same step as every fix.
 | `..\night6\PLAN.md` (local only, not in the public repo) | the 2026-11-04 single player night: every menu and screen, coach off |
 | `..\night7\PLAN.md`, `REPORT.md`, `RAD_REVIEW.md` (local only, not in the public repo) | 2026-11-06/07: clean test setup, network step by step; RAD review and balance |
 | `..\night8\PLAN.md` (local only, not in the public repo) | 2026-11-07/08: the new features in network games (saved line-ups, pool, season and match cards, scout ratings, coach) |
+| `..\polish\PLAN.md` (local only, not in the public repo) | 2026-11-13: look and feel polish at 1680x1050 (findings, what was changed; rows in `..\FIXES.md`) |
 | `..\scout_stars.md`, `..\assistant_pick.md` | design and facts for those two features |
 | `..\helper_*.md` | static exe findings (addresses, record offsets): `helper_search` (search View popup), `helper_squad` (squad View popup), `helper_match` (match stats, opening a club), `helper_live` (in-match player data), `helper_stats` (season stats Av R / Tck / Drb) |
 | `..\proof\INDEX.md` (local only, not in the public repo) | proof shots per resolution |

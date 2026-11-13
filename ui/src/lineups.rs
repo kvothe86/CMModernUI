@@ -241,7 +241,14 @@ pub unsafe fn draw(font: u32) {
     let slot_w = if compact { ((room - fill_w - 3 * 8) / 3).clamp(40, (y2 - y1) * 3) } else { ((room - fill_w - 4 * 8) / 3).clamp(110, 200) };
     let mut x = right - fill_w;
     let fb = (x, y1, right, y2);
-    fill(fb.0, fb.1, fb.2, fb.3, [0x2b, 0x45, 0x66]);
+    // (1680x1050: rounded pills on what is behind them, as the flat buttons do)
+    let bg_at = |px: i32, py: i32| pixel_at(px, py).unwrap_or([0x16, 0x1a, 0x20]);
+    if compact {
+        fill(fb.0, fb.1, fb.2, fb.3, [0x2b, 0x45, 0x66]);
+    } else {
+        fill(fb.0, fb.1, fb.2, fb.3, bg_at(fb.0 - 2, (y1 + y2) / 2));
+        rounded(fb.0, fb.1, fb.2, fb.3, [0x2b, 0x47, 0x66], 6);
+    }
     text_at((fb.0 + fb.2) / 2, y1, y2, small, white, fill_label, 1);
     RECTS.push((fb, Action::FillSubs));
     for k in (0..3).rev() {
@@ -256,12 +263,36 @@ pub unsafe fn draw(font: u32) {
         let save_label: &[u8] = if armed { b"Sure?" } else { b"Save" };
         let save_w = if tight { (y2 - y1).min(slot_w / 2) } else if compact { (y2 - y1) * 3 / 2 } else { text_width(small, b"Save") + 14 };
         let save = (r.2 - save_w, y1, r.2, y2);
-        let load = (r.0, y1, save.0 - 4, y2);
+        let load = (r.0, y1, if compact { save.0 - 4 } else { save.0 }, y2);
         let blue = [0x2b, 0x45, 0x66];
-        fill(load.0, load.1, load.2, load.3, if s.is_some() { blue } else { [0x22, 0x27, 0x2f] });
-        if active {
-            fill(load.0, load.1, load.2, load.1 + 2, GOLD);
-            fill(load.0, load.3 - 2, load.2, load.3, GOLD);
+        if compact {
+            fill(load.0, load.1, load.2, load.3, if s.is_some() { blue } else { [0x22, 0x27, 0x2f] });
+            if active {
+                fill(load.0, load.1, load.2, load.1 + 2, GOLD);
+                fill(load.0, load.3 - 2, load.2, load.3, GOLD);
+            }
+        } else {
+            // one segmented pill: Load part + Save part touching, a 1 px divider between
+            const R: i32 = 6;
+            fill(r.0, r.1, r.2, r.3, bg_at(r.0 - 2, (y1 + y2) / 2));
+            let edge = [0x3a, 0x40, 0x4a];
+            let save_face = if armed { [0xa8, 0x3a, 0x3a] } else { [0x22, 0x33, 0x48] };
+            if s.is_some() {
+                rounded(load.0, load.1, load.2, load.3, [0x2b, 0x47, 0x66], R);
+                fill(load.2 - R, load.1, load.2, load.3, [0x2b, 0x47, 0x66]);
+            } else {
+                rounded(load.0, load.1, load.2, load.3, edge, R);
+                fill(load.2 - R, load.1, load.2, load.3, edge);
+                let face = [0x1e, 0x23, 0x2a];
+                rounded(load.0 + 1, load.1 + 1, load.2, load.3 - 1, face, R - 1);
+                fill(load.2 - R, load.1 + 1, load.2, load.3 - 1, face);
+            }
+            rounded(save.0, save.1, save.2, save.3, save_face, R);
+            fill(save.0, save.1, save.0 + R, save.3, save_face);
+            fill(save.0, save.1, save.0 + 1, save.3, [0x16, 0x1e, 0x2a]);
+            if active {
+                fill(load.0 + 5, load.3 - 3, save.2 - 5, load.3 - 1, GOLD);
+            }
         }
         let mid = (y1 + y2) / 2;
         let cx = (load.0 + load.2) / 2;
@@ -290,7 +321,9 @@ pub unsafe fn draw(font: u32) {
                 text_at(cx, mid - 2, y2, small, muted, b"empty", 1);
             }
         }
-        fill(save.0, save.1, save.2, save.3, if armed { [0xa8, 0x3a, 0x3a] } else { [0x3a, 0x5a, 0x3a] });
+        if compact {
+            fill(save.0, save.1, save.2, save.3, if armed { [0xa8, 0x3a, 0x3a] } else { [0x3a, 0x5a, 0x3a] });
+        }
         text_at((save.0 + save.2) / 2, y1, y2, small, white, if compact { if armed { b"?".as_slice() } else { b"S".as_slice() } } else { save_label }, 1);
         RECTS.push((save, Action::Save(k)));
         if s.is_some() {

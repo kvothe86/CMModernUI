@@ -335,8 +335,14 @@ pub unsafe fn draw() {
         text_at((m + sw) / 2, ly + line * 3, ly + line * 4, f3, muted, if waiting { b"Asking the host...".as_slice() } else { b"No player of the country found" }, 1);
     }
     // Back: the full width at the bottom, as the game's screens have it
-    let back = (m, sh - my - sh / 18, sw - my, sh - my);
-    fill(back.0, back.1, back.2, back.3, [0x2c, 0x46, 0x6a]);
+    // (user 2026-11-13 polish: at 1680 rounded, a 20 px margin; the click rect is this one)
+    let edge = if small_screen() { my } else { 20 };
+    let back = (if small_screen() { m } else { m.max(20) }, sh - edge - sh / 18, sw - edge, sh - edge);
+    if small_screen() {
+        fill(back.0, back.1, back.2, back.3, [0x2c, 0x46, 0x6a]);
+    } else {
+        rounded(back.0, back.1, back.2, back.3, [0x2c, 0x46, 0x6a], 6);
+    }
     text_at((back.0 + back.2) / 2, back.1, back.3, f3, white, b"Back", 1);
     SPOTS.push((back, Spot::Back));
 }

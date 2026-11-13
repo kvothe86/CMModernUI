@@ -320,7 +320,9 @@ unsafe fn spots() -> Vec<Rect> {
         out.push((x, y, x + w, y + h));
         x += w + m;
     }
-    let back = (sw - m * 2 - sw / 8, sh - m - sh / 20, sw - m * 2, sh - m);
+    // (user 2026-11-13 polish: at 1680 a 20 px margin from the corner; drawn rounded below)
+    let (rx, ry) = if small_screen() { (m * 2, m) } else { (20, 20) };
+    let back = (sw - rx - sw / 8, sh - ry - sh / 20, sw - rx, sh - ry);
     out.push(back);
     out.push((back.0 - m - sw / 7, back.1, back.0 - m, back.3));
     out
@@ -352,7 +354,12 @@ unsafe fn overlay() {
     let labels: Vec<&str> = TABS.iter().copied().chain(["Back", if TAB == ASK { "New conversation" } else { "Ask again" }]).collect();
     for (k, r) in spots.iter().enumerate() {
         let (active, hover) = (k == TAB, HOVER == Some(k));
-        pill(r.0, r.1, r.2, r.3, if active || hover { SELECTED } else { [0x3a, 0x40, 0x4a] });
+        let face = if active || hover { SELECTED } else { [0x3a, 0x40, 0x4a] };
+        if k >= TABS.len() && !small_screen() {
+            rounded(r.0, r.1, r.2, r.3, face, 6); // (Back / Ask again, user 2026-11-13 polish)
+        } else {
+            pill(r.0, r.1, r.2, r.3, face);
+        }
         text_at((r.0 + r.2) / 2, r.1, r.3, f(3), if active || hover { GOLD } else { WHITE }, labels[k].as_bytes(), 1);
     }
     let (x1, y1, x2, y2) = (left + m * 2, spots[0].3 + m, sw - m * 2, spots[4].1 - m);
@@ -988,7 +995,15 @@ unsafe fn game_data(club: usize, manager: usize) -> String {
         if readable(opponent, 0x1e0 + 80) {
             let when = fixture_day(fixture).map_or(String::new(), |d| format!(", {}", day_text(d)));
             let name = latin1(&game_text(opponent + 4, 51)).into_owned();
-            NEXT_LABEL = to_latin1(&format!("Next match: {name} {}, {comp}{when}", if home { "at home" } else { "away" }));
+            // (an unknown opponent or competition leaves no empty part: no "away, , 3 Apr", user 2026-11-13 polish)
+            let mut parts = vec![format!("{name} {}", if home { "at home" } else { "away" }).trim().to_string()];
+            if !comp.is_empty() {
+                parts.push(comp.clone());
+            }
+            if !when.is_empty() {
+                parts.push(when.trim_start_matches(", ").to_string());
+            }
+            NEXT_LABEL = to_latin1(&format!("Next match: {}", parts.join(", ")));
             out += &format!("\nNEXT MATCH: {name} {}, {comp}{when}\n", if home { "at home" } else { "away" });
             let scout = assistant::scout_for(opponent, club);
             let mut lines = scout.split(|&c| c == b'\n');
