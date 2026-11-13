@@ -94,10 +94,10 @@ fn shapes() {
 }
 
 /// The club's player with this id (its squad, 50 places).
-/// The club's saved line-ups for the dashboard export: (slot 0..2, shape, the eleven's staff, 0 for
-/// one who left the club).
-pub(crate) unsafe fn saved(club: usize) -> Vec<(usize, String, Vec<usize>)> {
-    slots(club).iter().enumerate().filter_map(|(k, s)| s.as_ref().map(|s| (k, s.shape.clone(), s.ids[..11].iter().map(|&id| by_id(club, id)).collect()))).collect()
+/// The club's saved line-ups for the dashboard export: (slot 0..2, shape, the eleven as (staff at
+/// the club or 0, the staff id saved)).
+pub(crate) unsafe fn saved(club: usize) -> Vec<(usize, String, Vec<(usize, i32)>)> {
+    slots(club).iter().enumerate().filter_map(|(k, s)| s.as_ref().map(|s| (k, s.shape.clone(), s.ids[..11].iter().map(|&id| (by_id(club, id), id)).collect()))).collect()
 }
 
 unsafe fn by_id(club: usize, id: i32) -> usize {

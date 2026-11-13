@@ -411,8 +411,23 @@ unsafe fn extras(club: usize, season: i32, day: i32, year: i32, squad: &[usize],
     }
     let mut saved = Vec::new();
     if on(SAVED_LINEUPS) {
+        let (base, count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
         for (k, shape, eleven) in lineups::saved(club) {
-            let names: Vec<String> = eleven.iter().map(|&s| if s != 0 { js(&txt(&staff_name(s))) } else { "\"(not at club)\"".into() }).collect();
+            // (a player no longer at the club: found by his id, which is his row in the staff
+            // table, and named with where he is now)
+            let gone = |id: i32| {
+                let s = base + id.max(0) as usize * 0x6e;
+                if !(0..count).contains(&id) || !readable(s, 0x6e) || rd::<i32>(s) != id {
+                    return "\"(unknown player)\"".to_string();
+                }
+                let now = rd::<usize>(s + 0x39);
+                let at = if now != 0 && readable(now, 0x40) { format!("now {}", txt(&game_text(now + 4, 51))) } else { "no club now".into() };
+                if trace() {
+                    log(&format!("dashboard: saved XI {} id {id} = {} ({at})", k + 1, txt(&staff_name(s))));
+                }
+                js(&format!("{} ({at})", txt(&staff_name(s))))
+            };
+            let names: Vec<String> = eleven.iter().map(|&(s, id)| if s != 0 { js(&txt(&staff_name(s))) } else { gone(id) }).collect();
             saved.push(format!("[{},{},[{}]]", k + 1, js(&shape), names.join(",")));
         }
     }
