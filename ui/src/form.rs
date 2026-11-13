@@ -125,6 +125,63 @@ pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year)
     out
 }
 
+/// A fixture as the dashboard export lists it: competition id (+0), home and away club indices,
+/// the score (None before it is played), the date as (day of the year, year).
+#[derive(Clone, Copy, Debug)]
+pub struct Fixture {
+    pub comp: i32,
+    pub home: i32,
+    pub away: i32,
+    pub score: Option<(i32, i32)>,
+    pub date: (i32, i32),
+}
+
+/// The club's (index) fixtures between two dates, played or not, oldest first.
+pub unsafe fn fixtures(club: i32, (start_day, start_year): (i32, i32), (day, year): (i32, i32)) -> Vec<Fixture> {
+    let fm = rd::<usize>(FIXTURE_MANAGER);
+    let mut out = Vec::new();
+    if club < 0 || remote::CLIENT || !readable(fm, 16) || !(1900..2200).contains(&year) || !(1900..2200).contains(&start_year) {
+        return out;
+    }
+    let mut list = [0u8; 64];
+    let l = list.as_mut_ptr() as usize;
+    game::<extern "thiscall" fn(usize)>(LIST_NEW)(l);
+    game::<extern "thiscall" fn(usize, i32, i32, u32, u32, i32, usize, i32, i32, i32) -> i32>(FIND_FIXTURES)(fm, start_day, start_year, day as u32, year as u32, club, l, -1, -2, -1);
+    ((l + 10) as *mut u32).write_unaligned(((l + 6) as *const u32).read_unaligned());
+    let prev = game::<extern "thiscall" fn(usize) -> usize>(GET_PREV);
+    let mut seen = 0;
+    while let Some(f) = Some(prev(l)).filter(|&f| f != 0) {
+        seen += 1;
+        if seen > 2000 || !readable(f, 0x4f) {
+            break;
+        }
+        let (h, a) = (rd::<i32>(f + 0xc), rd::<i32>(f + 0x10));
+        if h != club && a != club {
+            continue;
+        }
+        let (hg, ag) = (rd::<u8>(f + 0x43), rd::<u8>(f + 0x44));
+        let score = (hg != 0xff && ag != 0xff && hg <= 40 && ag <= 40).then_some((hg as i32, ag as i32));
+        out.push(Fixture { comp: rd::<i32>(f), home: h, away: a, score, date: (rd::<i16>(f + 0x2a) as i32, rd::<i16>(f + 0x28) as i32) });
+    }
+    game::<extern "thiscall" fn(usize)>(LIST_CLEAR)(l);
+    out.sort_by_key(|f| f.date.1 * 366 + f.date.0);
+    out
+}
+
+/// A competition's name by its id (the fixture's +0).
+pub unsafe fn comp_name(comp: i32) -> Vec<u8> {
+    let (table, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if comp < 0 || comp >= count || !readable(table, count as usize * 0x6b) {
+        return Vec::new();
+    }
+    game_text(table + comp as usize * 0x6b + 4, 51)
+}
+
+/// A competition is a friendly (by its id).
+pub unsafe fn friendly(comp: i32) -> bool {
+    is_friendly(comp)
+}
+
 /// The club's (index) fixture of today, played or not: the home and away club indices.
 pub unsafe fn today_fixture(club: i32) -> Option<(i32, i32)> {
     let fm = rd::<usize>(FIXTURE_MANAGER);

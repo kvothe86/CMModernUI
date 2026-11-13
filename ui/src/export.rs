@@ -1,4 +1,6 @@
-//! Export as an HTML dashboard (switch `export_button`): the game's own printout is written as
+//! Export as an HTML dashboard (switch `export_button`). The club screen's Export opens the club
+//! dashboard read from the game's memory (`dash.rs`, `print\<name>_dashboard.html`); the page made
+//! from the printout below is still written, and opened for a competition. The game's own printout is written as
 //! before (its txt has everything: the scorers of each fixture, the transfers, the comp tables),
 //! then turned into one page next to it (`print\<name>.html`: flat design, CSS and a small script
 //! inline, the Outfit font from Google Fonts when online) and opened in the browser (single player only: on a network game the file lands on
@@ -14,7 +16,16 @@ use crate::*;
 pub extern "C" fn club(a: usize, b: usize, mask: u32, file: *const u8, flag: u32) -> i32 {
     let r = unsafe { game::<extern "C" fn(usize, usize, u32, *const u8, u32) -> i32>(0x7d4460)(a, b, mask, file, flag) };
     if r != 0 {
-        unsafe { convert(file) };
+        // the club's dashboard from the game's memory (dash.rs) is the page opened; the printout's
+        // page is still written next to it (and opened when the dashboard cannot be made)
+        unsafe {
+            let dashboard = !file.is_null()
+                && dash::club_of(a).is_some_and(|club| {
+                    let path = std::path::PathBuf::from(latin1(std::ffi::CStr::from_ptr(file as *const i8).to_bytes()).into_owned());
+                    dash::write_and_open(club, &path)
+                });
+            convert(file, !dashboard);
+        }
     }
     r
 }
@@ -22,7 +33,7 @@ pub extern "C" fn club(a: usize, b: usize, mask: u32, file: *const u8, flag: u32
 /// The competition screen's print (competition, entry, file, printer flag), its call at 0x496654.
 pub extern "C" fn comp(c: usize, mask: u32, file: *const u8, flag: u32) -> i32 {
     let r = unsafe { game::<extern "C" fn(usize, u32, *const u8, u32) -> i32>(0x7d7c80)(c, mask, file, flag) };
-    unsafe { convert(file) };
+    unsafe { convert(file, true) };
     r
 }
 
@@ -31,7 +42,17 @@ extern "system" {
     fn ShellExecuteA(hwnd: usize, op: *const u8, file: *const u8, params: *const u8, dir: *const u8, show: i32) -> usize;
 }
 
-unsafe fn convert(file: *const u8) {
+/// Open a written page in the browser (single player only: on a network game it lands on the host).
+pub unsafe fn open(page: &std::path::Path) {
+    if remote::network_game() {
+        return;
+    }
+    let full = std::env::current_dir().map(|d| d.join(page)).unwrap_or(page.to_path_buf());
+    let c = std::ffi::CString::new(full.to_string_lossy().as_bytes()).unwrap_or_default();
+    ShellExecuteA(0, b"open\0".as_ptr(), c.as_ptr() as *const u8, std::ptr::null(), std::ptr::null(), 1);
+}
+
+unsafe fn convert(file: *const u8, show: bool) {
     if file.is_null() {
         return;
     }
@@ -48,10 +69,8 @@ unsafe fn convert(file: *const u8) {
     if trace() {
         log(&format!("export: {} written", html.display()));
     }
-    if !remote::network_game() {
-        let full = std::env::current_dir().map(|d| d.join(&html)).unwrap_or(html);
-        let c = std::ffi::CString::new(full.to_string_lossy().as_bytes()).unwrap_or_default();
-        ShellExecuteA(0, b"open\0".as_ptr(), c.as_ptr() as *const u8, std::ptr::null(), std::ptr::null(), 1);
+    if show {
+        open(&html);
     }
 }
 

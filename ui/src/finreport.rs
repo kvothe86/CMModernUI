@@ -343,6 +343,16 @@ unsafe fn game_money() -> Money {
 /// The report of the club the screen shows, from the game's memory.
 unsafe fn read() -> Option<Report> {
     let club = [screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().find_map(|p| club_ptr(p))?;
+    let (cols, balance, funds, money) = figures(club)?;
+    let name = latin1(&game_text(club + 4, 51)).into_owned();
+    let seed = (club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE;
+    let date = date_text(rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
+    Some(build(&name, seed, &date, cols, balance, funds, &money))
+}
+
+/// A club's account (this month, last month, this year, last year), bank balance and transfer
+/// funds in the game's units, and how the game shows money (the P&L report, the dashboard export).
+pub unsafe fn figures(club: usize) -> Option<([Col; 4], i64, i64, Money)> {
     let table = rd::<usize>(FINANCE_TABLE);
     if table == 0 {
         return None;
@@ -361,10 +371,7 @@ unsafe fn read() -> Option<Report> {
     let mut cash = [raw as u32, 0, 0, 0];
     let shown = game::<extern "thiscall" fn(*mut u32, i32) -> i64>(CASH_CONVERT)(cash.as_mut_ptr(), 6).max(0);
     let funds = (shown as f64 / money.rate).round() as i64;
-    let name = latin1(&game_text(club + 4, 51)).into_owned();
-    let seed = (club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE;
-    let date = date_text(rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
-    Some(build(&name, seed, &date, cols, i64_at(rec, 0), funds, &money))
+    Some((cols, i64_at(rec, 0), funds, money))
 }
 
 unsafe fn button_rect() -> Option<(i32, i32, i32, i32, u32)> {

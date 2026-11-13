@@ -502,3 +502,17 @@ ClaudeVit.sav, shots `E:\cm25\shots\v_*.png`. Installed in every folder.
 | Team report: MC / % crossed by the pitch lines | no backing | `assistant.rs` `report` | Team report | checked 2026-11-13 |
 | Coach "Next match: away, , 3 Apr" (every size) | empty opponent joined | `coach.rs` `NEXT_LABEL` skips empty parts | Coach before the squad screen was seen | built |
 | Line-ups strip: four styles side by side, square | separate fills | `lineups.rs` `draw`: one segmented rounded pill a slot, quieter Save | squad screen | checked 2026-11-13 |
+
+## Club dashboard from the game's memory (2026-11-13, `dash.rs` + `dash.html`)
+
+The club screen's Export now opens a CoreUI-style dashboard read from memory, not from the printout
+(`print\<name>_dashboard.html`, one offline file, light / dark); the printout's page is still
+written next to it. Mockup and screenshots: `export_preview\` (local only). Checked on E:\cm25
+ClaudeVit.sav (Vitesse, 21 March 2027): place after each matchday worked out from every league
+club's fixtures, 8th / 40 pts / 41-41 after matchday 26, the same as the game's table.
+
+| Seen | Cause | Where | Check | Status |
+|---|---|---|---|---|
+| Form / Results listed the reserve team's matches | `find_fixtures` gives the club's reserve fixtures too | `dash.rs`: competitions named "Reserve..." left out | Fixtures tab | checked 2026-11-13 |
+| Whole page empty | a second `const step` in the chart function (script syntax error) | `dash.html` `line`: tick step renamed `ys`; check with `node --check` on the script | every tab | checked 2026-11-13 |
+| Players let go shown "to -" | no club (-1) | `dash.rs` sends "", the page says "released" | Transfers tab | checked 2026-11-13 |

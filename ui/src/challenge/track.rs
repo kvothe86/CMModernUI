@@ -627,6 +627,31 @@ pub(crate) unsafe fn league_place(club: usize) -> Option<(i32, i32)> {
     Some((1 + all.iter().filter(|&&r| key(r) > mine).count() as i32, teams as i32))
 }
 
+/// The whole table of the club's league (the dashboard export): the competition's id (its first
+/// dword) and every row's club with played, won, drawn, lost, for, against, points, in the
+/// table's order (points, goal difference, goals for).
+pub(crate) unsafe fn league_table(club: usize) -> Option<(i32, Vec<(usize, [i32; 7])>)> {
+    let comp = rd::<usize>(club + 0x57);
+    let league = league_object(comp);
+    if league == 0 {
+        return None;
+    }
+    let (teams, rows) = (rd::<i16>(league + 0x3e).max(0) as usize, rd::<usize>(league + 0xb1));
+    if !(2..=64).contains(&teams) || !readable(rows, teams * 0x3b) {
+        return None;
+    }
+    let mut all: Vec<(usize, [i32; 7])> = (0..teams)
+        .map(|k| rows + k * 0x3b)
+        .map(|r| {
+            let b = |o: usize| rd::<u8>(r + o) as i32;
+            let s = |o: usize| rd::<i16>(r + o) as i32;
+            (rd::<usize>(r), [b(0x11), b(0x12), b(0x13), b(0x14), s(0x15), s(0x17), s(0x19)])
+        })
+        .collect();
+    all.sort_by_key(|(_, v)| std::cmp::Reverse((v[6], v[4] - v[5], v[4])));
+    Some((rd::<i32>(comp), all))
+}
+
 /// The club's row of its league table: played, won, drawn, lost (bytes +0x11..+0x14), goals for
 /// and against (+0x15, +0x17), points (+0x19); and the league's name (the season review).
 pub(crate) unsafe fn league_row(club: usize) -> Option<([i32; 7], Vec<u8>)> {

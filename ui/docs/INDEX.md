@@ -9,7 +9,7 @@ Source sizes: `lib.rs` ~7000 lines (almost everything), `news.rs`, `comp.rs`, `a
 `prefetch.rs` (host: answers sent with the screen), `report.rs` (match report icons),
 `weather.rs`, `form.rs` (a club's results from the fixture manager), `card.rs` (match card),
 `season.rs` (season review), `natpool.rs` (national pool), `lineups.rs` (saved line-ups, Fill
-subs), `coach.rs`, `challenge\` (`mod.rs`, `draw.rs`, `track.rs`, `goals.rs`). Find a function:
+subs), `coach.rs`, `dash.rs` + `dash.html` (the club Export's dashboard from memory), `challenge\` (`mod.rs`, `draw.rs`, `track.rs`, `goals.rs`). Find a function:
 Grep `fn <name>` in `ui\src`. The code map with every file is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Screen / feature -> doc -> main functions

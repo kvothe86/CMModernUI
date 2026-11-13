@@ -45,6 +45,7 @@ mod finreport;
 mod natpool;
 mod lineups;
 mod export;
+mod dash;
 
 /// Whether `len` bytes at `addr` are committed, readable memory of this process.
 fn mapped(addr: usize, len: usize) -> bool {
