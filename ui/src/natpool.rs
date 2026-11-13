@@ -215,8 +215,15 @@ unsafe fn gather(team: usize) -> Vec<Man> {
     out
 }
 
+/// The pool of a national team for the dashboard export: (name, positions, age, club, caps,
+/// goals, the assistant's score 0..100, in the squad), best first in each position group.
+pub(crate) unsafe fn pool_rows(team: usize) -> Vec<(Vec<u8>, Vec<u8>, i32, Vec<u8>, i32, i32, i32, bool)> {
+    gather(team).into_iter().map(|m| (m.name, m.positions, m.age, m.club, m.caps, m.goals, m.score, m.in_squad)).collect()
+}
+
+/// The human's Short List holds the player (the game's SCOUT_MANAGER::is_shortlisted).
 #[allow(static_mut_refs)]
-unsafe fn shortlisted(staff: usize) -> bool {
+pub(crate) unsafe fn shortlisted(staff: usize) -> bool {
     if remote::CLIENT {
         return LISTED.contains(&staff);
     }

@@ -99,6 +99,16 @@ tr.me td{background:rgba(88,86,214,.1);font-weight:600}
 .pair{display:grid;grid-template-columns:130px 1fr 80px;align-items:center;gap:10px;font-size:13px;margin-bottom:10px}
 .pair .bars i{display:block;height:7px;border-radius:4px;margin:2px 0}
 .pair b{text-align:right}
+.grid2x{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+@media(max-width:1300px){.grid2x{grid-template-columns:1fr}}
+.pitch{position:relative;aspect-ratio:68/80;border-radius:8px;overflow:hidden;background:repeating-linear-gradient(180deg,#2f7a45 0 10%,#2b7040 10% 20%)}
+.pitch svg{position:absolute;inset:0;width:100%;height:100%}
+.pl{position:absolute;transform:translate(-50%,-50%);text-align:center;width:110px;color:#fff;font-size:11px;line-height:1.25;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.pl b{display:inline-block;background:rgba(17,20,26,.82);border-radius:6px;padding:1px 6px;font-size:10px;letter-spacing:.04em;margin-bottom:2px}
+.pl .stars{text-shadow:none;font-size:10px}
+.chips span{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;margin:2px 4px 2px 0;background:var(--bg);color:var(--text)}
+.chips span.r{background:rgba(51,153,255,.15)}.chips span.g{background:rgba(46,184,92,.15)}
+.season{padding:12px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:70px 1fr 60px;gap:12px;align-items:start}.season:last-child{border:0}
 @media print{.side,.top{display:none}.page{display:grid!important;break-after:page}}
 </style>
 </head>
@@ -116,6 +126,12 @@ tr.me td{background:rgba(88,86,214,.1);font-weight:600}
     <div class="t">Season</div>
     <a data-p="fix"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>Fixtures</span></a>
     <a data-p="tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg><span>Transfers</span></a>
+    <div class="t" id="moreT">Manager</div>
+    <a data-p="lu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M3 12h18M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0"/></svg><span>Line-ups</span></a>
+    <a data-p="inj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>Injuries</span></a>
+    <a data-p="car"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5L5.5 21l2-7.5L2 9h7z"/></svg><span>Career</span></a>
+    <a data-p="tg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg><span>Targets</span></a>
+    <a data-p="pool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22V4M4 4h13l-2 4 2 4H4"/></svg><span>National pool</span></a>
   </nav>
   <div class="foot" id="foot"></div>
 </aside>
@@ -185,6 +201,35 @@ tr.me td{background:rgba(88,86,214,.1);font-weight:600}
     <section class="page" id="p-tr">
       <div class="grid4" id="tkpis"></div>
       <div class="card"><div class="h"><h3>This season's moves</h3><span class="sub">loans left out</span></div><div class="b scroll"><table id="trs"></table></div></div>
+    </section>
+
+    <section class="page" id="p-lu">
+      <div class="grid2x" id="teams"></div>
+      <div class="card" id="savedCard"><div class="h"><h3>Saved line-ups</h3><span class="sub">XI 1 / 2 / 3 from the squad screen</span></div><div class="b"><div class="grid3" id="saved"></div></div></div>
+    </section>
+
+    <section class="page" id="p-inj">
+      <div class="grid4" id="ikpis"></div>
+      <div class="grid2">
+        <div class="card"><div class="h"><h3>Injury and ban log</h3><span class="sub">newest first per player</span><input class="search" id="iq" placeholder="Search..."></div><div class="b scroll"><table id="ilog"></table></div></div>
+        <div class="card"><div class="h"><h3>Injury-prone</h3><span class="sub">injuries on record</span></div><div class="b" id="prone"></div></div>
+      </div>
+    </section>
+
+    <section class="page" id="p-car">
+      <div class="grid4" id="ckpis"></div>
+      <div class="grid2">
+        <div class="card"><div class="h"><h3>CM Challenge by season</h3><span class="sub">prizes, RAD challenges and career goals</span></div><div class="b" id="cseasons"></div></div>
+        <div class="card"><div class="h"><h3>Transfers by season</h3><div class="legend" style="margin:0 0 0 auto"><span><i style="background:#e55353"></i>spent</span><span><i style="background:#2eb85c"></i>received</span></div></div><div class="b" id="cmoney"></div></div>
+      </div>
+    </section>
+
+    <section class="page" id="p-tg">
+      <div class="card"><div class="h"><h3>Short List</h3><span class="sub" id="tgSub"></span></div><div class="b scroll"><table id="tgt"></table></div></div>
+    </section>
+
+    <section class="page" id="p-pool">
+      <div class="card"><div class="h"><h3>National pool</h3><span class="sub">every player of the country, as the assistant rates them</span><input class="search" id="pq" placeholder="Search..."></div><div class="b scroll"><table id="pool"></table></div></div>
     </section>
   </div>
 </div>
@@ -334,6 +379,42 @@ const T=D.transfers,tin=T.filter(t=>t[0]),tout=T.filter(t=>!t[0]),spent=tin.redu
 $('#tkpis').innerHTML=[['k1',tin.length,'Players in'],['k4',fm(spent),'Spent'],['k2',tout.length,'Players out'],['k3',(got-spent>=0?'+':'')+fm(got-spent),'Net transfer income']]
   .map(([k,v,l])=>`<div class="kpi ${k}" style="min-height:0;padding-bottom:18px"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
 $('#trs').innerHTML=T.length?`<thead><tr><th></th><th>Player</th><th>Club</th><th>Date</th><th class="num">Fee</th></tr></thead><tbody>${T.map(t=>`<tr><td><span class="badge" style="background:${t[0]?'var(--success)':'var(--danger)'}">${t[0]?'IN':'OUT'}</span></td><td><div class="who">${av(t[1])}${esc(t[1])}</div></td><td>${t[2]?(t[0]?'from ':'to ')+esc(t[2]):'<span class="muted">released</span>'}</td><td>${t[3]}</td><td class="num">${t[4]?fm(t[4]):'free'}</td></tr>`).join('')}</tbody>`:'<tbody><tr><td>'+empty('No moves this season')+'</td></tr></tbody>';
+
+/* ---- the panels added later: a page whose data is empty leaves the sidebar ---- */
+const hide=p=>{const a=document.querySelector(`#nav a[data-p="${p}"]`);if(a)a.remove()};
+const half=h=>h<0?'':stars(h/2);
+const LINES='<svg viewBox="0 0 68 80" preserveAspectRatio="none" fill="none" stroke="rgba(255,255,255,.35)" stroke-width=".4"><rect x="2" y="2" width="64" height="76"/><path d="M2 40h64"/><circle cx="34" cy="40" r="7"/><rect x="16" y="2" width="36" height="12"/><rect x="25" y="2" width="18" height="4.5"/><rect x="16" y="66" width="36" height="12"/><rect x="25" y="73.5" width="18" height="4.5"/></svg>';
+const pitch=t=>`<div class="pitch">${LINES}${t.xi.map(([l,x,y,n,h])=>`<div class="pl" style="left:${x*100}%;top:${y*100}%"><b>${esc(l)}</b><br>${esc(n)}${h>=0?'<br>'+half(h):''}</div>`).join('')}</div>`;
+const TE=D.teams||[];
+if(TE.length){$('#teams').innerHTML=TE.map(([title,t])=>`<div class="card"><div class="h"><h3>${esc(title)}</h3><span class="sub">${esc(t.shape)}</span></div><div class="b">${pitch(t)}${t.says?`<p class="sm muted" style="margin:14px 0 0">${esc(t.says)}</p>`:''}${t.bench.length?`<p class="sm" style="margin:10px 0 0"><span class="muted">Bench:</span> ${t.bench.map(esc).join(', ')}</p>`:''}</div></div>`).join('')}
+const SV=D.saved||[];
+if(SV.length)$('#saved').innerHTML=SV.map(([k,shape,names])=>`<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="badge" style="background:var(--primary)">XI ${k}</span><b>${esc(shape)}</b></div><div class="list">${names.map((n,i)=>`<div style="padding:5px 0"><span class="muted sm" style="width:18px">${i+1}</span>${esc(n)}</div>`).join('')}</div></div>`).join('');else $('#savedCard').remove();
+if(!TE.length&&!SV.length)hide('lu');
+const IN=D.injuries||[];
+if(IN.length){const inj=IN.filter(r=>r[1]=='I'),bans=IN.filter(r=>r[1]=='B'),per={};inj.forEach(r=>per[r[0]]=(per[r[0]]||0)+1);
+  $('#ikpis').innerHTML=[['k4',inj.length,'Injuries on record'],['k3',bans.length,'Bans on record'],['k2',Object.keys(per).length,'Players ever injured'],['k1',Q.filter(p=>p.c>=0&&p.c<75).length,'Below 75% condition now']].map(([k,v,l])=>`<div class="kpi ${k}" style="min-height:0;padding-bottom:18px"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const drawLog=()=>{const q=$('#iq').value.toLowerCase();$('#ilog').innerHTML=`<thead><tr><th>Player</th><th></th><th>Date</th><th>What</th><th></th></tr></thead><tbody>${IN.filter(r=>(Q[r[0]].n+' '+r[3]+' '+r[4]).toLowerCase().includes(q)).map(r=>`<tr data-id="${r[0]}" style="cursor:pointer"><td><div class="who">${av(Q[r[0]].n)}${esc(Q[r[0]].n)}</div></td><td><span class="badge" style="background:${r[1]=='I'?'var(--danger)':'var(--warning)'}">${r[1]=='I'?'Injury':'Ban'}</span></td><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td class="muted">${esc(r[4])}</td></tr>`).join('')}</tbody>`};
+  $('#iq').oninput=drawLog;drawLog();
+  hbars($('#prone'),Object.entries(per).map(([id,v])=>[Q[id].n,v]).slice(0,40),'var(--danger)',v=>v+(v==1?' injury':' injuries'))}else hide('inj');
+const CA=D.career||{seasons:[],money:[]};
+if(CA.seasons.length||CA.money.length){const spentAll=CA.money.reduce((a,m)=>a+m[3],0),gotAll=CA.money.reduce((a,m)=>a+m[4],0);
+  $('#ckpis').innerHTML=[['k1',CA.total||0,'CM Challenge points'+(CA.rank?' · '+esc(CA.rank):'')],['k2',CA.seasons.length,'Seasons with prizes'],['k4',fm(spentAll),'Spent on transfers'],['k3',(gotAll-spentAll>=0?'+':'')+fm(gotAll-spentAll),'Net transfer income']]
+    .map(([k,v,l])=>`<div class="kpi ${k}" style="min-height:0;padding-bottom:18px"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const chip=(l,c)=>l.map(([t,p])=>`<span class="${c}">${esc(t)} <b>${p}</b></span>`).join('');
+  $('#cseasons').innerHTML=CA.seasons.length?CA.seasons.map(([y,items,rads,goals,pts])=>`<div class="season"><b>${y}/${String((y+1)%100).padStart(2,'0')}</b><div class="chips">${chip(items,'')}${chip(rads,'r')}${chip(goals,'g')}</div><b style="text-align:right">${pts}</b></div>`).join('')+'<div class="legend"><span><i style="background:var(--bg);border:1px solid var(--line)"></i>prizes</span><span><i style="background:rgba(51,153,255,.4)"></i>RAD challenges</span><span><i style="background:rgba(46,184,92,.4)"></i>career goals</span></div>':empty('CM Challenge is off, or nothing won yet');
+  const mx=Math.max(1,...CA.money.flatMap(m=>[m[3],m[4]]));
+  $('#cmoney').innerHTML=CA.money.length?CA.money.map(([y,i,o,s,g])=>`<div class="pair" style="grid-template-columns:70px 1fr 90px"><span>${y}/${String((y+1)%100).padStart(2,'0')}</span><div class="bars"><i style="width:${s/mx*100}%;background:#e55353" title="spent ${fm(s)}, ${i} in"></i><i style="width:${g/mx*100}%;background:#2eb85c" title="received ${fm(g)}, ${o} out"></i></div><b style="color:${g-s>=0?'var(--success)':'var(--danger)'}">${g-s>=0?'+':''}${fm(g-s)}</b></div>`).join(''):empty('No transfers')}else hide('car');
+const TG=D.targets||[];
+if(TG.length){$('#tgSub').textContent=`${TG.length} players · stars as the club's best judge sees them`;
+  $('#tgt').innerHTML=`<thead><tr><th>Player</th><th>Pos</th><th class="num">Age</th><th>Club</th><th class="num">Value</th><th>Rating</th></tr></thead><tbody>${TG.slice().sort((a,b)=>b[5]-a[5]).map(t=>`<tr><td><div class="who">${av(t[0])}${esc(t[0])}</div></td><td><span class="pos">${esc(t[1])}</span></td><td class="num">${t[2]}</td><td>${esc(t[3])}</td><td class="num">${fm(t[4])}</td><td>${half(t[5])}</td></tr>`).join('')}</tbody>`}else hide('tg');
+const PO=D.pool||[];
+if(PO.length){const drawPool=()=>{const q=$('#pq').value.toLowerCase();$('#pool').innerHTML=`<thead><tr><th>Player</th><th>Pos</th><th class="num">Age</th><th>Club</th><th class="num">Caps</th><th class="num">Goals</th><th>Assistant</th><th></th></tr></thead><tbody>${PO.filter(p=>(p[0]+' '+p[1]+' '+p[3]).toLowerCase().includes(q)).map(p=>`<tr><td><div class="who">${av(p[0])}${esc(p[0])}</div></td><td><span class="pos">${esc(p[1])}</span></td><td class="num">${p[2]}</td><td>${esc(p[3])}</td><td class="num">${p[4]}</td><td class="num">${p[5]}</td><td><b>${p[6]}</b><span class="mini"><i style="width:${p[6]}%;background:var(--primary)"></i></span></td><td>${p[7]?'<span class="badge" style="background:var(--success)">squad</span>':''}</td></tr>`).join('')}</tbody>`};$('#pq').oninput=drawPool;drawPool()}else hide('pool');
+if(!document.querySelector('#nav a[data-p="lu"],#nav a[data-p="inj"],#nav a[data-p="car"],#nav a[data-p="tg"],#nav a[data-p="pool"]'))$('#moreT').remove();
+
+/* ---- contracts running out (from the squad's contracts) ---- */
+const MON={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11},ends=p=>{const m=p.ct.match(/(\w{3}) (\d{4})/);return m?+m[2]*12+MON[m[1]]:1e9};
+const soon=Q.filter(p=>ends(p)<1e9).sort((a,b)=>ends(a)-ends(b)).slice(0,6);
+if(soon.length){const c=document.createElement('div');c.className='card';c.innerHTML=`<div class="h"><h3>Contracts running out first</h3></div><div class="b"><div class="grid3">${soon.map(p=>`<div data-id="${p.id}" style="cursor:pointer;display:flex;gap:10px;align-items:center">${av(p.n)}<div>${esc(p.n)}<div class="muted sm">${esc(p.p)} · ${fm(p.v)}</div></div><span class="chip" style="margin-left:auto">${esc(p.ct)}</span></div>`).join('')}</div></div>`;$('#p-squad').insertBefore(c,$('#p-squad').children[0])}
 
 const redraw=()=>drawMain();redraw();window.onresize=redraw;
 const go=()=>{const h=location.hash.slice(1),a=document.querySelector(`#nav a[data-p="${h.split('-')[0]}"]`);if(a)a.click();

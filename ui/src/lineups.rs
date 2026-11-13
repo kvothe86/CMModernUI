@@ -94,6 +94,12 @@ fn shapes() {
 }
 
 /// The club's player with this id (its squad, 50 places).
+/// The club's saved line-ups for the dashboard export: (slot 0..2, shape, the eleven's staff, 0 for
+/// one who left the club).
+pub(crate) unsafe fn saved(club: usize) -> Vec<(usize, String, Vec<usize>)> {
+    slots(club).iter().enumerate().filter_map(|(k, s)| s.as_ref().map(|s| (k, s.shape.clone(), s.ids[..11].iter().map(|&id| by_id(club, id)).collect()))).collect()
+}
+
 unsafe fn by_id(club: usize, id: i32) -> usize {
     (0..50).map(|k| rd::<usize>(club + 0xd7 + 4 * k)).find(|&s| id >= 0 && readable(s, 0x6e) && plays_for(s, club) && rd::<i32>(s) == id).unwrap_or(0)
 }

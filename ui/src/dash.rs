@@ -192,15 +192,14 @@ pub unsafe fn page(club: usize) -> Option<String> {
 
     // ---- squad ----
     let mut men = Vec::new();
+    let mut staff_of = Vec::new(); // (the squad's staff, in the order of the JSON's ids)
     for s in challenge::squad_of(club) {
         let player = rd::<usize>(s + 0x61);
         if !readable(player, 70) {
             continue;
         }
-        let (bd, bm, by) = day_month(s + 0x10);
-        let born = if by == 1900 { rd::<u16>(s + 0x18) as i32 } else { by };
-        let born_day = if by == 1900 { 0 } else { [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][bm] + bd - 1 };
-        let age = year - born - (day < born_day) as i32;
+        staff_of.push(s);
+        let age = age_of(s, day, year);
         let nation = rd::<usize>(s + 0x1a);
         let nat = if readable(nation, 55) { txt(&game_text(nation + 4, 51)) } else { String::new() };
         let (ca, pa) = ca_pa(player).unwrap_or((0, 0));
@@ -259,8 +258,198 @@ pub unsafe fn page(club: usize) -> Option<String> {
             }
         }
     }
-    j += &format!("\"transfers\":[{}]}}", moves.join(","));
+    j += &format!("\"transfers\":[{}]", moves.join(","));
+    j += &extras(club, season, day, year, &staff_of, &shown);
+    j += "}";
     Some(TEMPLATE.replace("/*DATA*/", &j))
+}
+
+/// A staff member's age on the day (staff +0x10 the birth date, +0x18 the year when only that is
+/// known).
+unsafe fn age_of(s: usize, day: i32, year: i32) -> i32 {
+    let (bd, bm, by) = day_month(s + 0x10);
+    let born = if by == 1900 { rd::<u16>(s + 0x18) as i32 } else { by };
+    let born_day = if by == 1900 { 0 } else { [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][bm] + bd - 1 };
+    year - born - (day < born_day) as i32
+}
+
+/// A team on the pitch: (slot label, name, half stars or -1) by slot, placed as the team report
+/// places them.
+fn team_json(shape: &str, says: &str, eleven: &[(Vec<u8>, Vec<u8>, i32)], bench: &[Vec<u8>]) -> String {
+    let labels: Vec<&[u8]> = eleven.iter().map(|e| e.0.as_slice()).collect();
+    let at = assistant::places(&labels);
+    let xi: Vec<String> = eleven.iter().zip(at).map(|(e, (x, y))| format!("[{},{:.3},{:.3},{},{}]", js(&txt(&e.0)), x, y, js(&txt(&e.1)), e.2)).collect();
+    let bench: Vec<String> = bench.iter().map(|b| js(&txt(b))).collect();
+    format!("{{\"shape\":{},\"says\":{},\"xi\":[{}],\"bench\":[{}]}}", js(shape), js(says), xi.join(","), bench.join(","))
+}
+
+/// The assistant's report as two teams (role 1 the best eleven, 2 the backup) and what he says.
+unsafe fn report_teams(club: usize, slots: &[Vec<u8>], unavailable: Vec<usize>) -> Vec<String> {
+    let text = assistant::report_for(club, slots.to_vec(), unavailable);
+    let mut lines = text.split(|&c| c == b'\n');
+    let head: Vec<&[u8]> = lines.next().unwrap_or(&[]).split(|&c| c == b'\t').collect();
+    if head.len() < 4 {
+        return Vec::new();
+    }
+    let rows: Vec<Vec<&[u8]>> = lines.map(|l| l.split(|&c| c == b'\t').collect::<Vec<_>>()).filter(|f| f.len() >= 7).collect();
+    let says = txt(head[3]).replace('*', "");
+    [b'1', b'2']
+        .iter()
+        .map(|role| {
+            let mut eleven: Vec<(usize, (Vec<u8>, Vec<u8>, i32))> = rows
+                .iter()
+                .filter(|f| f[3] == [*role])
+                .map(|f| (txt(f[4]).parse().unwrap_or(99), (f[5].to_vec(), f[0].to_vec(), txt(f[6]).parse().unwrap_or(-1))))
+                .collect();
+            eleven.sort_by_key(|e| e.0);
+            let eleven: Vec<(Vec<u8>, Vec<u8>, i32)> = eleven.into_iter().map(|e| e.1).collect();
+            team_json(&txt(head[2]), if *role == b'1' { &says } else { "" }, &eleven, &[])
+        })
+        .collect()
+}
+
+/// The panels after the first build (2026-11-13, asked for from the dashboard session): injuries
+/// and bans, the career (CM Challenge seasons, transfers by season), line-ups (the selection, the
+/// assistant's best / backup / fittest eleven, the saved XIs), the Short List with the scout's
+/// stars, a national team's pool. A panel whose switch is off or that has nothing is left empty
+/// (the page hides it).
+unsafe fn extras(club: usize, season: i32, day: i32, year: i32, squad: &[usize], shown: &dyn Fn(i64) -> i64) -> String {
+    let mut j = String::new();
+    let slot = CHANNEL_MANAGER + 0x300 * channel();
+    let manager = if readable(slot, 4) { rd::<usize>(slot) } else { 0 };
+    let manager = if readable(manager, 0x61) { manager } else { 0 };
+
+    // ---- injuries and bans of the squad (the History tab's lists) ----
+    let mut log_rows = Vec::new();
+    if on(INJURY_HISTORY) {
+        for (id, &s) in squad.iter().enumerate() {
+            for line in history::rows(s).split(|&c| c == b'\n') {
+                let f: Vec<&[u8]> = line.split(|&c| c == b'\t').collect();
+                if f.len() >= 4 && (f[0] == b"I" || f[0] == b"B") {
+                    log_rows.push(format!("[{id},{},{},{},{}]", js(&txt(f[0])), js(&txt(f[1])), js(&txt(f[2])), js(&txt(f[3]))));
+                }
+            }
+        }
+    }
+    j += &format!(",\"injuries\":[{}]", log_rows.join(","));
+
+    // ---- career: CM Challenge by season, the club's transfers by season ----
+    let mut seasons = Vec::new();
+    let (mut total, mut rank) = (0, String::new());
+    if manager != 0 {
+        for y in (season - 25..=season).rev() {
+            let Some(s) = challenge::summary(manager, y) else { break };
+            total = s.total;
+            rank = s.rank.clone();
+            if s.items.is_empty() && s.rads.is_empty() && s.goals.is_empty() {
+                continue;
+            }
+            let list = |l: &[(String, i32)]| l.iter().map(|(t, p)| format!("[{},{p}]", js(t))).collect::<Vec<_>>().join(",");
+            seasons.push(format!("[{y},[{}],[{}],[{}],{}]", list(&s.items), list(&s.rads), list(&s.goals), s.season));
+        }
+    }
+    let mut by_season: Vec<(i32, [i64; 4])> = Vec::new();
+    let tm = rd::<usize>(TRANSFER_MANAGER);
+    if readable(tm, 0x86e) {
+        let (rows, count) = (rd::<usize>(tm + 0x862), rd::<i32>(tm + 0x86a));
+        let me = index_of(club);
+        if count > 0 && readable(rows, count as usize * 0x25) {
+            for t in (0..count as usize).map(|k| rows + k * 0x25) {
+                let (joined, left, fee, kind, d, y) = (rd::<i32>(t + 0x10), rd::<i32>(t + 0x14), rd::<i32>(t + 0x18).max(0) as i64, rd::<u8>(t + 0x1c), rd::<i16>(t + 0x1d) as i32, rd::<i16>(t + 0x1f) as i32);
+                if kind == 2 || (joined != me && left != me) || !(1900..2200).contains(&y) {
+                    continue;
+                }
+                let s = if d >= 181 { y } else { y - 1 };
+                let k = match by_season.iter().position(|b| b.0 == s) {
+                    Some(k) => k,
+                    None => {
+                        by_season.push((s, [0; 4]));
+                        by_season.len() - 1
+                    }
+                };
+                let v = &mut by_season[k].1;
+                if joined == me {
+                    v[0] += 1;
+                    v[2] += shown(fee);
+                } else {
+                    v[1] += 1;
+                    v[3] += shown(fee);
+                }
+            }
+        }
+    }
+    by_season.sort_by_key(|b| -b.0);
+    let money: Vec<String> = by_season.iter().map(|(s, v)| format!("[{s},{},{},{},{}]", v[0], v[1], v[2], v[3])).collect();
+    j += &format!(",\"career\":{{\"total\":{total},\"rank\":{},\"seasons\":[{}],\"money\":[{}]}}", js(&rank), seasons.join(","), money.join(","));
+
+    // ---- line-ups: the selection, the assistant's elevens, the saved XIs ----
+    let mut teams = Vec::new(); // [title, team]
+    let humans = rd::<usize>(assistant::HUMAN_MANAGER);
+    let formation = if manager != 0 && mapped(humans, 4) { game::<extern "thiscall" fn(usize, usize) -> usize>(assistant::ACTIVE_TACTIC)(humans, manager) } else { 0 };
+    if mapped(formation, 0x200) {
+        let slots = assistant::formation_slots(formation);
+        if slots.len() >= 11 {
+            if let Some((shape, eleven, bench, _)) = assistant::lineup(club, club, Some(manager)) {
+                let eleven: Vec<(Vec<u8>, Vec<u8>, i32)> = eleven.into_iter().map(|(l, s)| (l, staff_name(s), -1)).collect();
+                let bench: Vec<Vec<u8>> = bench.into_iter().map(|s| staff_name(s)).collect();
+                if !eleven.is_empty() {
+                    teams.push(format!("[\"Selected\",{}]", team_json(&shape, "", &eleven, &bench)));
+                }
+            }
+            if on(TEAM_REPORT) {
+                let injured: Vec<usize> = squad.iter().copied().filter(|&s| assistant::injured(s)).collect();
+                let tired: Vec<usize> = squad.iter().copied().filter(|&s| assistant::injured(s) || condition(s).is_some_and(|c| c < 85)).collect();
+                let best = report_teams(club, &slots, injured);
+                let fit = report_teams(club, &slots, tired);
+                for (title, team) in [("Best XI", best.first()), ("Backup XI", best.get(1)), ("Fittest XI", fit.first())] {
+                    if let Some(t) = team {
+                        teams.push(format!("[{},{t}]", js(title)));
+                    }
+                }
+            }
+        }
+    }
+    let mut saved = Vec::new();
+    if on(SAVED_LINEUPS) {
+        for (k, shape, eleven) in lineups::saved(club) {
+            let names: Vec<String> = eleven.iter().map(|&s| if s != 0 { js(&txt(&staff_name(s))) } else { "\"(not at club)\"".into() }).collect();
+            saved.push(format!("[{},{},[{}]]", k + 1, js(&shape), names.join(",")));
+        }
+    }
+    j += &format!(",\"teams\":[{}],\"saved\":[{}]", teams.join(","), saved.join(","));
+
+    // ---- the Short List, as the club's best judge sees each player ----
+    let mut targets = Vec::new();
+    let judge = assistant::best_judge(club).or_else(|| assistant::assistant_of(club)).unwrap_or(0);
+    let (base, count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
+    for s in (0..count.max(0) as usize).map(|k| base + k * 0x6e) {
+        if targets.len() >= 200 || !readable(((s + 0x61) as *const usize).read_unaligned(), 70) || !natpool::shortlisted(s) {
+            continue;
+        }
+        let other = rd::<usize>(s + 0x39);
+        let other = if other != 0 && readable(other, 0x40) { txt(&game_text(other + 4, 51)) } else { "Free agent".into() };
+        let stars = if judge != 0 { scout::seen_score(s, judge, None).map_or(-1, |v| scout::halves(v) as i32) } else { -1 };
+        targets.push(format!(
+            "[{},{},{},{},{},{}]",
+            js(&txt(&staff_name(s))),
+            js(&txt(&positions_text(s))),
+            age_of(s, day, year),
+            js(&other),
+            shown(((s + 0x52) as *const i32).read_unaligned() as i64),
+            stars
+        ));
+    }
+    j += &format!(",\"targets\":[{}]", targets.join(","));
+
+    // ---- a national team's pool ----
+    let mut pool = Vec::new();
+    if on(NATIONAL_POOL) && national_team(club) {
+        for (n, p, a, c, caps, goals, score, in_squad) in natpool::pool_rows(club) {
+            pool.push(format!("[{},{},{a},{},{caps},{goals},{score},{}]", js(&txt(&n)), js(&txt(&p)), js(&txt(&c)), in_squad as u8));
+        }
+    }
+    j += &format!(",\"pool\":[{}]", pool.join(","));
+    j
 }
 
 /// Write the club's page next to the printout and open it (single player); true when written.
