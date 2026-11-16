@@ -250,6 +250,35 @@ def same_comp(a, b):
                 or (digits_a and digits_b and digits_a != digits_b))
 
 
+def sfl_lion():
+    """The Southern League's white lion alone, out of the site's "SFL Premier South" picture
+    (a navy box with the division's name under the lion): the navy made clear and the name band
+    cut off, so it sits on any title band (user 2026-11-16: the box "blends ugly")."""
+    from PIL import Image
+    path = f'{OUT}/png/sfl-lion.png'
+    if os.path.exists(path):
+        return
+    src = next((url for slug, name, url in csv.reader(open(f'{OUT}/index.tsv', encoding='utf-8'), delimiter='\t')
+                if name == 'Southern Football League Premier South'), None)
+    box = f'{OUT}/png/{src.rsplit("/", 1)[-1]}' if src else None
+    if not box or not os.path.exists(box):
+        return
+    im = Image.open(box).convert('RGBA')
+    w, h = im.size
+    im = im.crop((0, 0, w, int(h * 0.66)))  # the name band below the lion
+    px = im.load()
+    for y in range(im.height):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            light = min(r, g, b)  # the lion is white, the box navy: how white, as opacity
+            px[x, y] = (255, 255, 255, a * max(0, min(255, (light - 60) * 255 // 150)) // 255)
+    im = im.crop(im.getbbox() or (0, 0, w, im.height))
+    side = max(im.size)
+    out = Image.new('RGBA', (side, side))
+    out.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
+    out.resize((256, 256), Image.LANCZOS).save(path)
+
+
 def rings():
     """The Olympic rings, not on the site: drawn, so the package holds no picture of them. The
     black ring is white, or it is lost on the dark screens."""
@@ -275,6 +304,7 @@ def comps():
         for r in records(f'{GAME}/Data/{f}', 107):
             cm[text(r[4:55])] = (struct.unpack_from('<i', r)[0], struct.unpack_from('<h', r, 105)[0])
     rings()
+    sfl_lion()
     rows = []
     for line in open('comp_logos.tsv', encoding='utf-8'):
         if line.startswith('#') or not line.strip():
@@ -331,7 +361,9 @@ def comps_by_name(by_slug, done):
                     fit = max(difflib.SequenceMatcher(None, ' '.join(k), ' '.join(site_words)).ratio() for k in ks)
                     ranked.append((fit, c))
             ranked.sort(key=lambda t: -t[0])
-            if ranked and (len(ranked) == 1 or ranked[1][0] < ranked[0][0] - 0.02):
+            # (a fit under 0.4 is two short words inside a long name: "Premier League" took
+            # "English Southern League Premier Division South" at 0.35; right weak ones are 0.45+)
+            if ranked and ranked[0][0] >= 0.4 and (len(ranked) == 1 or ranked[1][0] < ranked[0][0] - 0.02):
                 c = ranked[0][1]
                 rows.append((f'c{cid}', name, slug, rep, c[0], c[1], f'{ranked[0][0]:.2f}', ''))
                 done.add(name)
@@ -486,7 +518,7 @@ def pack():
     (badges) goes before the site's."""
     from PIL import Image
     owner = {}
-    rows = [(row, f.startswith('badge')) for f in ('match.tsv', 'comp_match.tsv', 'flag_match.tsv', 'badge_match.tsv', 'badge_comp_match.tsv')
+    rows = [(row, f.startswith('badge')) for f in ('match.tsv', 'comp_match.tsv', 'flag_match.tsv', 'badge_match.tsv', 'badge_comp_match.tsv', 'carry_match.tsv', 'hand_match.tsv')
             if os.path.exists(f'{TSV}/{f}') for row in csv.reader(open(f'{TSV}/{f}', encoding='utf-8'), delimiter='\t')]
     for (cid, name, nation, rep, site, url, fit, short), from_pack in rows:
         path = url if os.path.isabs(url) else f'{OUT}/png/{url.rsplit("/", 1)[-1]}'

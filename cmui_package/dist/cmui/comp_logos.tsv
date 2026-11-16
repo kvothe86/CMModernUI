@@ -134,3 +134,334 @@ Copa América	tournaments	CONMEBOL
 Mexican First Division	mexico	Liga MX
 Mexican First Division A	mexico	Liga de Expansión MX
 American Major League	usa	MLS - Major League Soccer
+
+# 26/27 Restructured database (2026-11-16): own logo where a site has one, a group the parent league's,
+# else the federation (its own logo or the national team badge); defunct ones (USSR, Yugoslavia...) left out
+Supercopa Libertadores	tournaments	CONMEBOL
+Recopa Sudamericana	tournaments	CONMEBOL
+Copa Merconorte	tournaments	CONMEBOL
+Copa Mercosur	tournaments	CONMEBOL
+Copa Interamericana	tournaments	CONMEBOL
+Copa América Qualifying	tournaments	CONMEBOL
+South American Youth Football Championship	tournaments	CONMEBOL
+Asian Super Cup	tournaments	AFC
+AFC U-20 Asian Cup	tournaments	AFC
+AFC U-20 Asian Cup Qualifying	tournaments	AFC
+CAF Confederation Cup	tournaments	CAF
+African Cup Winners' Cup	tournaments	CAF
+CAF Super Cup	tournaments	CAF
+African Cup of Nations Qualifying	tournaments	CAF
+U-20 Africa Cup of Nations	tournaments	CAF
+U-20 Africa Cup of Nations Qualifying	tournaments	CAF
+CFU Caribbean Club Shield	tournaments	Concacaf
+Campeones Cup	tournaments	Concacaf
+CONCACAF Under-20 Championship	tournaments	Concacaf
+CONCACAF Under-20 Championship Qualifying	tournaments	Concacaf
+OFC U-19 Championship	tournaments	OFC
+UEFA Intertoto Cup	tournaments	UEFA
+World Cup - UEFA Qualifying Section	tournaments	FIFA
+World Cup - CONMEBOL Qualifying Section	tournaments	FIFA
+World Cup - CAF Qualifying Section	tournaments	FIFA
+World Cup - AFC Qualifying Section	tournaments	FIFA
+World Cup - CONCACAF Qualifying Section	tournaments	FIFA
+World Cup - OFC Qualifying Section	tournaments	FIFA
+World Cup Play-Off Tournament	tournaments	FIFA
+FIFA Confederations Cup	tournaments	FIFA
+FIFA U-20 World Cup	tournaments	FIFA
+U-20 World Cup Play-Off Tournament	tournaments	FIFA
+Algerian League 2	algeria	Algeria National Team
+Algerian Cup	algeria	Algeria National Team
+Algerian Super Cup	algeria	Algeria National Team
+Argentine Primera División B	argentina	Argentina National Team
+Argentine Torneo Federal A	argentina	Argentina National Team
+Supercopa Argentina	argentina	Argentina National Team
+Trofeo de Campeones	argentina	Argentina National Team
+National Premier Leagues NSW	australia	Australia National Team
+National Premier Leagues Queensland	australia	Australia National Team
+National Premier Leagues South Australia	australia	Australia National Team
+National Premier Leagues Victoria	australia	Australia National Team
+National Premier Leagues Western Australia	australia	Australia National Team
+Northern Territory Premier League	australia	Australia National Team
+National Premier Leagues Tasmania	australia	Australia National Team
+National Premier Leagues Northern NSW	australia	Australia National Team
+National Premier Leagues Capital Football	australia	Australia National Team
+Australia Cup	australia	Australia National Team
+Austrian Regionalliga	austria	Austria National Team
+Austrian ÖFB-Cup	austria	Austria National Team
+Belgian Coupe de la Ligue Pro	belgium	Belgian Pro League
+Belgian Division 1 VV	belgium	Belgium National Team
+Belgian Division 1 FFA	belgium	Belgium National Team
+Belgian Division 1	belgium	Belgium National Team
+Supercoupe de Belgique	belgium	Belgium National Team
+Belgian Division 2 VV	belgium	Belgium National Team
+Belgian Division 2 VV A	belgium	Belgium National Team
+Belgian Division 2 VV B	belgium	Belgium National Team
+Belgian Division 2 FFA	belgium	Belgium National Team
+Campeonato Brasileiro Série A	brazil	Brazilian Serie A
+Campeonato Brasileiro Série B	brazil	Brazilian Serie B
+Campeonato Brasileiro Série C	brazil	Brazilian Serie C
+Campeonato Brasileiro Série D	brazil	Brazilian Serie D
+Brazilian Campeonato do Nordeste	brazil	Copa do Nordeste
+Brazilian Campeonato Carioca	brazil	Brazil National Team
+Brazilian Campeonato Paulista	brazil	Brazil National Team
+Brazilian Campeonato do Norte	brazil	Brazil National Team
+Brazilian Campeonato Central	brazil	Brazil National Team
+Brazilian North Lower Division	brazil	Brazil National Team
+Brazilian Central Lower Division	brazil	Brazil National Team
+Brazilian São Paulo Lower Division	brazil	Brazil National Team
+Brazilian Rio de Janeiro Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Gaúcho	brazil	Brazil National Team
+Brazilian Gaúcho Lower Division	brazil	Brazil National Team
+Brazilian Northeast Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Baiano	brazil	Brazil National Team
+Brazilian Bahia Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Goiano	brazil	Brazil National Team
+Brazilian Goiás Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Mineiro	brazil	Brazil National Team
+Brazilian Minas Gerais Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Pernambucano	brazil	Brazil National Team
+Brazilian Pernambuco Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Paranaense	brazil	Brazil National Team
+Brazilian Paraná Lower Division	brazil	Brazil National Team
+Brazilian Campeonato Catarinense	brazil	Brazil National Team
+Brazilian Santa Catarina Lower Division	brazil	Brazil National Team
+Brazilian Supercopa Rei	brazil	Brazil National Team
+Brazilian Copa Norte	brazil	Brazil National Team
+Brazilian Copa Centro-Oeste	brazil	Brazil National Team
+Brazilian Copa Sul-Minas	brazil	Brazil National Team
+Brazilian Torneio Rio-São Paulo	brazil	Brazil National Team
+Kupa na Bulgariya	bulgaria	Bulgaria National Team
+Bulgarian Vtora Liga	bulgaria	Bulgaria National Team
+Superkupa na Bulgariya	bulgaria	Bulgaria National Team
+Bulgarian Elite Cup	bulgaria	Bulgaria National Team
+Copa Chile	chile	Chile National Team
+Supercopa de Chile	chile	Chile National Team
+Chilean Copa de la Liga	chile	Chile National Team
+Chinese League Two	china	China National Team
+Chinese League One	china	China National Team
+Chinese FA Cup	china	China National Team
+Chinese FA Super Cup	china	China National Team
+Copa Colombia	colombia	Colombia National Team
+Colombian Torneo DIMAYOR	colombia	Colombia National Team
+Superliga Colombiana	colombia	Colombia National Team
+Colombian Liga DIMAYOR	colombia	Colombia National Team
+Croatian Prva NL	croatia	Croatia National Team
+Croatian Treca NL	croatia	Croatia National Team
+Hrvatski Kup	croatia	Croatia National Team
+Croatian Druga NL	croatia	Croatia National Team
+Hrvatski Superkup	croatia	Croatia National Team
+Cypriot A' Katigoría	cyprus	Cypriot First Division
+Kýpello Kýprou	cyprus	Cyprus National Team
+Cypriot Super Cup	cyprus	Cyprus National Team
+Cypriot B' Katigoría	cyprus	Cyprus National Team
+Czech 1. Liga	czech-republic	Chance Liga
+Czech Fotbalová Národní Liga	czech-republic	Chance Narodní Liga
+Czech Pohár FACR	czech-republic	Czech Republic Football Association
+Czech Ceská Fotbalová Liga	czech-republic	Czech Republic Football Association
+Czech Moravskoslezská Fotbalová Liga	czech-republic	Czech Republic Football Association
+Danish 1. Division	denmark	1st Division
+Danish 2. Division	denmark	2nd Division
+DBU Pokalen	denmark	Danish Cup
+Danish 3. Division	denmark	Denmark National Team
+Egyptian Super Cup	egypt	Egypt National Team
+Egyptian League Cup	egypt	Egypt National Team
+Egyptian Second Division A	egypt	Egypt National Team
+Egyptian FA Cup	egypt	Egypt National Team
+English National League Cup	england	National League
+English Football League Cup	england	EFL Carabao Cup
+English Football League Trophy	england	English Football League
+English FA Trophy	england	The Football Association
+English Academy League	england	The Football Association
+Finnish Ykkösliiga	finland	Ykkösliiga
+Suomen Cup	finland	Football Association of Finland
+Finnish Ykkönen	finland	Football Association of Finland
+Finnish Kakkonen	finland	Football Association of Finland
+Finnish Kakkonen Group A	finland	Football Association of Finland
+Finnish Kakkonen Group B	finland	Football Association of Finland
+Finnish Kakkonen Group C	finland	Football Association of Finland
+Finnish Kolmonen	finland	Football Association of Finland
+Finnish Liigacup	finland	Football Association of Finland
+French Championnat National 1	france	National 1
+French Championnat National 1/A	france	National 1
+French Championnat National 1/B	france	National 1
+French Championnat National 1/C	france	National 1
+Coupe de France	france	French Cup
+French Championnat National 2	france	French Football Federation
+Trophée des Champions	france	French Football Federation
+Coupe de la Ligue	france	French Football Federation
+German Regionalliga	germany	DFB German Football Association
+Kýpello Elládas	greece	Hellenic Football Federation
+Greek Gamma Ethniki	greece	Hellenic Football Federation
+Soúper Kap Elládos	greece	Hellenic Football Federation
+Hungarian Nemzeti Bajnokság I	hungary	Nemzeti Bajnokság I
+Hungarian Nemzeti Bajnokság II	hungary	Nemzeti Bajnokság II
+Magyar Kupa	hungary	Hungarian Football Federation
+Iranian Hazfi Cup	iran	Iran National Team
+Iranian Super Cup	iran	Iran National Team
+Iranian Azadegan League	iran	Iran National Team
+Italian Serie C/A	italy	Serie C
+Italian Serie C/B	italy	Serie C
+Supercoppa Serie C	italy	Serie C
+Coppa Italia Serie C	italy	Serie C
+Italian Serie C2/A	italy	Serie C
+Italian Serie C2/B	italy	Serie C
+Italian Serie C2/C	italy	Serie C
+Italian Serie C2/D	italy	Serie C
+Italian Serie D/A	italy	Serie D
+Italian Serie D/B	italy	Serie D
+Italian Serie D/C	italy	Serie D
+Italian Serie D/D	italy	Serie D
+Italian Serie D/E	italy	Serie D
+Italian Serie D/F	italy	Serie D
+Italian Serie D/G	italy	Serie D
+Italian Serie D/H	italy	Serie D
+Italian Serie D/I	italy	Serie D
+Coppa Italia Serie D	italy	Serie D
+Japanese Emperor's Cup	japan	Japan National Team
+Japanese J.League Cup	japan	Japan National Team
+Japanese Super Cup	japan	Japan National Team
+Japanese Football League	japan	Japan National Team
+Mexican Campeón de Campeones	mexico	Liga MX
+Moroccan Botola Pro	morocco	Botola Pro
+Moroccan Botola Pro 2	morocco	Botola Pro 2
+Moroccan Throne Cup	morocco	Morocco National Team
+Moroccan Excellence Cup	morocco	Morocco National Team
+Johan Cruijff Schaal	netherlands	Netherlands National Team
+NIFL Championship	northern-ireland	Northern Ireland Football League
+NIFL National Conference League	northern-ireland	Northern Ireland Football League
+NIFL Cup	northern-ireland	Northern Ireland Football League
+NIFL Charity Shield	northern-ireland	Northern Ireland Football League
+Irish Football Association Challenge Cup	northern-ireland	Northern Ireland National Team
+Northern Irish County Antrim Shield	northern-ireland	Northern Ireland National Team
+Norwegian 1. Divisjon	norway	Norwegian First Division
+Norwegian 2. Divisjon	norway	Football Association of Norway
+Norwegian 2. Divisjon Group 1	norway	Football Association of Norway
+Norwegian 2. Divisjon Group 2	norway	Football Association of Norway
+Norwegian 3. Divisjon	norway	Football Association of Norway
+Norwegian Cupen	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 1	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 2	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 3	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 4	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 5	norway	Football Association of Norway
+Norwegian 3. Divisjon Group 6	norway	Football Association of Norway
+Polish 2 Liga	poland	Polish Football Association
+Puchar Ekstraklasy	poland	Polish Football Association
+Puchar Polski	poland	Polish Football Association
+Superpuchar Polski	poland	Polish Football Association
+Polish 3 Liga	poland	Polish Football Association
+Liga Portugal 1	portugal	Primeira Liga
+Liga 3 Série A	portugal	Liga 3
+Liga 3 Série B	portugal	Liga 3
+Campeonato de Portugal	portugal	Portugal National Team
+Campeonato de Portugal Série A	portugal	Portugal National Team
+Campeonato de Portugal Série B	portugal	Portugal National Team
+Campeonato de Portugal Série C	portugal	Portugal National Team
+Campeonato de Portugal Série D	portugal	Portugal National Team
+Supertaça Cândido de Oliveira	portugal	Portugal National Team
+Taça da Liga	portugal	Portugal National Team
+Qatar Cup	qatar	Qatar National Team
+Qatari QSL Cup	qatar	Qatar National Team
+Qatari Sheikh Jassim Cup	qatar	Qatar National Team
+Qatari Stars League 2	qatar	Qatar National Team
+Amir of Qatar Cup	qatar	Qatar National Team
+League of Ireland Cup	republic-of-ireland	League of Ireland
+Irish Senior Challenge Cup	republic-of-ireland	Football Association of Ireland
+Irish National League	republic-of-ireland	Football Association of Ireland
+Irish Leinster Senior League	republic-of-ireland	Football Association of Ireland
+Irish Connacht Senior League	republic-of-ireland	Football Association of Ireland
+Irish Ulster Senior League	republic-of-ireland	Football Association of Ireland
+Irish Munster Senior League	republic-of-ireland	Football Association of Ireland
+President of Ireland's Cup	republic-of-ireland	Football Association of Ireland
+Irish Munster Senior Cup	republic-of-ireland	Football Association of Ireland
+Irish Leinster Senior Cup	republic-of-ireland	Football Association of Ireland
+Cupa României	romania	Romanian Football Federation
+Romanian Liga 2	romania	Romanian Football Federation
+Supercupa României	romania	Romanian Football Federation
+Russian Premier Liga	russia	Russian Premier League
+Superkubok Rossii	russia	Russia National Team
+Russian Second League Division A	russia	Russia National Team
+Russian Second League Division A Gold	russia	Russia National Team
+Russian Second League Division A Silver	russia	Russia National Team
+Russian Second League Division B	russia	Russia National Team
+Kubok Rossii	russia	Russia National Team
+Saudi Pro League	saudi-arabia	Saudi Professional League
+Saudi King's Cup	saudi-arabia	Saudi Arabian Football Federation
+Saudi Super Cup	saudi-arabia	Saudi Arabian Football Federation
+Scottish League Challenge Cup	scotland	Scottish Football Association
+Scottish Lowland Football League	scotland	Scottish Football Association
+Scottish Highland Football League	scotland	Scottish Football Association
+Scottish Pyramid Playoffs	scotland	Scottish Football Association
+Scottish Cup	scotland	Scottish Football Association
+Scottish League Cup	scotland	Scottish Football Association
+Serbian Prva Liga	serbia	Serbia National Team
+Srpska Liga Vojvodina	serbia	Serbia National Team
+Kup Srbije	serbia	Serbia National Team
+Srpska Liga Beograd	serbia	Serbia National Team
+Srpska Liga Zapad	serbia	Serbia National Team
+Srpska Liga Istok	serbia	Serbia National Team
+South African Premiership	south-africa	Premier Soccer League
+South African Championship	south-africa	South Africa National Team
+South African Nedbank Cup	south-africa	South Africa National Team
+South African Top 8 Cup	south-africa	South Africa National Team
+South African Knockout Cup	south-africa	South Africa National Team
+South African Lower Division	south-africa	South Africa National Team
+Korea Cup	south-korea	South Korea National Team
+Korean League Cup	south-korea	South Korea National Team
+Spanish Primera Federación Group 1	spain	Primera Federación
+Spanish Primera Federación Group 2	spain	Primera Federación
+Spanish Primera Federación Group 3	spain	Primera Federación
+Spanish Primera Federación Group 4	spain	Primera Federación
+Spanish Segunda Federación Group 1	spain	Segunda Federación
+Spanish Segunda Federación Group 2	spain	Segunda Federación
+Spanish Segunda Federación Group 3	spain	Segunda Federación
+Spanish Segunda Federación Group 4	spain	Segunda Federación
+Spanish Segunda Federación Group 5	spain	Segunda Federación
+Spanish Segunda Federación	spain	Segunda Federación
+Swedish Ettan	sweden	Swedish Football Association
+Swedish Ettan South	sweden	Swedish Football Association
+Swedish Ettan North	sweden	Swedish Football Association
+Swedish Division 2	sweden	Swedish Football Association
+Swedish Division 2 South Svealand	sweden	Swedish Football Association
+Swedish Division 2 North Götaland	sweden	Swedish Football Association
+Swedish Division 2 Norrland	sweden	Swedish Football Association
+Swedish Division 2 West Götaland	sweden	Swedish Football Association
+Swedish Division 2 North Svealand	sweden	Swedish Football Association
+Swedish Division 2 South Götaland	sweden	Swedish Football Association
+Svenska Cupen	sweden	Swedish Football Association
+Swiss Promotion League	switzerland	Swiss Football Association
+Schweizer Cup	switzerland	Swiss Football Association
+Thai Champions Cup	thailand	Thailand National Team
+Thai League Cup	thailand	Thailand National Team
+Thai League 2	thailand	Thailand National Team
+Thai FA Cup	thailand	Thailand National Team
+Tunisian Ligue Professionnelle 2	tunisia	Tunisia National Team
+Tunisian Super Cup	tunisia	Tunisia National Team
+Tunisian Cup	tunisia	Tunisia National Team
+TFF 2. Lig Group 1	turkey	2. Lig
+TFF 3. Lig	turkey	Turkish Football Federation
+TFF 3. Lig Group 1	turkey	Turkish Football Federation
+TFF 3. Lig Group 2	turkey	Turkish Football Federation
+TFF 3. Lig Group 3	turkey	Turkish Football Federation
+Turkish Süper Kupa	turkey	Turkish Football Federation
+Ukrainian Premier Liha	ukraine	Ukrainian Premier League
+Ukrainian Persha Liha	ukraine	Persha Liga
+Kubok Ukrainy	ukraine	Ukrainian Association of Football
+Superkubok Ukrainy	ukraine	Ukrainian Association of Football
+UAE League Cup	uae	UAE National Team
+UAE Super Cup	uae	UAE National Team
+UAE First Division League	uae	UAE National Team
+UAE President's Cup	uae	UAE National Team
+Supercopa Uruguaya	uruguay	Uruguay National Team
+Uruguayan Segunda División	uruguay	Uruguay National Team
+Copa AUF Uruguay	uruguay	Uruguay National Team
+Uruguayan Copa de la Liga	uruguay	Uruguay National Team
+Welsh Cymru Premier	wales	Cymru Premier
+Welsh Cymru North	wales	Cymru North
+Welsh Cymru South	wales	Cymru South
+FAW Premier Cup	wales	Wales National Team
+FAW Welsh Cup	wales	Wales National Team
+Cymru League Cup	wales	Wales National Team
+English Southern League Premier Division	drawn	sfl-lion.png
+English Southern League Premier Division South	drawn	sfl-lion.png
+English Southern League Premier Division Central	drawn	sfl-lion.png

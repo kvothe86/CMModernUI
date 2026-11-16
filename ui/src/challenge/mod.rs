@@ -39,6 +39,11 @@ pub(crate) unsafe fn season_stat(staff: usize, row: i32, field: i32) -> f32 {
 }
 pub use draw::{bar_item, button_shown, flip, input, overlay};
 
+/// The CM Challenge page is up (over the screen).
+pub(crate) fn page_open() -> bool {
+    unsafe { draw::OPEN }
+}
+
 const RULES: &[u8] = include_bytes!("rules.tsv");
 /// The Dutch names of the first version: a league file that has them counts as with the new ones.
 const RENAMES: &[u8] = include_bytes!("renames.tsv");

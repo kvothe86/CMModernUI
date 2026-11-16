@@ -192,6 +192,99 @@ pub unsafe fn remote_note(channel: i16, number: u32) -> Option<Vec<u8>> {
     REMOTE_NOTES.iter().find(|n| n.0 == channel && n.1 == number).map(|n| n.2.clone())
 }
 
+/// A slot's group for the bench: 0 keeper, 1 centre-back, 2 full / wing back, 3 central
+/// midfield, 4 wide midfield / winger, 5 attacking midfield, 6 striker, 7 defensive midfield (its
+/// own: a 4-1-4-1 got a central midfielder and no reserve DM, user 2026-11-17).
+fn bench_group(label: &[u8]) -> Option<usize> {
+    Some(match label {
+        b"GK" => 0,
+        b"DC" | b"SW" => 1,
+        b"DL" | b"DR" | b"WBL" | b"WBR" => 2,
+        b"DMC" => 7,
+        b"MC" => 3,
+        b"ML" | b"MR" | b"AML" | b"AMR" | b"DML" | b"DMR" => 4,
+        b"AMC" => 5,
+        l if l.starts_with(b"F") => 6,
+        _ => return None,
+    })
+}
+
+/// What the bench must cover, most needed first: a keeper always, then each group of the eleven
+/// (centre-back, defensive mid, central midfield, striker, full-back, wide, attacking midfield),
+/// with the eleven's own labels of that group. A short bench keeps the first ones (user
+/// 2026-11-17: one sub for each position before a second of the best).
+pub(crate) fn bench_wants<'a>(starters: &[&'a [u8]]) -> Vec<Vec<&'a [u8]>> {
+    // by the tactic (user 2026-11-17): a group weighs as many as its places in the eleven (a pair
+    // of flank places, full-backs or wide men, as one: one sub covers either side); the most used
+    // first, then a second sub for each group of two or more, and so on; ties in this order
+    let mut groups: Vec<(usize, usize, Vec<&'a [u8]>)> = Vec::new();
+    for (order, g) in [1, 7, 3, 6, 2, 4, 5].into_iter().enumerate() {
+        let mut labels: Vec<&'a [u8]> = starters.iter().copied().filter(|l| bench_group(l) == Some(g)).collect();
+        let n = labels.len();
+        if n == 0 {
+            continue;
+        }
+        labels.sort();
+        labels.dedup();
+        let weight = if g == 2 || g == 4 { n.div_ceil(2) } else { n };
+        groups.push((weight, order, labels));
+    }
+    groups.sort_by_key(|g| (std::cmp::Reverse(g.0), g.1));
+    let mut out: Vec<Vec<&'a [u8]>> = vec![vec![b"GK"]];
+    for round in 1..=groups.first().map_or(0, |g| g.0) {
+        out.extend(groups.iter().filter(|g| g.0 >= round).map(|g| g.2.clone()));
+    }
+    out
+}
+
+/// Natural for a slot: his role and his side both rated 15 or more (ratings: GK, SW, D, DM, M,
+/// AM, F, WB, then the sides R, L, C; player +15).
+fn natural_by(ratings: &[i8; 11], label: &[u8]) -> bool {
+    if label == b"GK" {
+        return ratings[0] >= 15;
+    }
+    let roles: [(&[u8], usize); 7] = [(b"SW", 1), (b"DM", 3), (b"AM", 5), (b"WB", 7), (b"D", 2), (b"M", 4), (b"F", 6)];
+    let Some(&(prefix, role)) = roles.iter().find(|(p, _)| label.starts_with(p)) else { return false };
+    let side = match label.get(prefix.len()) {
+        Some(b'R') => 8,
+        Some(b'L') => 9,
+        _ => 10,
+    };
+    ratings[role] >= 15 && ratings[side] >= 15
+}
+
+/// A staff member's natural fit for a slot (his player record's ratings).
+pub(crate) unsafe fn natural(staff: usize, label: &[u8]) -> bool {
+    let p = if readable(staff + 0x61, 4) { ((staff + 0x61) as *const usize).read_unaligned() } else { 0 };
+    if !readable(p, GK + 11) {
+        return false;
+    }
+    natural_by(&std::array::from_fn(|k| rd::<i8>(p + GK + k)), label)
+}
+
+#[cfg(test)]
+#[test]
+fn bench_covers_each_position() {
+    let firsts = |xi: &[&'static [u8]]| -> Vec<&'static [u8]> { bench_wants(xi).iter().map(|g| g[0]).collect() };
+    // 4-1-4-1: centre-backs and central mids weigh two, the rest one; then a second of each pair
+    let xi: Vec<&[u8]> = vec![b"GK", b"DL", b"DC", b"DC", b"DR", b"DMC", b"ML", b"MC", b"MC", b"MR", b"FC"];
+    assert_eq!(firsts(&xi), vec![&b"GK"[..], b"DC", b"MC", b"DMC", b"FC", b"DL", b"ML", b"DC", b"MC"]);
+    // two defenders, three defensive mids: the DMs first and most
+    let xi: Vec<&[u8]> = vec![b"GK", b"DC", b"DC", b"DMC", b"DMC", b"DMC", b"ML", b"MR", b"AMC", b"FC", b"FC"];
+    assert_eq!(firsts(&xi)[..3], [&b"GK"[..], b"DMC", b"DC"]);
+    assert_eq!(firsts(&xi).iter().filter(|l| **l == b"DMC").count(), 3);
+    // 3-4-3 with three forwards: centre-backs and strikers three, central mids two
+    let xi: Vec<&[u8]> = vec![b"GK", b"DC", b"DC", b"DC", b"ML", b"MC", b"MC", b"MR", b"FC", b"FC", b"FC"];
+    assert_eq!(firsts(&xi)[..4], [&b"GK"[..], b"DC", b"FC", b"MC"]);
+    // a natural DC: D and C 15+; not a DL without the left side
+    let mut r = [5i8; 11];
+    (r[2], r[10]) = (16, 17);
+    assert!(natural_by(&r, b"DC") && !natural_by(&r, b"DL") && !natural_by(&r, b"DMC"));
+    r[3] = 15;
+    assert!(natural_by(&r, b"DMC"));
+    assert!(!natural_by(&r, b"GK"));
+}
+
 /// The eleven slots' labels of a formation, then nine bench slots.
 pub(crate) unsafe fn formation_slots(formation: usize) -> Vec<Vec<u8>> {
     let mut slots: Vec<Vec<u8>> = (0..11).map(|k| label_of(game::<extern "thiscall" fn(usize, i32, i32) -> u32>(SLOT_POSITION)(formation, k, 0))).collect();
@@ -1610,12 +1703,18 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
             s(x).total_cmp(&s(y))
         })
     };
-    // (wing backs only where the tactic has them: their rating is apart from a defender's)
-    let backs: Vec<&[u8]> = [&b"DC"[..], b"DL", b"DR"].into_iter().chain(starters.iter().copied().filter(|l| l.starts_with(b"WB"))).collect();
-    let lines: [&[&[u8]]; 4] = [&[b"GK"], &backs, &[b"MC", b"ML", b"MR", b"DMC", b"AMC"], &[b"FC", b"AMC"]];
+    // one for each position of the eleven first (a natural one where there is one), then the
+    // best of the rest (user 2026-11-17)
+    let wants = bench_wants(&starters);
     let all: Vec<&[u8]> = starters.iter().copied().filter(|l| *l != b"GK").collect();
+    let natural_for = |labels: &[&[u8]], bench: &Vec<usize>| -> Option<usize> {
+        (0..pool.len()).filter(|&i| !taken(i, bench) && labels.iter().any(|l| natural(pool[i].staff, l))).max_by(|&x, &y| {
+            let s = |i: usize| labels.iter().map(|l| score(&pool[i], l)).fold(f64::MIN, f64::max);
+            s(x).total_cmp(&s(y))
+        })
+    };
     for k in 0..bench_slots {
-        let pick = if k < lines.len() { best_for(lines[k], &bench) } else { best_for(&all, &bench) };
+        let pick = if k < wants.len() { natural_for(&wants[k], &bench).or_else(|| best_for(&wants[k], &bench)) } else { best_for(&all, &bench) };
         match pick {
             Some(i) => bench.push(i),
             None => break,
@@ -1832,20 +1931,25 @@ pub(crate) unsafe fn fill_team(club: usize, slots: &[Vec<u8>], unavailable: &[us
     let named = if readable(fixture, 0x50) { (rd::<u8>(fixture + 0x4d) & 0xf) as usize } else { 0 };
     let bench_slots = if (1..=9).contains(&named) { named } else { 9.min(slots.len().saturating_sub(11)) };
     let mut bench: Vec<usize> = fixed[11..].iter().copied().filter(|&s| s != 0).take(bench_slots).collect();
-    let backs: Vec<&[u8]> = [&b"DC"[..], b"DL", b"DR"].into_iter().chain(starters.iter().copied().filter(|l| l.starts_with(b"WB"))).collect();
-    let lines: [&[&[u8]]; 4] = [&[b"GK"], &backs, &[b"MC", b"ML", b"MR", b"DMC", b"AMC"], &[b"FC", b"AMC"]];
+    // one for each position of the eleven first (a natural one where there is one; a group the
+    // kept bench places already cover is skipped), then the best of the rest (user 2026-11-17)
+    let wants = bench_wants(&starters);
     let all: Vec<&[u8]> = starters.iter().copied().filter(|l| *l != b"GK").collect();
-    let keeper_on_bench = bench.iter().any(|&s| readable(s, 0x6e) && rd::<i8>(((s + 0x61) as *const usize).read_unaligned() + GK) >= 15);
     let mut picked_subs = Vec::new();
-    let mut line = if keeper_on_bench { 1 } else { 0 };
+    let mut line = 0;
+    // (the bench places the manager kept count for the first wants they fit, one each)
+    let mut kept = bench.clone();
     while bench.len() < bench_slots {
-        let want: &[&[u8]] = if line < lines.len() { lines[line] } else { &all };
+        while let Some(at) = wants.get(line).and_then(|w| kept.iter().position(|&s| w.iter().any(|l| natural(s, l)))) {
+            kept.remove(at);
+            line += 1;
+        }
+        let want: &[&[u8]] = if line < wants.len() { &wants[line] } else { &all };
         line += 1;
         let taken = |i: usize| used(i, &chosen) || eleven.contains(&pool[i].staff) || bench.contains(&pool[i].staff);
-        let best = (0..pool.len()).filter(|&i| !taken(i)).max_by(|&x, &y| {
-            let s = |i: usize| want.iter().map(|l| eye.score(&pool[i], l)).fold(f64::MIN, f64::max);
-            s(x).total_cmp(&s(y))
-        });
+        let s = |i: usize| want.iter().map(|l| eye.score(&pool[i], l)).fold(f64::MIN, f64::max);
+        let best_of = |only_natural: bool| (0..pool.len()).filter(|&i| !taken(i) && (!only_natural || want.iter().any(|l| natural(pool[i].staff, l)))).max_by(|&x, &y| s(x).total_cmp(&s(y)));
+        let best = if want.len() < all.len() || want == [&b"GK"[..]] { best_of(true).or_else(|| best_of(false)) } else { best_of(false) };
         match best {
             Some(i) => {
                 chosen.push(i);

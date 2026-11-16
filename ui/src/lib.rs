@@ -354,7 +354,8 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // (only a wide cell (a date) or one at a list's right edge (the away side): the squad's
         // selection slots (50 wide, at the row's start) and the squad numbers' slots are boxes to
         // keep, they vanished with this, user 2026-11-16)
-        let date_or_away = x2 - x1 > 150 || x2 > sw * 95 / 100;
+        // (a group's fixture dates are 135 wide: over 100; slots and shirt numbers are 50..76)
+        let date_or_away = x2 - x1 > sx(100) || x2 > sw * 95 / 100;
         if theme && !MENU_BAR_PICTURE && flags == 0x30 && (is_colour(low, 0x0008) || is_colour(low, 0x39e8)) && x2 - x1 < 400 && y2 - y1 < 40 && date_or_away {
             fill(x1, y1, x2 + 1, y2 + 1, AREA);
             return;
@@ -1181,7 +1182,9 @@ unsafe fn keep_picture() {
 
 #[allow(static_mut_refs)]
 unsafe fn let_picture_through(left: i32, top: i32, right: i32, bottom: i32) {
-    if BEHIND.0.is_empty() {
+    // (the CM Challenge pages keep a plain dark background: their small text over a picture was
+    // hard to read, user 2026-11-16)
+    if BEHIND.0.is_empty() || (on(CHALLENGE) && challenge::page_open()) {
         return;
     }
     let area = rgb(AREA);
@@ -1653,9 +1656,16 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 } else {
                     let width = game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(font, text);
                     let (cx, h) = ((x1 + x2) / 2, y2 - y1);
+                    // (in a match a player out of it, injured or sent off, greyed: his shirt above
+                    // the name washed grey, the name and his fitness grey, user 2026-11-17)
+                    let out = LIVE_TACTICS && pitch_member(t).is_some_and(|s| live_out(s));
+                    if out {
+                        let (sw2, sh2) = (h * 3 / 2, h * 13 / 5);
+                        blend(cx - sw2, y1 - sh2, 2 * sw2, sh2, |_, _| (rgb565([0x6a, 0x6e, 0x74]), 170));
+                    }
                     pill(cx - width / 2 - 8, y1 + 1, cx + width / 2 + 8, y2 - 1, [0x14, 0x18, 0x1c]);
                     // the game's own bytes (Latin-1: "Tó Madeira")
-                    game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(cx - width / 2 - 8, y1, cx + width / 2 + 8, y2, 0xc, font, rgb(WHITE) as u32, text, -1);
+                    game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(cx - width / 2 - 8, y1, cx + width / 2 + 8, y2, 0xc, font, rgb(if out { GREY } else { WHITE }) as u32, text, -1);
                     // (the human's own club only: an opponent's condition is not the human's to see)
                     let own = human_runs(SQUAD_CLUB);
                     // (during a match his live condition from the match engine)
@@ -1670,7 +1680,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                         let fw = game::<extern "C" fn(u32, *const i8) -> i32>(TEXT_WIDTH)(small, c.as_ptr());
                         let top = y2 + if small_screen() { 5 } else { 2 };
                         let bottom = top + h * 85 / 100;
-                        pill(cx - fw / 2 - 7, top, cx + fw / 2 + 7, bottom, if fit >= 90 { [0x2e, 0x7d, 0x52] } else { [0x9a, 0x7a, 0x30] });
+                        pill(cx - fw / 2 - 7, top, cx + fw / 2 + 7, bottom, if out { [0x4a, 0x4e, 0x54] } else if fit >= 90 { [0x2e, 0x7d, 0x52] } else { [0x9a, 0x7a, 0x30] });
                         put(cx - fw / 2 - 7, top, cx + fw / 2 + 7, bottom, 0xc, small, WHITE, &label);
                     }
                     return;
@@ -4418,7 +4428,7 @@ unsafe fn tactics_row(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32
         // (in a match the box call draws nothing here: the plain text routine, cut to fit; grey
         // when he is not on the pitch: a sub not yet on, a starter gone off)
         let bytes = clip_text(f, std::ffi::CStr::from_ptr(shown).to_bytes(), room);
-        let off = live_off_pitch(staff);
+        let off = live_out(staff);
         text_at(x1 + 2, y1, y2, f, if off { GREY } else { LIGHT }, &bytes, 0);
     } else {
         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(x1, y1, name_end, y2, 0x1, f, colour, shown, -1);
@@ -4437,7 +4447,7 @@ unsafe fn tactics_row(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32
             if pos.starts_with(b"SB") {
                 pos = if k % 20 >= 11 { clip_text(small, &positions_text(staff), text_width(small, b"DMCR") + sx(14).max(6)) } else { b"-".to_vec() };
             }
-            text_at(cols[0], y1, y2, small, if dim { GREY } else { GOLD }, &pos, 1);
+            text_at(cols[0], y1, y2, small, if dim || live_out(staff) { GREY } else { GOLD }, &pos, 1);
             text_at(cols[1], y1, y2, small, fit_colour(cond), format!("{cond}%").as_bytes(), 1);
         }
         if TACTICS_HEAD.is_none_or(|h| y1 < h.0) {
@@ -4483,6 +4493,20 @@ unsafe fn live_off_pitch(staff: usize) -> bool {
         }
         None => false,
     }
+}
+
+/// In a match, the player is out of it: off the pitch, or a starter with no place on it any more
+/// (injured or sent off: his slot neither 0..=10 nor the -2 of a starter before the kick-off),
+/// greyed in the tactics screen's list and on its pitch (user 2026-11-17).
+unsafe fn live_out(staff: usize) -> bool {
+    let Some(e) = live_engine() else { return false };
+    if live_off_pitch(staff) {
+        return true;
+    }
+    live_player(e, staff).is_some_and(|p| {
+        let (k, slot) = ((p - (e + 0x4796)) / 0x1be, rd::<i8>(p + 0x19));
+        k % 20 < 11 && !(0..=10).contains(&slot) && slot != -2
+    })
 }
 
 /// A player's row in the match engine (0x1be bytes; +0x69 Staff*, +0x4d live condition 0..10000
