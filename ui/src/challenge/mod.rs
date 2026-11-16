@@ -668,6 +668,9 @@ unsafe fn use_game() {
     let humans = humans();
     let Some((first, name)) = humans.last() else { return };
     let start = facts_of(*first).1.first().map_or((0, 0, 0), |j| (j.year, j.day, j.club - rd::<usize>(CLUB_TABLE)));
+    if start.0 > 0 {
+        START_SEASON = start_season(start.1, start.0);
+    }
     let file = format!("cmchallenge_{:08x}.tsv", game_key(name, start.0, start.1, start.2));
     if file == FILE {
         return;
@@ -985,7 +988,18 @@ unsafe fn top_scorer(club: usize) -> Option<(String, i32)> {
 }
 
 unsafe fn this_season() -> i32 {
-    season_from(rd::<i16>(TODAY), rd::<i16>(TODAY + 2) as i32, RUNNING_FROM)
+    season_from(rd::<i16>(TODAY), rd::<i16>(TODAY + 2) as i32, RUNNING_FROM).max(START_SEASON)
+}
+
+/// The season the loaded game began in (0 unknown): never earlier than the running one.
+static mut START_SEASON: i32 = 0;
+/// 1 June: a game begun from here on is the coming season's (the 26/27 database starts on 27
+/// June 2026; its spins were for 2025/26, user 2026-11-16).
+const START_FROM: i16 = 152;
+
+/// The season of a game begun on `day` of `year`.
+fn start_season(day: i16, year: i32) -> i32 {
+    season_from(day, year, START_FROM)
 }
 
 /// Every manager's seasons: as entered where the file has them, else from the game. This
@@ -1564,6 +1578,10 @@ mod tests {
         assert_eq!(season_from(RUNNING_FROM, 2025, RUNNING_FROM), 2025);
         assert_eq!(season_from(RUNNING_FROM - 1, 2026, RUNNING_FROM), 2025); // 30 June
         assert_eq!(season_from(30, 2026, RUNNING_FROM), 2025);
+        // a game begun on 27 June (the 26/27 database) is the coming season's, one in July too
+        assert_eq!(start_season(178, 2026), 2026);
+        assert_eq!(start_season(192, 2025), 2025);
+        assert_eq!(start_season(30, 2026), 2025);
         // a supercup in the days before 200 still counts to the season gone
         assert_eq!(season_from(192, 2025, SEASON_FROM), 2024);
         assert_eq!(season_from(SEASON_FROM, 2025, SEASON_FROM), 2025);

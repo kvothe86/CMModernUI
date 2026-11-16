@@ -331,7 +331,9 @@ def comps_by_name(by_slug, done):
                     fit = max(difflib.SequenceMatcher(None, ' '.join(k), ' '.join(site_words)).ratio() for k in ks)
                     ranked.append((fit, c))
             ranked.sort(key=lambda t: -t[0])
-            if ranked and (len(ranked) == 1 or ranked[1][0] < ranked[0][0] - 0.02):
+            # (a fit under 0.4 is two short words inside a long name: "Premier League" took
+            # "English Southern League Premier Division South" at 0.35; right weak ones are 0.45+)
+            if ranked and ranked[0][0] >= 0.4 and (len(ranked) == 1 or ranked[1][0] < ranked[0][0] - 0.02):
                 c = ranked[0][1]
                 rows.append((f'c{cid}', name, slug, rep, c[0], c[1], f'{ranked[0][0]:.2f}', ''))
                 done.add(name)

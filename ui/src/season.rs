@@ -53,6 +53,8 @@ static mut CARD: Option<Card> = None;
 static mut LOADED: bool = false;
 static mut DAY: i32 = -1;
 static mut OPEN: bool = false;
+/// A card worked out on a new day, opened once the game waits for the user again.
+static mut DUE: bool = false;
 /// When the card came up: a release in its first moments belongs to the click that loaded the
 /// game (it loads on the press) and lands on Back, closing the card unseen (night 8).
 static mut OPENED_AT: Option<std::time::Instant> = None;
@@ -404,8 +406,14 @@ pub unsafe fn flip() {
             if let Some(s) = SNAPS.iter_mut().find(|s| s.club == index && s.season == season - 1 && s.shown < s.season) {
                 s.shown = s.season;
                 let s = s.clone();
-                CARD = Some(card(staff, &s));
-                OPEN = true;
+                // (no league match in it: a game begun in June, the 26/27 database's 27 June,
+                // has a few days of the season before; no card of zeros, user 2026-11-16)
+                if s.row[0] > 0 {
+                    CARD = Some(card(staff, &s));
+                    DUE = true;
+                } else {
+                    log(&format!("season card: season {} had no league match, none shown", s.season));
+                }
                 save();
             }
             take(day, year);
@@ -425,6 +433,12 @@ pub unsafe fn flip() {
                 None => log(&format!("season card: no snapshot of club {index} (no league row)")),
             }
         }
+    }
+    // (opened on the first flip the game waits for the user again: never over the screen of days
+    // going by, where no click reaches it and Back cannot close it, user 2026-11-16)
+    if DUE && crate::polling() {
+        DUE = false;
+        OPEN = true;
     }
     // (logged: a test's click on the bottom right closes it unseen, night 8)
     static mut LOGGED: bool = false;

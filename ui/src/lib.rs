@@ -278,6 +278,11 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
             game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1, x2, y2, flags & !0x800, colour, extra);
             fill(x1 + 1, y2 - 3, x2, y2, GOLD);
             ACTIVE_TAB = (x1, y1, x2, y2);
+            // (the news' flat tab bar must know the open tab too: without it the bar's fill wiped
+            // any open tab but the first, its label gone, user 2026-11-16)
+            if on(THEME_ON) {
+                news::note_panel(x1, y1, x2, y2, flags);
+            }
             return;
         }
         if (x1, y1, x2, y2) == ACTIVE_TAB {
@@ -291,10 +296,16 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // no bar picture of ours (the background carries the bar: Restructured 26/27's pack, its
         // g800.mbr deleted): the game's own boxes, lines and all, over the background's bar
         if theme && on(MENU_FIXES) && x2 <= bar_end(sw) && (flags == 0x1021 || flags == 0x1061) && !MENU_BAR_PICTURE {
-            game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1, x2, y2, flags, colour, extra);
-            // inside the box the background 60% darker: the labels read on a light bar too
-            if DARKEN_ORIG != 0 {
-                game::<extern "C" fn(i32, i32, i32, i32)>(DARKEN_ORIG)(x1 + 1, y1 + 1, x2 - 1, y2 - 1);
+            // (Game Options' home: one box there for each of cmui's own buttons that take it (CM
+            // Challenge, Coach), then Game Options' own under them)
+            let n = if OPTIONS_HOME == Some((x1, y1, x2, y2)) { EXTRA_BUTTONS } else { 0 };
+            for k in 0..=n {
+                let s = k * (y2 - y1 + 4);
+                game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1 + s, x2, y2 + s, flags, colour, extra);
+                // inside the box the background 60% darker: the labels read on a light bar too
+                if DARKEN_ORIG != 0 {
+                    game::<extern "C" fn(i32, i32, i32, i32)>(DARKEN_ORIG)(x1 + 1, y1 + s + 1, x2 - 1, y2 + s - 1);
+                }
             }
             return;
         }
@@ -333,6 +344,13 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         } else if theme && flags & 0xff == 0x30 {
             LAST_FRAME = (x1, y1, x2, y2);
             FRAME_DRAWN = true;
+        }
+        // picture mode: a list's grey / navy cells (a schedule's or the news' dates, the away
+        // side's nation / flag, "Low") take the row's own see-through look, gaps and all, with no
+        // frame line: light blocks, seams and underlines over a picture (user 2026-11-16, 5 6 13 16 17)
+        if theme && !MENU_BAR_PICTURE && flags == 0x30 && (is_colour(low, 0x0008) || is_colour(low, 0x39e8)) && x2 - x1 < 400 && y2 - y1 < 40 {
+            fill(x1, y1, x2 + 1, y2 + 1, AREA);
+            return;
         }
         if theme && flags == 0x30 && is_colour(low, 0x0008) && x2 - x1 < 100 {
             colour = colour & !0xffff | px565(0x39e8);
@@ -1160,6 +1178,15 @@ unsafe fn let_picture_through(left: i32, top: i32, right: i32, bottom: i32) {
         return;
     }
     let area = rgb(AREA);
+    // picture mode (the background carries the menu bar: Restructured 26/27's pack): cmui's own
+    // solid dark pieces let the picture through as the panels do, so they sit in it (user's
+    // choice 2026-11-16): the bars' empty tracks (SIDEBAR), the table's Pts cells, match events
+    let f565 = screen_format() == Some(true);
+    let (shows, see): (u32, Vec<(u16, [u32; 3])>) = if MENU_BAR_PICTURE {
+        (0, Vec::new())
+    } else {
+        (PICTURE_SHOWS, [SIDEBAR, [0x26, 0x2a, 0x31], [0x26, 0x2b, 0x31]].iter().map(|&c| (rgb(c), unpack(rgb(c) as u32, f565))).collect())
+    };
     with_back_buffer(|bits, pitch, w, h| {
         if (w, h) != (BEHIND.1, BEHIND.2) {
             return;
@@ -1172,10 +1199,21 @@ unsafe fn let_picture_through(left: i32, top: i32, right: i32, bottom: i32) {
             for x in x1 as usize..x2 as usize {
                 if row[x] == area {
                     row[x] = THROUGH[under[x] as usize];
+                } else if let Some((_, c)) = see.iter().find(|s| s.0 == row[x]) {
+                    let p = unpack(under[x] as u32, f565);
+                    row[x] = pack([0, 1, 2].map(|i| (p[i] * shows + c[i] * (100 - shows)) / 100), f565);
                 }
             }
         }
     });
+}
+
+/// A flip of part of the screen outside the flip pass: the picture let through AREA first.
+extern "C" fn flip_through(left: i32, top: i32, right: i32, bottom: i32) {
+    unsafe {
+        let_picture_through(left, top, right, bottom);
+        game::<extern "C" fn(i32, i32, i32, i32)>(FLIP_RECT)(left, top, right, bottom);
+    }
 }
 
 /// Points the one direct call to `target` inside [func, func + len) at `hook`.
@@ -3163,6 +3201,12 @@ static mut SCRIPT_NEXT: Option<std::time::Instant> = None;
 static mut SCRIPT_PAUSE: u64 = 1500;
 /// When poll_input last ran (the flip pass runs the script while it does not, in a live match).
 static mut LAST_POLL: Option<std::time::Instant> = None;
+
+/// The game waits for the user (its input poll ran lately): not a screen of days going by or a
+/// live match's own loop.
+pub(crate) fn polling() -> bool {
+    unsafe { LAST_POLL.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(700)) }
+}
 /// The texts drawn since a test script came (newest last: box, lower-case trimmed text), so
 /// `click <label>` / `hover <label>` find a button or row at any resolution.
 static mut SCRIPTED: bool = false;
@@ -5326,7 +5370,9 @@ extern "C" fn glyph(x: i32, y: i32, colour: u32, g: *const u8) {
         let s = w.max(h) as f32 * 0.75;
         // (a dark button's arrow light; the arrows on a white or club-coloured title band stay)
         let dark = |p: [u8; 3]| (p[0] as i32 + p[1] as i32 + p[2] as i32) < 330;
-        let c565 = if on(MODERN_BUTTONS) && pixel_at(x, y).is_some_and(dark) { rgb565(LIGHT) } else { colour as u16 };
+        // (below the title band it is always a button's: over a picture background the pixel
+        // under it can be the light picture, and it came out black, user 2026-11-16)
+        let c565 = if on(MODERN_BUTTONS) && (pixel_at(x, y).is_some_and(dark) || y > screen().1 * 15 / 100) { rgb565(LIGHT) } else { colour as u16 };
         // a chevron: two strokes meeting at the tip
         let (tip, a, b) = match dir {
             0 => ((cx + s * 0.45, cy), (cx - s * 0.45, cy - s), (cx - s * 0.45, cy + s)),
@@ -7462,6 +7508,16 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             // (a scroll bar being dragged stays in the game's style: Area::draw_scrollbar draws
             // it without the panels `news::scrollbars` restyles; sending Area::scroll_rows' flip
             // through the flip pass did not change that, 2026-11-04, left so on the user's word)
+            // the game's other flips of a part of the screen (a text field's caret, a widget, a
+            // scrolled list) let the picture through too: without it a cell redrawn alone stayed
+            // solid AREA, a black box behind a name being typed (26/27, 2026-11-16)
+            if on(BACKGROUND_SHOW) {
+                for (func, len, count) in [(0x402d10, 112, 1), (0x402d80, 240, 1), (0x403ee0, 752, 1), (0x55f2c0, 64, 1), (0x561050, 448, 1),
+                    (0x561210, 1456, 3), (0x5617c0, 1872, 2), (0x561f10, 736, 2), (0x5e30e0, 1440, 1), (0x5e8290, 1552, 2), (0x5eec20, 144, 1),
+                    (0x5eecb0, 160, 1), (0x5eed50, 432, 1), (0x7fdc00, 2208, 1)] {
+                    patch_calls(func, len, FLIP_RECT, flip_through as usize, count);
+                }
+            }
             patch_calls(AREA_DRAW, 816, DRAW_LINE, no_grid_line as usize, 2);
             patch_calls(GUIO_DRAW, 1680, DRAW_GLYPH, glyph as usize, 5);
             patch_call(OTHER_ITEM_CALL, 5, ADD_ITEM, other_item as usize);
