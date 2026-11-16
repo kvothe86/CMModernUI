@@ -5959,6 +5959,15 @@ const SEARCH_INPUT: usize = 0x80eb00; // search_screens_handle_player_search_inp
 const SEARCH_VIEW: usize = 0xdd6cc8; // u32* to the current tab's view bits
 const FORMAT_POSITIONS: usize = 0x53ee50; // database_format_player_positions(player, buf, size, style)
 
+/// A player's hidden scout score (intrinsic, no one's eye), the host's on a network client.
+#[allow(dead_code)]
+pub(crate) unsafe fn hidden_score_of(staff: usize) -> Option<f64> {
+    if remote::CLIENT {
+        return ask_host(&key(b'h', &[staff as u32])).and_then(|v| std::str::from_utf8(&v).ok()?.parse().ok());
+    }
+    scout::hidden_score(staff)
+}
+
 /// A player's positions as the game writes them ("D/DM RC"), the host's words in a network client.
 unsafe fn positions_text(staff: usize) -> Vec<u8> {
     if remote::CLIENT {
@@ -7035,6 +7044,7 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'V' => valid_staff(staff).then(|| to_latin1(&money_texts(staff).1)),
         b'A' => (valid_staff(staff) && mapped(*((staff + 0x61) as *const usize), 70)).then(|| attributes(staff).to_vec()),
         b'O' => valid_staff(staff).then(|| positions_text(staff)),
+        b'h' => valid_staff(staff).then(|| scout::hidden_score(staff).map_or(Vec::new(), |v| format!("{v:.1}").into_bytes())),
         b'M' => compare_players(&key[1..]).map(|(a, b)| [le(a), le(b)].concat()),
         b'G' => staff_by_row_name(&key[1..]).map(le),
         // a story's crest from its links (empty: none)

@@ -95,7 +95,8 @@ struct Section {
 
 /// cp1252 as the game writes it (0x80 the euro, the rest as latin1).
 fn text(b: &[u8]) -> String {
-    b.iter().map(|&c| if c == 0x80 { '\u{20ac}' } else { c as char }).collect()
+    // (0xA4 as well: the Restructured packs write their euro there, the user, 2026-11-17)
+    b.iter().map(|&c| if c == 0x80 || c == 0xa4 { '\u{20ac}' } else { c as char }).collect()
 }
 
 fn rule(l: &str, c: char) -> bool {

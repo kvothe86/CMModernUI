@@ -23,7 +23,8 @@ fn js(s: &str) -> String {
         match c {
             '"' => o += "\\\"",
             '\\' => o += "\\\\",
-            '\u{80}' => o.push('\u{20ac}'),
+            // (0xA4 too: the Restructured packs' currency is "\xa4uro", a font with a euro at 0xA4)
+            '\u{80}' | '\u{a4}' => o.push('\u{20ac}'),
             '<' => o += "\\u003c",
             c if (c as u32) < 0x20 => o += &format!("\\u{:04x}", c as u32),
             c => o.push(c),
@@ -89,7 +90,7 @@ pub unsafe fn page(club: usize) -> Option<String> {
     let me = index_of(club);
     let (name, short) = names(club);
     let (cols, balance, funds, money) = finreport::figures(club).unwrap_or_default();
-    let cur = money.symbol.replace('\u{80}', "\u{20ac}");
+    let cur = money.symbol.replace(['\u{80}', '\u{a4}'], "\u{20ac}");
     let shown = |v: i64| (v as f64 * money.rate).round() as i64;
     let mut j = String::from("{");
 
