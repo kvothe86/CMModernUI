@@ -1895,7 +1895,9 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 // a slot (a squad's selection cell, a number; small) is a place to drop a player on,
                 // filled or not: a thin outline shows it, else an empty one could not be found
                 // (user 2026-11-16); a wide one (a date) stays flat
-                if t.is_empty() || x2 - x1 < sx(80) {
+                // (not on the match screen: Player Ratings' away numbers are such cells, the home
+                // side's plain text, and got boxes on one side only, user 2026-11-16)
+                if !MATCH && (t.is_empty() || x2 - x1 < sx(80)) {
                     const SLOT: [u8; 3] = [0x5a, 0x62, 0x6e];
                     fill(x1 + 2, y1 + 2, x2 - 1, y1 + 3, SLOT);
                     fill(x1 + 2, y2 - 2, x2 - 1, y2 - 1, SLOT);

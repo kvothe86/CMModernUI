@@ -250,6 +250,35 @@ def same_comp(a, b):
                 or (digits_a and digits_b and digits_a != digits_b))
 
 
+def sfl_lion():
+    """The Southern League's white lion alone, out of the site's "SFL Premier South" picture
+    (a navy box with the division's name under the lion): the navy made clear and the name band
+    cut off, so it sits on any title band (user 2026-11-16: the box "blends ugly")."""
+    from PIL import Image
+    path = f'{OUT}/png/sfl-lion.png'
+    if os.path.exists(path):
+        return
+    src = next((url for slug, name, url in csv.reader(open(f'{OUT}/index.tsv', encoding='utf-8'), delimiter='\t')
+                if name == 'Southern Football League Premier South'), None)
+    box = f'{OUT}/png/{src.rsplit("/", 1)[-1]}' if src else None
+    if not box or not os.path.exists(box):
+        return
+    im = Image.open(box).convert('RGBA')
+    w, h = im.size
+    im = im.crop((0, 0, w, int(h * 0.66)))  # the name band below the lion
+    px = im.load()
+    for y in range(im.height):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            light = min(r, g, b)  # the lion is white, the box navy: how white, as opacity
+            px[x, y] = (255, 255, 255, a * max(0, min(255, (light - 60) * 255 // 150)) // 255)
+    im = im.crop(im.getbbox() or (0, 0, w, im.height))
+    side = max(im.size)
+    out = Image.new('RGBA', (side, side))
+    out.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
+    out.resize((256, 256), Image.LANCZOS).save(path)
+
+
 def rings():
     """The Olympic rings, not on the site: drawn, so the package holds no picture of them. The
     black ring is white, or it is lost on the dark screens."""
@@ -275,6 +304,7 @@ def comps():
         for r in records(f'{GAME}/Data/{f}', 107):
             cm[text(r[4:55])] = (struct.unpack_from('<i', r)[0], struct.unpack_from('<h', r, 105)[0])
     rings()
+    sfl_lion()
     rows = []
     for line in open('comp_logos.tsv', encoding='utf-8'):
         if line.startswith('#') or not line.strip():
