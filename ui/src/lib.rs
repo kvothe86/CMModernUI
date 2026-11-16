@@ -28,6 +28,9 @@ extern "system" {
 }
 
 mod remote;
+// a user's own local additions, kept out of the repository (see build.rs)
+#[cfg(cmui_local)]
+mod local;
 mod assistant;
 mod challenge;
 mod coach;
@@ -1485,6 +1488,10 @@ impl Drop for Timed {
 extern "C" fn text_box(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, colour: u32, text: *const i8, caret: i32) {
     let start = std::time::Instant::now();
     text_box_hooked(x1, y1, x2, y2, flags, font, colour, text, caret);
+    #[cfg(cmui_local)]
+    if !text.is_null() {
+        unsafe { local::after_text(x1, y1, x2, y2, font, std::ffi::CStr::from_ptr(text).to_bytes()) };
+    }
     unsafe {
         if TIMING && start.elapsed().as_micros() > 3000 && !text.is_null() {
             log(&format!("timing: slow text {:.1} ms at {x1},{y1}-{x2},{y2} flags {flags:#x} {:?}", start.elapsed().as_secs_f64() * 1e3, latin1(std::ffi::CStr::from_ptr(text).to_bytes())));
@@ -2566,7 +2573,9 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     }
     let f = SIDEBAR_ITEM_FONT.unwrap_or(fit);
     let c = colour as u16 as u32;
-    let rgb = [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8];
+    // (the game's "you are here" colour for the section's button, a dim grey-blue 0xbe19 that read
+    // as unavailable: gold, user 2026-11-16)
+    let rgb = if is_colour(colour, 0xbe19) { GOLD } else { [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8] };
     let h = y2 - y1;
     let label = latin1(t).replace('\n', " ").to_lowercase();
     // (the coach's own button is no bar item for either: it would walk down the bar)
@@ -7520,6 +7529,8 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             }
             patch_calls(AREA_DRAW, 816, DRAW_LINE, no_grid_line as usize, 2);
             patch_calls(GUIO_DRAW, 1680, DRAW_GLYPH, glyph as usize, 5);
+            #[cfg(cmui_local)]
+            local::install();
             patch_call(OTHER_ITEM_CALL, 5, ADD_ITEM, other_item as usize);
             patch_call(RESULTS_CALL, 5, GET_RESULTS, get_results as usize);
             patch_call(SELECTION_ITEM_CALL, 5, ADD_ITEM, selection_item as usize);

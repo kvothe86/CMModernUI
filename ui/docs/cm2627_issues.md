@@ -30,6 +30,7 @@ unless said):**
 - 14 / typing box: `flip_through` installed. Not seen live (needs typing / a held scroll).
 - 4: GD before Pld and the Form column are the Restructured exe's own table; Form is empty before any match. Left; look again with results in.
 - 15 ("1" like "I"): open.
+- 18 (after v12): the manager's menu button looked greyed out on Player & Staff Search though it can be clicked: the game's "you are here" colour 0xbe19 for the section's button. Now gold (label and icon), user's choice. Installed in all six folders and seen on the news screen (2026-11-16); the user: "much better, this looks elite".
 
 | # | Screen | Seen | Status |
 |---|---|---|---|

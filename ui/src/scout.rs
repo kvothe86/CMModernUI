@@ -180,6 +180,11 @@ pub(crate) unsafe fn margin(judge: usize) -> Option<f64> {
     judging(judge, false).map(|j| (20.0 - j).max(0.0) * EYE)
 }
 
+/// A player's intrinsic score at his current ability, no one's eye in it.
+pub(crate) unsafe fn hidden_score(staff: usize) -> Option<f64> {
+    records(staff).map(|(s, p)| intrinsic(p, s, word(p, 5)))
+}
+
 /// A club's best eleven's intrinsic score on average, no one's eye in it (0 with no squad).
 pub(crate) unsafe fn strength(club: usize) -> f64 {
     let mut squad: Vec<f64> = (0..50).filter_map(|k| records(rd::<usize>(club + 0xd7 + 4 * k))).map(|(s, p)| intrinsic(p, s, word(p, 5))).collect();

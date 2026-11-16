@@ -193,7 +193,7 @@ unsafe fn human_of(c: usize) -> Option<(usize, usize)> {
 }
 
 /// The human manager of this game (channel) and his club.
-unsafe fn human() -> Option<(usize, usize)> {
+pub(crate) unsafe fn human() -> Option<(usize, usize)> {
     human_of(channel())
 }
 
