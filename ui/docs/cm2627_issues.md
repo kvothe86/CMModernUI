@@ -30,6 +30,7 @@ unless said):**
 - 14 / typing box: `flip_through` installed. Not seen live (needs typing / a held scroll).
 - 4: GD before Pld and the Form column are the Restructured exe's own table; Form is empty before any match. Left; look again with results in.
 - 15 ("1" like "I"): open.
+- 19 (after v12): the squad's selection slots (and the squad numbers' boxes) gone: v12's picture-mode cell rule took every small grey 0x39e8 / navy cell; traced on the squad screen: the slots are grey 0x39e8, 50x27, at each row's start. Now the rule only takes a wide cell (> 150, the dates) or one at a list's right edge (the away nation / flag, "Low"). That was not all: the real cause of the invisible slots is switch 39 `flat_buttons` (2026-11-09): a list's clickable grey cell gets no box, only its text in light blue; an empty slot has no text, so it vanished on every background. Now every small flat cell (< 80 px: a selection slot, a number), filled or empty, and every empty one gets a thin outline (text hook, `FLAT_CELL`); dates stay flat. Installed in all six folders; confirmed by the user ("now it's perfect", 2026-11-16).
 - 18 (after v12): the manager's menu button looked greyed out on Player & Staff Search though it can be clicked: the game's "you are here" colour 0xbe19 for the section's button. Now gold (label and icon), user's choice. Installed in all six folders and seen on the news screen (2026-11-16); the user: "much better, this looks elite".
 
 | # | Screen | Seen | Status |

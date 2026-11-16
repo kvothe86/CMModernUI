@@ -351,7 +351,11 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // picture mode: a list's grey / navy cells (a schedule's or the news' dates, the away
         // side's nation / flag, "Low") take the row's own see-through look, gaps and all, with no
         // frame line: light blocks, seams and underlines over a picture (user 2026-11-16, 5 6 13 16 17)
-        if theme && !MENU_BAR_PICTURE && flags == 0x30 && (is_colour(low, 0x0008) || is_colour(low, 0x39e8)) && x2 - x1 < 400 && y2 - y1 < 40 {
+        // (only a wide cell (a date) or one at a list's right edge (the away side): the squad's
+        // selection slots (50 wide, at the row's start) and the squad numbers' slots are boxes to
+        // keep, they vanished with this, user 2026-11-16)
+        let date_or_away = x2 - x1 > 150 || x2 > sw * 95 / 100;
+        if theme && !MENU_BAR_PICTURE && flags == 0x30 && (is_colour(low, 0x0008) || is_colour(low, 0x39e8)) && x2 - x1 < 400 && y2 - y1 < 40 && date_or_away {
             fill(x1, y1, x2 + 1, y2 + 1, AREA);
             return;
         }
@@ -1888,6 +1892,16 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             #[allow(static_mut_refs)]
             if FLAT_CELL == Some((x1, y1, x2, y2)) {
                 colour = rgb(CELL_TEXT) as u32;
+                // a slot (a squad's selection cell, a number; small) is a place to drop a player on,
+                // filled or not: a thin outline shows it, else an empty one could not be found
+                // (user 2026-11-16); a wide one (a date) stays flat
+                if t.is_empty() || x2 - x1 < sx(80) {
+                    const SLOT: [u8; 3] = [0x5a, 0x62, 0x6e];
+                    fill(x1 + 2, y1 + 2, x2 - 1, y1 + 3, SLOT);
+                    fill(x1 + 2, y2 - 2, x2 - 1, y2 - 1, SLOT);
+                    fill(x1 + 2, y1 + 2, x1 + 3, y2 - 1, SLOT);
+                    fill(x2 - 2, y1 + 2, x2 - 1, y2 - 1, SLOT);
+                }
             }
             // a player's status (Inj, Lst, Unh...): the game's box (its own panel, the same rect,
             // just before) painted over with the row's background and a flat badge of the
