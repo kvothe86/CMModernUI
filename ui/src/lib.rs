@@ -1522,6 +1522,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             let size = (x2 - x1, y2 - y1);
             // the season stats table: flat headers, values coloured by column, Av R as a pill
             let t = s.trim_ascii();
+            note_live_out(y1, t);
             // (a dropdown's rows start with five spaces: "Passing" or "Form" there is no profile's)
             let dropdown = s.starts_with(b"     ");
             // the bar's date ("Wednesday\n1.8.01 EVE"): a line wider than its box makes the game
@@ -4428,6 +4429,17 @@ unsafe fn tactics_row(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32
         // (in a match the box call draws nothing here: the plain text routine, cut to fit; grey
         // when he is not on the pitch: a sub not yet on, a starter gone off)
         let bytes = clip_text(f, std::ffi::CStr::from_ptr(shown).to_bytes(), room);
+        #[allow(static_mut_refs)]
+        {
+            // (a new match, a new engine: last match's injured are not out of this one)
+            static mut ENGINE: usize = 0;
+            let e = live_engine().unwrap_or(0);
+            if e != ENGINE {
+                (ENGINE, LIVE_OUT, LIVE_ROWS) = (e, Vec::new(), Vec::new());
+            }
+            LIVE_ROWS.retain(|r| r.0 != y1);
+            LIVE_ROWS.push((y1, staff));
+        }
         let off = live_out(staff);
         text_at(x1 + 2, y1, y2, f, if off { GREY } else { LIGHT }, &bytes, 0);
     } else {
@@ -4495,12 +4507,34 @@ unsafe fn live_off_pitch(staff: usize) -> bool {
     }
 }
 
+/// Players the game's own list marks out of the match ("inj 58" in his row: an injured man keeps
+/// his pitch slot in the engine), and the tactics list's rows this match (y, staff) to find them.
+static mut LIVE_OUT: Vec<usize> = Vec::new();
+static mut LIVE_ROWS: Vec<(i32, usize)> = Vec::new();
+
+/// The game's text in a row of the match's tactics list ("inj <minute>" injured, "off <minute>"
+/// sent off: the exe's formats at 0x616a68, beside "sub <minute>") marks that row's player out, and
+/// the screen is drawn again so he is grey everywhere.
+#[allow(static_mut_refs)]
+unsafe fn note_live_out(y1: i32, t: &[u8]) {
+    if !(LIVE_TACTICS && (t.starts_with(b"inj ") || t.starts_with(b"off "))) {
+        return;
+    }
+    if let Some(&(_, staff)) = LIVE_ROWS.iter().find(|r| (r.0 - y1).abs() <= 3) {
+        if !LIVE_OUT.contains(&staff) {
+            LIVE_OUT.push(staff);
+            REDRAW = true;
+        }
+    }
+}
+
 /// In a match, the player is out of it: off the pitch, or a starter with no place on it any more
 /// (injured or sent off: his slot neither 0..=10 nor the -2 of a starter before the kick-off),
 /// greyed in the tactics screen's list and on its pitch (user 2026-11-17).
 unsafe fn live_out(staff: usize) -> bool {
     let Some(e) = live_engine() else { return false };
-    if live_off_pitch(staff) {
+    #[allow(static_mut_refs)]
+    if live_off_pitch(staff) || LIVE_OUT.contains(&staff) {
         return true;
     }
     live_player(e, staff).is_some_and(|p| {
