@@ -425,7 +425,7 @@ twice; the add_item stub takes the font argument one down first where that patch
 ids then equal the host's. Checked again on a 1680x1050 copy of Restructured 25-26 made with the
 patcher's own code (`F:\CM0102 - Restructured 2025-2026 - 1680x1050`, client copy beside it with
 cnc-ddraw/cmfix, the single-instance jne at 0x68d3b6 made a jmp and a windowed game.cfg: test
-only).
+only). All F: Restructured folders were deleted on purpose 2026-11-16.
 
 Game data for a client (`src\remote.rs`): the client has no game data and no screen state (both
 live on the host), so cmui's game-data reads go through `readable` / `rd` / `data_bytes` /
@@ -528,9 +528,8 @@ Game Credits crashes the user's patched exe (1680x1050) with or without cmui (ch
 
 ## Shelved
 
-Player pictures in the profile's title bar (2026-10-28, worked in single player and on a network
-client at 1680x1050): `shelved\player_pictures\` holds `faces.py` and the code with how to put it
-back. Shelved until a face pack by name (not FM ID) turns up.
+Player pictures in the profile's title bar: scrapped by the user 2026-11-16 ("it won't work out");
+code, `faces.py`, `shelved\player_pictures\` and every game folder's `cmui_faces.bin` removed.
 
 ## Not done
 

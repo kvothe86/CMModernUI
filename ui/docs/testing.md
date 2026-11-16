@@ -47,15 +47,19 @@ scripts detect state (`shows`). Mouse points are scaled into a window larger tha
 | `drive.ps1` | commands as args | writes `cmui.click` in `$env:CMUI_GAME` (default `E:\CM0102`), waits for its marker, prints new log lines, turns `shot` BMPs into PNGs |
 | `run.ps1` | `[shot.png] [seconds]` | quit running game, copy the fresh DLL, start `cm0102_ui.exe`, print log, screenshot (`shot.py`) |
 | `retest.ps1` | drive commands | quit game, `install_all.ps1`, start, restore a save, run the steps. Env: `RETEST_GAME` (default `E:\cm25`), `RETEST_SAVE` (default `Glory_v3`), `RETEST_QUIT` |
-| `install_all.ps1` | none (games closed) | copy `cmui.dll` into every game folder (cm25, main, `_net`, `_net2`, three F: folders), hash-checked ("= build" / "DIFFERENT") |
+| `install_all.ps1` | none (games closed) | copy `cmui.dll` into every game folder (cm25, cm25_c, main, `_net`, `_net2`; the F: Restructured folders were deleted on purpose 2026-11-16. Their successor `F:\CM2627` (CM 26/27 database + new Restructured patch, 2026-11-16) has no cmui yet and is not on the list: add it only on the user's word), hash-checked ("= build" / "DIFFERENT") |
 | `suite.ps1` | `game prefix manager club p1 p2 [part]` | every screen by label, shots `<prefix>_<name>.png`; parts menus, squad, profile, compare, news, search (default all) and match (only when named; moves the game on) |
 | `check.ps1` | `[sp\|client] [res,..] [part]` | builds, runs suite per resolution (single player on `E:\CM0102_net`..., or a network pair via `net_pair.ps1`), writes `ui\check\<res>\` shots, sheets, `summary_<mode>.txt` |
 | `net_pair.ps1` | `<host> <client>` | host restores the VVV save as network game "test", client joins as Test Client at Ajax |
 | `net_join.ps1` | `<host> <client> [ip] [club]` | client half, for a host already at Manager Status |
-| `net_tes.ps1` | `[client] [host]` | network pair from the user's `tes` save (host `E:\cm25`, client `F:\CM0102 - Restructured 2025-2026 - 1680x1050 - client`) |
+| `net_tes.ps1` | `[client] [host]` | network pair from the user's `tes` save (host `E:\cm25`, client `F:\CM0102 - Restructured 2025-2026 - 1680x1050 - client`). **That client folder was deleted on purpose 2026-11-16**: pass a client folder (e.g. `E:\CM25_c`) to `net_tes`, `net_rejoin`, `net_days` |
 | `net_rejoin.ps1` | `[client] [host]` | restart the client with the fresh DLL and rejoin the running host |
 | `net_days.ps1` | `[n] [client] [host]` | Continue Game on host and client n times (marks news read first) |
 | `net_res.ps1` | `W H` | builds `E:\CM0102_net_WxH` (+ `_c`) with the patcher's resolution change (32-bit PowerShell). Those folders were removed 2026-10-31 to save room: run this first before `check.ps1` at 800x600 or 1280x800 |
+| `exe_compat.py` | `<known exe> <new exe> [src dirs]` | diffs a new patched exe against a known-good one and lists every address the cmui / cmnet sources name that sits on changed bytes (run with `install.py <game> --check`) |
+| `nickdll_scan.py` | `<NickDLL.dll> [src dirs]` | game addresses in NickDLL that meet cmui's (named ones, hooked functions); most hits are shared globals or chance byte patterns: the real check is cmui.log at start (nothing "left alone", `features off: []`) |
+| `crest_carry.py` | `<old game> <new game>` / `hand <game>` | crests of an older database's matches carried to a newer one by exact name or reserve side -> `carry_match.tsv`; the hand table `club_logos.tsv` -> `hand_match.tsv` (both read by `logos.py pack`) |
+| `bkg_fix.py`, `rgn.py` | `scan` / `preview` / `fix <Pictures> <out>` | fits 800x600-born backgrounds (90 px bar baked in, stretched to 189) to the 126 px bar at 1680x1050; `rgn.py` reads / writes `.rgn` |
 | `shot.py`, `peek.py`, `sheet.py`, `showcase.py` | | screenshot, memory peek (fails with error 5), contact sheets |
 
 Pitfalls: game still running -> `cmui.quit` in its own folder first; the first manager-menu opening

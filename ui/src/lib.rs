@@ -288,6 +288,16 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // the menu bar's button boxes: none (`sidebar_item` draws the buttons, the click areas stay
         // the game's boxes); an open or pressed one (0x1061) gets a lighter band with a gold edge
         let (sw, sh) = screen();
+        // no bar picture of ours (the background carries the bar: Restructured 26/27's pack, its
+        // g800.mbr deleted): the game's own boxes, lines and all, over the background's bar
+        if theme && on(MENU_FIXES) && x2 <= bar_end(sw) && (flags == 0x1021 || flags == 0x1061) && !MENU_BAR_PICTURE {
+            game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32)>(PANEL_ORIG)(x1, y1, x2, y2, flags, colour, extra);
+            // inside the box the background 60% darker: the labels read on a light bar too
+            if DARKEN_ORIG != 0 {
+                game::<extern "C" fn(i32, i32, i32, i32)>(DARKEN_ORIG)(x1 + 1, y1 + 1, x2 - 1, y2 - 1);
+            }
+            return;
+        }
         if theme && on(MENU_FIXES) && x2 <= bar_end(sw) && (flags == 0x1021 || flags == 0x1061) {
             // (Game Options' box where its button is drawn, while only its drawing moves)
             let s = if OPTIONS_HOME == Some((x1, y1, x2, y2)) { options_shift() } else { 0 };
@@ -332,7 +342,7 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
             // (blue) on patched resolutions, and they are only decoration
             return;
         }
-        if theme && flags & PANEL_VGRAD != 0 {
+        if theme && flags & PANEL_VGRAD != 0 && (MENU_BAR_PICTURE || x2 > bar_end(sw)) {
             colour = rgb(SIDEBAR) as u32;
         }
         if flags == 0x2 {
@@ -1219,6 +1229,15 @@ extern "C" fn darken(x1: i32, y1: i32, x2: i32, y2: i32) {
         unsafe { game::<extern "C" fn(i32, i32, i32, i32)>(DARKEN_ORIG)(x1, y1, x2, y2) }
     } else if x2 >= 0 && y2 >= 0 && x1 < w && y1 < h {
         fill(x1.max(0), y1.max(0), (x2 + 1).min(w - 1), (y2 + 1).min(h - 1), AREA);
+        // a big cell (the main menu's Start New Game...) over a background that carries the menu
+        // bar (no flat theme behind it): a thin outline, as the game's grid lines gave it
+        if unsafe { !MENU_BAR_PICTURE } && y2 - y1 > h * 6 / 100 && x2 - x1 > w / 6 && x1 >= 0 && y1 >= 0 && x2 < w && y2 < h {
+            const LINE: [u8; 3] = [0x70, 0x78, 0x84];
+            fill(x1, y1, x2 + 1, y1 + 1, LINE);
+            fill(x1, y2, x2 + 1, y2 + 1, LINE);
+            fill(x1, y1, x1 + 1, y2 + 1, LINE);
+            fill(x2, y1, x2 + 1, y2 + 1, LINE);
+        }
         #[allow(static_mut_refs)]
         unsafe {
             if DARKENED.len() < 4096 {
@@ -2012,18 +2031,6 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 if let Some((club, surname)) = human_club() {
                     if !surname.is_empty() && title.windows(surname.len()).any(|w| w == surname) {
                         draw_crest(&club, cx, cy, size);
-                    }
-                }
-            }
-            // a person's screens ("23. Rafael van der Vaart (Ajax)"): his picture right of the
-            // crest, found by the name the title shows (so a network client needs no host); not
-            // where the title text would run into it (small bars)
-            if on(PROFILE) && !own_title && !MATCH && !key.is_empty() {
-                if let Some(name) = profile_name(title) {
-                    let (fx, shown) = (cx + size + size / 5, title.trim_ascii());
-                    let text_left = if flags & 0x4 != 0 { (x1 + x2 - text_width(font, shown)) / 2 } else { x1 };
-                    if fx + size + size / 8 < text_left {
-                        draw_face(name, fx, cy, size);
                     }
                 }
             }
@@ -2850,6 +2857,9 @@ unsafe fn exe_switches() -> Option<&'static [u8]> {
 /// match.mbr, read as 555; a resolution patch's g800.mbr / m800.mbr, blitted as they are, 565),
 /// Data\<cmui name> is written with the original's header (its size) in sidebar grey with a
 /// lighter one-pixel edge on the right, and the exe's name (same length) swapped for it.
+/// A flat bar picture of ours is in use (else the background picture carries the menu bar).
+static mut MENU_BAR_PICTURE: bool = false;
+
 unsafe fn menu_bars() {
     const BARS: [(&[u8], &str, bool); 4] = [(b"game.mbr", "gcui.mbr", false), (b"match.mbr", "mcui_.mbr", false), (b"g800.mbr", "gcui.mbr", true), (b"m800.mbr", "mcui.mbr", true)];
     let nt = nt_header();
@@ -2880,6 +2890,7 @@ unsafe fn menu_bars() {
             VirtualProtect(hits[0] as *mut u8, old.len(), 0x04, &mut protect);
             std::ptr::copy_nonoverlapping(new.as_ptr(), hits[0] as *mut u8, old.len());
             VirtualProtect(hits[0] as *mut u8, old.len(), protect, &mut protect);
+            MENU_BAR_PICTURE = true;
             log(&format!("menu bar Data\\{new} ({w}x{h}) for {}", std::str::from_utf8(old).unwrap()));
         }
     }
@@ -6483,53 +6494,6 @@ unsafe fn pack_pixels(crests: &'static mut Crests, key: &[u8]) -> Option<(&'stat
         crests.last.insert(at, Box::new(px));
     }
     Some((&**crests.last.get(&at)?, side))
-}
-
-static mut FACES: Option<Option<Crests>> = None;
-
-/// Data\cmui_faces.bin (`footy.py faces` + shelved\player_pictures\faces.py, 'CMU2', 160): player
-/// pictures by the name a profile's title shows, "?" a generic one for players without one.
-fn load_faces() -> Option<Crests> {
-    load_pack("Data\\cmui_faces.bin")
-}
-
-/// A player's picture with a thin black line round it, its top left at (x, y); without a pack of
-/// pictures nothing is drawn (this is the switch: no cmui_faces.bin, no pictures). A player the pack
-/// has none of gets its "?" (a default face "?0".."?n" picked by his name if the pack has those).
-#[allow(static_mut_refs)]
-unsafe fn draw_face(name: &[u8], x: i32, y: i32, size: i32) -> bool {
-    if !on(CRESTS_ON) {
-        return false;
-    }
-    let Some(faces) = FACES.get_or_insert_with(load_faces).as_mut() else { return false };
-    let pool = faces.index.keys().filter(|k| k.len() > 1 && k[0] == b'?').count();
-    let fallback = if pool > 0 {
-        // FNV-1a of the name: the same default face for him every time
-        let hash = name.iter().fold(0x811c9dc5u32, |h, &c| (h ^ c as u32).wrapping_mul(0x01000193));
-        format!("?{}", hash as usize % pool).into_bytes()
-    } else {
-        b"?".to_vec()
-    };
-    let Some((px, side)) = pack_pixels(faces, name).or_else(|| pack_pixels(FACES.as_mut().unwrap().as_mut().unwrap(), &fallback)) else { return false };
-    // the thin black frame, then the picture inside it
-    let line = (size / 40).max(1);
-    let black = rgb565([0, 0, 0]);
-    blend(x - line, y - line, size + 2 * line, size + 2 * line, |col, row| {
-        let edge = col < line || row < line || col >= size + line || row >= size + line;
-        (black, if edge { 255 } else { 0 })
-    });
-    blend_picture(px, side as i32, x, y, size, false);
-    true
-}
-
-/// "23. Rafael van der Vaart (Ajax)" -> "Rafael van der Vaart".
-fn profile_name(title: &[u8]) -> Option<&[u8]> {
-    let name = title[..title.iter().rposition(|&c| c == b'(')?].trim_ascii();
-    let name = match name.iter().position(|&c| c == b' ') {
-        Some(p) if p > 1 && name[p - 1] == b'.' && name[..p - 1].iter().all(u8::is_ascii_digit) => name[p + 1..].trim_ascii_start(),
-        _ => name,
-    };
-    (!name.is_empty()).then_some(name)
 }
 
 /// The rows of a picture that hold anything (a flag's own height in its square): first, end.

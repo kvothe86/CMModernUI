@@ -216,12 +216,10 @@ signing partner and a small-print footer. Back closes it; Save image writes the 
 - The first build called Cash::convert with two arguments and crashed on the click (a guessed call
   signature: always read the callee's `ret` before calling a game function).
 
-## Player pictures and footylogos.com logos (2026-11-09/10)
+## footylogos.com logos (2026-11-09/10)
 
-`footy.py` (see `docs/ARCHITECTURE.md`): the site's catalogue (11,356 players, 3,392 football logos) matched to
-the game folder's database. Logos: `logos` writes `badge_match.tsv` (the fuzzy matches 0.8 and up, as for the
-other logo source) and downloads only the matched files (a 404 falls back to the preview picture).
-Players: `faces` matches by nation, name and club (exact words first, then one name inside the other with
-the club agreeing), takes the headshot kinds first (ucl_head 324, portugal_head, head), then portraits,
-and names each picture by the name the game shows. Header: `draw_face` in `lib.rs` draws it right of the
-club badge in a thin black frame when `Data\cmui_faces.bin` exists. Nothing from the site is committed.
+`footy.py` (see `docs/ARCHITECTURE.md`): the site's 3,392 football logos matched to the game folder's
+database. `logos` writes `badge_match.tsv` (the fuzzy matches 0.8 and up, as for the other logo source) and
+downloads only the matched files (a 404 falls back to the preview picture). Nothing from the site is committed.
+Player pictures (`faces`, `draw_face`, `cmui_faces.bin`) were scrapped by the user on 2026-11-16: removed from
+code, docs, package and every game folder.

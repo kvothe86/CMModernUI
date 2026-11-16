@@ -486,7 +486,7 @@ def pack():
     (badges) goes before the site's."""
     from PIL import Image
     owner = {}
-    rows = [(row, f.startswith('badge')) for f in ('match.tsv', 'comp_match.tsv', 'flag_match.tsv', 'badge_match.tsv', 'badge_comp_match.tsv')
+    rows = [(row, f.startswith('badge')) for f in ('match.tsv', 'comp_match.tsv', 'flag_match.tsv', 'badge_match.tsv', 'badge_comp_match.tsv', 'carry_match.tsv', 'hand_match.tsv')
             if os.path.exists(f'{TSV}/{f}') for row in csv.reader(open(f'{TSV}/{f}', encoding='utf-8'), delimiter='\t')]
     for (cid, name, nation, rep, site, url, fit, short), from_pack in rows:
         path = url if os.path.isabs(url) else f'{OUT}/png/{url.rsplit("/", 1)[-1]}'
