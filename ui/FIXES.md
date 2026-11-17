@@ -523,6 +523,13 @@ club's fixtures, 8th / 40 pts / 41-41 after matchday 26, the same as the game's 
 | Saved XI 3 showed "(not at club)" on 5 slots | not a bug: the ids map right (a staff id is his row in the staff table); those five left after the XI was saved (Bakker, Markelo, Schikora, Marschalk, Huth: the season's transfers) | `dash.rs` names a player who left with where he is now ("Marco Schikora (now FC Utrecht)"); `lineups::saved` gives the saved ids | Line-ups page, trace lines "saved XI" | checked 2026-11-13 |
 | (added, asked from the dashboard session) Line-ups, Injuries, Career, Targets, National pool pages; contracts running out on Squad | new panels, each hidden when empty or its switch is off | `dash.rs` `extras` (history::rows, challenge::summary, assistant::report_for / lineup, lineups::saved, natpool::shortlisted / pool_rows), `dash.html` | ClaudeVit: 38 injuries / 17 bans, 4 pitches, 20 targets, CM Challenge 2025/26; pool hidden (club) | checked 2026-11-13, uncommitted; news, match detail, staff, board, attendance skipped (no reader) |
 
+### Man of the match unmarked when opened from Evening Results (2026-11-17, OPEN)
+
+The game draws him in the normal colour on that first view (0x723350 recolours a row only when
+it changed from its last copy; trace showed no MOM_SLOT draw). `man_of_match` now picks him from
+the match record +0x3c by name: the user saw it colour something, but not as intended. Left for
+later on the user's word; check which row it lights (+0x3c may not be a staff id).
+
 ### Match Overview one goal short (2026-11-17, not cmui)
 
 Hanwell v Basingstoke 0-5 (F:\CM2627, 21.11.26): ratings show five goals (Ponce 1), the
