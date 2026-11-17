@@ -209,12 +209,21 @@ pub fn colour(letter: u8) -> [u8; 3] {
     }
 }
 
+/// A club's (index) last five as letters, newest first: on a network client the host's (key 'f';
+/// the client asking its own game crashed it, night 7), here the game's.
+pub unsafe fn letters_of(club: i32) -> Vec<u8> {
+    if remote::CLIENT {
+        return ask_host(&key(b'f', &[club as u32])).unwrap_or_default();
+    }
+    results(club, 5).iter().map(Result_::letter).collect()
+}
+
 /// The club header's form: the last five as small W / D / L pills in a row centred on `cx`
 /// (y1..y2), oldest at the left; no crests or scores (user, 2026-11-07: ten crests and scores
 /// beside the name were too much; those are on the match card).
 pub unsafe fn mini(club: usize, cx: i32, y1: i32, y2: i32) {
     let index = ((club - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE) as i32;
-    let mut last = results(index, 5);
+    let mut last = letters_of(index);
     if last.is_empty() || y2 - y1 < 8 {
         return;
     }
@@ -225,7 +234,7 @@ pub unsafe fn mini(club: usize, cx: i32, y1: i32, y2: i32) {
     let x0 = cx - (last.len() as i32 * (w + gap) - gap) / 2;
     for (k, r) in last.iter().enumerate() {
         let x = x0 + k as i32 * (w + gap);
-        pill(x, y1, x + w, y2, colour(r.letter()));
-        text_at(x + w / 2, y1, y2, font, [0xf4, 0xf6, 0xf8], &[r.letter()], 1);
+        pill(x, y1, x + w, y2, colour(*r));
+        text_at(x + w / 2, y1, y2, font, [0xf4, 0xf6, 0xf8], &[*r], 1);
     }
 }

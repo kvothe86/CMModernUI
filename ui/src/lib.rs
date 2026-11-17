@@ -4142,6 +4142,7 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             assistant::flip(full_frame);
         }
         news::frame_end(FULL_FRAME);
+        export::client_tick();
         if on(STATS_TABLE) {
             comp::flip(FULL_FRAME);
         }
@@ -4786,7 +4787,8 @@ unsafe fn league_line() {
     game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(left - 2, top, left + width + 2, top + h, 0xc, font, colour, c.as_ptr(), -1);
     // the club's last five as small pills under this line (user's wish, 2026-11-07, slimmed the
     // same day); a club screen's own title only (not History, Tactics, Training)
-    if on(FORM_TIMELINE) && !remote::network_game() && HEADER_PLAIN {
+    // (network games too since 2026-11-17, the user's wish; a client gets the host's, key 'f')
+    if on(FORM_TIMELINE) && HEADER_PLAIN {
         let (py1, py2) = (top + h + 3, (top + h + 3 + bar * 15 / 106).min(t.3 - 3));
         form::mini(club, (x1 + x2) / 2, py1, py2);
     }
@@ -4839,6 +4841,26 @@ unsafe fn light_man_of_match() {
     blend(from, y1, x1 - from, y2 - y1 + 1, |_, _| (tint, 64));
     blend(x2 + 1, y1, to - x2, y2 - y1 + 1, |_, _| (tint, 64));
     fill(from, y1, from + 3, y2 + 1, GOLD);
+}
+
+/// Whether a Player Ratings name is the man of the match's, from the match record (+0x3c, compared
+/// with each row's +0x194 by 0x723350). The game colours his name only when the row changed from
+/// its last copy: opened from Evening Results it did not, and he went unmarked (user 2026-11-17).
+unsafe fn man_of_match(t: &[u8]) -> bool {
+    let Some((_, _, m)) = match_record() else { return false };
+    let id = rd::<i32>(m + 0x3c);
+    let (base, count) = (rd::<usize>(STAFF_TABLE), rd::<i32>(STAFF_COUNT));
+    let staff = if (0..count).contains(&id) { base + id as usize * 0x6e } else { id as u32 as usize };
+    if staff < base || staff >= base + count.max(0) as usize * 0x6e || (staff - base) % 0x6e != 0 || !readable(staff, 0x10) {
+        return false;
+    }
+    let name = |at: usize| {
+        let p = rd::<usize>(staff + at);
+        game_text(p, 51)
+    };
+    let (first, second, common) = (name(4), name(8), name(0xc));
+    let t = t.trim_ascii();
+    (!common.is_empty() && t == common) || t == [first.as_slice(), b" ", second.as_slice()].concat()
 }
 
 /// The half of a Player Ratings row (cells left to right: left, right) that holds the name at
@@ -5072,7 +5094,7 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
         }
     }
     #[allow(static_mut_refs)]
-    if MATCH_TAB == b"Player Ratings" && colour & 0xffff == *(MOM_SLOT as *const u16) as u32 && x2 - x1 > sx(200) && !t.is_empty() && !t[0].is_ascii_digit() {
+    if MATCH_TAB == b"Player Ratings" && x2 - x1 > sx(200) && !t.is_empty() && !t[0].is_ascii_digit() && (colour & 0xffff == *(MOM_SLOT as *const u16) as u32 || man_of_match(t)) {
         MOM_CELL = Some((x1, y1, x2, y2));
         fill(x1, y1, x2 + 1, y2 + 1, MOM_TINT);
         text_at(x1 + 4, y1, y2, font, GOLD, t, 0);
@@ -7044,9 +7066,11 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'V' => valid_staff(staff).then(|| to_latin1(&money_texts(staff).1)),
         b'A' => (valid_staff(staff) && mapped(*((staff + 0x61) as *const usize), 70)).then(|| attributes(staff).to_vec()),
         b'O' => valid_staff(staff).then(|| positions_text(staff)),
-        b'h' => valid_staff(staff).then(|| scout::hidden_score(staff).map_or(Vec::new(), |v| format!("{v:.1}").into_bytes())),
+        b'f' => (0..rd::<i32>(CLUB_COUNT)).contains(&(staff as i32)).then(|| form::results(staff as i32, 5).iter().map(form::Result_::letter).collect()),
+        b'h' => valid_staff(staff).then(||scout::hidden_score(staff).map_or(Vec::new(), |v| format!("{v:.1}").into_bytes())),
         b'M' => compare_players(&key[1..]).map(|(a, b)| [le(a), le(b)].concat()),
         b'G' => staff_by_row_name(&key[1..]).map(le),
+        b'e' | b'E' => export::host_key(channel, key),
         // a story's crest from its links (empty: none)
         b'Y' => {
             let text = &key[1..];
@@ -7248,7 +7272,9 @@ fn event_text_colours() {
 const STATUSES: [(&str, [u8; 3], bool, &str); 21] = [
     // (code, badge colour, dark text on it, what it means; the legend's order)
     ("Inj", [0xdc, 0x26, 0x26], false, "injured"),
-    ("Sus", [0x7f, 0x1d, 0x1d], false, "suspended"),
+    // (a friend found injured and suspended too alike, 2026-11-17: black with red letters, as a
+    // red card; unhappy took suspended's old maroon)
+    ("Sus", [0x0b, 0x0b, 0x0c], false, "suspended"),
     ("Yel", [0xfa, 0xcc, 0x15], true, "one card from a ban"),
     ("Tir", [0xf5, 0x9e, 0x0b], true, "tired"),
     ("Abs", [0x25, 0x63, 0xeb], false, "away on international duty"),
@@ -7256,7 +7282,7 @@ const STATUSES: [(&str, [u8; 3], bool, &str); 21] = [
     ("Cup", [0x94, 0xa3, 0xb8], true, "ineligible for the cup match"),
     ("Wpm", [0x0e, 0x74, 0x90], false, "work permit"),
     ("Fgn", [0xa1, 0x62, 0x07], false, "foreigner (foreign player rule)"),
-    ("Unh", [0xbe, 0x12, 0x3c], false, "unhappy"),
+    ("Unh", [0x7f, 0x1d, 0x1d], false, "unhappy"),
     ("Ret", [0x57, 0x53, 0x4e], false, "retiring"),
     ("Lst", [0x7c, 0x3a, 0xed], false, "transfer listed"),
     ("Req", [0xc2, 0x41, 0x0c], false, "asked for a transfer"),
@@ -7271,7 +7297,8 @@ const STATUSES: [(&str, [u8; 3], bool, &str); 21] = [
 ];
 
 fn status_badge(code: &[u8]) -> Option<([u8; 3], [u8; 3])> {
-    STATUSES.iter().find(|s| s.0.as_bytes() == code).map(|s| (s.1, if s.2 { [0x11, 0x18, 0x27] } else { [0xff, 0xff, 0xff] }))
+    let ink = |s: &(&str, [u8; 3], bool, &str)| if s.0 == "Sus" { [0xf8, 0x51, 0x51] } else if s.2 { [0x11, 0x18, 0x27] } else { [0xff, 0xff, 0xff] };
+    STATUSES.iter().find(|s| s.0.as_bytes() == code).map(|s| (s.1, ink(s)))
 }
 
 /// The codes the squad list drew a badge for since its screen was built (the legend's; a row

@@ -42,14 +42,86 @@ extern "system" {
     fn ShellExecuteA(hwnd: usize, op: *const u8, file: *const u8, params: *const u8, dir: *const u8, show: i32) -> usize;
 }
 
-/// Open a written page in the browser (single player only: on a network game it lands on the host).
+/// Open a written page in the browser. In a network game the game writes a client's export on the
+/// host: kept there for that client (`host_key`), who fetches it and opens it (`client_tick`).
 pub unsafe fn open(page: &std::path::Path) {
-    if remote::network_game() {
+    if remote::CLIENT {
         return;
     }
+    // ponytail: the host's own screen is channel 0 (as the session's channels go)
+    let serving = rd::<i16>(SCREEN_MANAGER + 0x382a);
+    if remote::network_game() && serving > 0 {
+        if let (Ok(bytes), Some(name)) = (std::fs::read(page), page.file_name()) {
+            #[allow(static_mut_refs)]
+            {
+                SEQ += 1;
+                KEPT.retain(|k| k.0 != serving);
+                KEPT.push((serving, SEQ, name.to_string_lossy().as_bytes().to_vec(), bytes));
+            }
+            log(&format!("export: {} kept for channel {serving}", page.display()));
+        }
+        return;
+    }
+    shell_open(page);
+}
+
+unsafe fn shell_open(page: &std::path::Path) {
     let full = std::env::current_dir().map(|d| d.join(page)).unwrap_or(page.to_path_buf());
     let c = std::ffi::CString::new(full.to_string_lossy().as_bytes()).unwrap_or_default();
     ShellExecuteA(0, b"open\0".as_ptr(), c.as_ptr() as *const u8, std::ptr::null(), std::ptr::null(), 1);
+}
+
+/// The last export of each client channel on the host: channel, number, file name, page.
+static mut KEPT: Vec<(i16, u32, Vec<u8>, Vec<u8>)> = Vec::new();
+static mut SEQ: u32 = 0;
+/// A page goes to a client in slices (a packet holds 40,000 bytes at most).
+const SLICE: usize = 12_000;
+
+/// The host's answer to a client's export keys: 'e' the newest page's number, length and name
+/// (number 0: none yet); 'E' (number, offset) a slice of it.
+#[allow(static_mut_refs)]
+pub unsafe fn host_key(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
+    let kept = KEPT.iter().find(|k| k.0 == channel);
+    let arg = |k: usize| key.get(1 + 4 * k..5 + 4 * k).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+    match key.first()? {
+        b'e' => Some(kept.map_or(vec![0; 8], |k| [&k.1.to_le_bytes()[..], &(k.3.len() as u32).to_le_bytes(), &k.2].concat())),
+        b'E' => kept.filter(|k| k.1 as usize == arg(0)).map(|k| k.3[arg(1).min(k.3.len())..(arg(1) + SLICE).min(k.3.len())].to_vec()),
+        _ => None,
+    }
+}
+
+/// On a network client, each frame: a new export of this manager's on the host is fetched slice by
+/// slice, written to print\ here and opened (the one there when the client joined is not).
+#[allow(static_mut_refs)]
+pub unsafe fn client_tick() {
+    static mut SEEN: Option<u32> = None;
+    if !remote::CLIENT {
+        return;
+    }
+    let Some(head) = crate::ask_host(&[b'e']).filter(|h| h.len() >= 8) else { return };
+    let Some(seq) = crate::word(&head) else { return };
+    let len = crate::word(&head[4..]).unwrap_or(0);
+    if SEEN.is_none() || seq == 0 {
+        SEEN = Some(seq as u32);
+        return;
+    }
+    if SEEN == Some(seq as u32) {
+        return;
+    }
+    let mut page = Vec::with_capacity(len);
+    for off in (0..len).step_by(SLICE) {
+        let Some(part) = crate::ask_host(&crate::key(b'E', &[seq as u32, off as u32])) else { return };
+        page.extend(part);
+    }
+    SEEN = Some(seq as u32);
+    // (the name only: nothing the host sends picks a folder here)
+    let name = std::path::Path::new(&*latin1(&head[8..])).file_name().map(|n| n.to_os_string()).unwrap_or_else(|| "export.html".into());
+    let out = std::path::Path::new("print").join(name);
+    let _ = std::fs::create_dir_all("print");
+    if page.len() == len && std::fs::write(&out, &page).is_ok() {
+        log(&format!("export: {} from the host", out.display()));
+        shell_open(&out);
+    }
 }
 
 unsafe fn convert(file: *const u8, show: bool) {

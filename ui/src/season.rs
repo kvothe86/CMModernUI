@@ -185,7 +185,7 @@ fn card_bytes() {
 }
 
 /// The human manager of a channel and his club.
-unsafe fn human_of(c: usize) -> Option<(usize, usize)> {
+pub(crate) unsafe fn human_of(c: usize) -> Option<(usize, usize)> {
     let slot = CHANNEL_MANAGER + 0x300 * c;
     let staff = if readable(slot, 4) { rd::<usize>(slot) } else { 0 };
     let club = if readable(staff, 0x3d) { rd::<usize>(staff + 0x39) } else { 0 };

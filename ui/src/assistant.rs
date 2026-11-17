@@ -255,7 +255,7 @@ fn natural_by(ratings: &[i8; 11], label: &[u8]) -> bool {
 
 /// A staff member's natural fit for a slot (his player record's ratings).
 pub(crate) unsafe fn natural(staff: usize, label: &[u8]) -> bool {
-    let p = if readable(staff + 0x61, 4) { ((staff + 0x61) as *const usize).read_unaligned() } else { 0 };
+    let p = if readable(staff + 0x61, 4) { rd::<usize>(staff + 0x61) } else { 0 };
     if !readable(p, GK + 11) {
         return false;
     }
