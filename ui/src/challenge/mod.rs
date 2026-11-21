@@ -1203,7 +1203,9 @@ unsafe fn page(me: &str, all: bool, stats_year: i32) -> String {
         out += &if names.len() == 1 { format!("F\tClubs\t{}\n", clubs_of(n)) } else { format!("F\tClub hopper\t{n} ({} clubs)\n", clubs_of(n)) };
     }
     if let Some(s) = rows.iter().filter(|s| !s.goals.is_empty()).max_by_key(|s| s.goals.parse::<i32>().unwrap_or(0)) {
-        out += &format!("F\tBest top scorer\t{} ({})\n", scorer_name(&s.scorer), s.goals);
+        // (a league's best over every manager: whose it was, or it read as the viewer's own, night 10)
+        let whose = if names.len() > 1 { format!(", {}", s.name) } else { String::new() };
+        out += &format!("F\tBest top scorer\t{} ({}{whose})\n", scorer_name(&s.scorer), s.goals);
     }
     // (one manager: his career as tiles, the points a season and his best season besides)
     if let [n] = &names[..] {

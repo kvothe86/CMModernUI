@@ -86,7 +86,7 @@ unsafe fn poll_pending() -> bool {
         Some(data) => {
             let text = latin1(&data).into_owned();
             let (club, data) = text.split_once('\n').map_or(("", text.as_str()), |(first, rest)| (first.strip_prefix("CLUB\t").unwrap_or(""), rest));
-            send_question(tab, &question, club, data);
+            send_question(tab, &question, club, &(data.to_string() + &seen_screens()));
             true
         }
         None if since.elapsed().as_secs() < 30 => {
@@ -832,7 +832,7 @@ unsafe fn ask(tab: usize, question: &str) {
     }
     let Some(club) = human_club_ptr() else { return };
     let name = latin1(&game_text(club + 4, 51)).into_owned();
-    send_question(tab, question, &name, &game_data(club, 0));
+    send_question(tab, question, &name, &(game_data(club, 0) + &seen_screens()));
 }
 
 /// The question to Claude with the game data, answered on a thread.
@@ -1031,6 +1031,15 @@ unsafe fn game_data(club: usize, manager: usize) -> String {
             }
         }
     }
+    out
+}
+
+/// What this side saw: its last match screens and the screen the manager came from. Not in
+/// `game_data`: on a client those are the client's own (the host's put the host's screen, "the
+/// Arsenal squad list you were just looking at", in a client's briefing, night 10).
+#[allow(static_mut_refs)]
+unsafe fn seen_screens() -> String {
+    let mut out = String::new();
     let cap = |rows: &[String], max: usize| -> String {
         let mut s = rows.join("\n");
         if s.len() > max {
