@@ -31,7 +31,8 @@ const ICON_CLOCK: u32 = 0xE823;
 const TABS: [&[u8]; 6] = [b"Dashboard", b"Season", b"RAD", b"Stats", b"History", b"Rules"];
 const TAB_RAD: usize = 2;
 const TAB_GOALS: usize = 6; // shown after RAD when the host has career goals on
-const SPIN_MS: u128 = 4000;
+const WHEEL_MS: u128 = 2200; // a wheel turning to its stop
+const STEP_MS: u128 = 2900; // and standing on it a while, lit, before the next
 
 /// The game's menu bar seen this frame: its lowest button's box, font and colour, and whether it
 /// is the bar of the plain game days (Game Options; a match has another); ours under it.
@@ -235,12 +236,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     *(assistant::RIGHT_CLICK as *mut u32) = 0;
     let hover = SPOTS.iter().position(|s| inside(s.0));
     let mut redraw = std::mem::replace(&mut HOVER, hover) != hover;
-    if let Some((since, name)) = &SPIN {
-        redraw |= SPIN_DRAWN.is_none_or(|t| t.elapsed().as_millis() > 80);
-        if since.elapsed().as_millis() > SPIN_MS {
-            let name = name.clone();
+    if let Some((since, _)) = &SPIN {
+        redraw |= SPIN_DRAWN.is_none_or(|t| t.elapsed().as_millis() > 40);
+        if since.elapsed().as_millis() > STEP_MS * 3 {
             SPIN = None;
-            request(ACT_ROLL, 0, &name);
             redraw = true;
         }
     } else if let (true, Some(k)) = (released, hover) {
@@ -281,7 +280,11 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                 let name = lines.iter().filter(|l| l[0] == b"K").nth(PICK).map_or(Vec::new(), |l| l[1].to_vec());
                 NEW_FROM = Some(lines.iter().filter(|l| l[0] == b"R").map(|l| number(l[1])).max().unwrap_or(0));
                 (NEW_ROW, NOTHING_LEFT, BACK_YEARS) = (None, false, 0);
-                SPIN = Some((std::time::Instant::now(), name));
+                // (drawn first, then the wheels turn to it: leaving the page mid-spin keeps the draw)
+                request(ACT_ROLL, 0, &name);
+                if !league().spun.is_empty() {
+                    SPIN = Some((std::time::Instant::now(), name));
+                }
             }
             Spot::Tick(id) => request(ACT_TICK, id, &[]),
             Spot::Delete(id) => request(ACT_DELETE, id, &[]),
@@ -487,7 +490,7 @@ pub unsafe fn overlay() {
             match TAB {
                 0 => dashboard(area, &managers, &of(b"F"), &of(b"G")),
                 1 => this_year(area, &of(b"L"), &of(b"R"), &of(b"P"), &of(b"Q"), &of(b"W"), number(field(head, 4)), field(head, 2)),
-                TAB_RAD => rads(area, &of(b"R"), &of(b"A"), head, &names),
+                TAB_RAD => rads(area, &of(b"R"), head, &names),
                 3 => stats(area, &of(b"T"), &of(b"Y"), &names),
                 4 => past(area, &of(b"H"), &names),
                 TAB_GOALS if with_goals => goals(area, &of(b"Q"), &of(b"W"), &of(b"M"), &of(b"N"), head, &names),
@@ -787,7 +790,7 @@ fn standing(row: &[&[u8]], now: i32) -> (&'static [u8], [u8; 3], usize) {
 /// RAD: at the left every manager at a glance (a click shows his) and the wheel, at the right the
 /// chosen manager's challenges of one season by where they stand.
 #[allow(static_mut_refs)]
-unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8]], names: &[&[u8]]) {
+unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, head: &[&[u8]], names: &[&[u8]]) {
     let host = field(head, 3) == b"1";
     let now = number(field(head, 4));
     let year = now - BACK_YEARS;
@@ -805,6 +808,10 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     }
     let mid = x1 + (x2 - x1) * 36 / 100;
     let line = (y2 - y1) * 7 / 100;
+    // the host's spin: three wheels over the whole tab
+    if let Some((since, name)) = &SPIN {
+        return spin_stage((x1, y1, x2, y2), since.elapsed().as_millis(), name, line);
+    }
     // every manager at a glance
     let left_end = mid - 6;
     card((x1, y1, left_end, y2));
@@ -850,12 +857,7 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     let (cx, cy) = ((shown.0 + shown.2) / 2, (shown.1 + shown.3) / 2);
     let (tl, tr) = (shown.0 + 12, shown.2 - 12);
     let new = NEW_ROW.and_then(|id| rows.iter().find(|r| number(r[1]) == id));
-    if let Some((since, name)) = &SPIN {
-        let ms = since.elapsed().as_millis() as usize;
-        let t = tasks[(ms / 90 * 7) % tasks.len().max(1)];
-        text_at(cx, shown.1 + 6, shown.1 + line, f(3), GOLD, &[b"RAD spinning for ", &word(name)[..], b"..."].concat(), 1);
-        assistant::report_text(tl, cy - line / 2, tr, shown.3 - 6, f(3), line * 7 / 10, t[2]);
-    } else if let Some(r) = new {
+    if let Some(r) = new {
         text_at(cx, shown.1 + 6, shown.1 + line, f(2), GOLD, b"NEW CHALLENGE", 1);
         text_at(cx, shown.1 + line, shown.1 + line * 2, f(3), INK, &[&word(r[2])[..], b"  -  season ", field(head, 1)].concat(), 1);
         assistant::report_text(tl, shown.1 + line * 2, tr, shown.3 - line, f(3), line * 7 / 10, r[5]);
@@ -910,6 +912,118 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, tasks: &Lines, head: &[&[u8
     }
     let foot = if host { format!("{points} points in. A click on a row: done, then failed, then the game's again. The cross removes it.") } else { format!("{points} points in. The host spins and ticks off.") };
     text_at(rx, y2 - line * 7 / 10, y2 - 2, f(2), MUTED, foot.as_bytes(), 0);
+}
+
+/// The host's spin (`League::spun`, drawn before the wheels turn): a wheel of the categories, then
+/// of the landed one's sub-categories, then of their challenges, each easing to a stop on the
+/// drawn segment and standing there lit a while. Clients see the result only.
+#[allow(static_mut_refs)]
+unsafe fn spin_stage((x1, y1, x2, y2): Rect, ms: u128, name: &[u8], line: i32) {
+    let spun = &league().spun;
+    let Some(last) = spun.len().checked_sub(1) else { return };
+    let (step, t) = match (ms / STEP_MS) as usize {
+        k if k > last => (last, 1.0),
+        k => (k, ((ms % STEP_MS) as f32 / WHEEL_MS as f32).min(1.0)),
+    };
+    card((x1, y1, x2, y2));
+    let cx = (x1 + x2) / 2;
+    let who = name.split(|&c| c == b' ').next().unwrap_or(b"");
+    text_at(cx, y1 + 4, y1 + line, f(4), GOLD, &[b"RAD spinning for ", who, b"..."].concat(), 1);
+    // the three steps, what each gave once it stands
+    let third = (x2 - x1) / 3;
+    for (i, title) in [&b"Category"[..], b"Sub-category", b"Challenge"].iter().enumerate() {
+        let (a, b) = (x1 + third * i as i32 + 10, x1 + third * (i as i32 + 1) - 10);
+        let landed = i < step || (i == step && t >= 1.0);
+        round((a, y1 + line, b, y1 + line * 2 - 6), 6, if i == step { SELECTED } else { CARD });
+        let said = match spun.get(i) {
+            Some(w) if landed => [*title, b": ", &to_latin1(&w.0[w.1].0)[..]].concat(),
+            _ => title.to_vec(),
+        };
+        let colour = if landed { GOLD } else if i == step { INK } else { MUTED };
+        text_at((a + b) / 2, y1 + line, y1 + line * 2 - 6, f(3), colour, &clip_text(f(3), &said, b - a - 16), 1);
+    }
+    // the wheel: the pointer at the top stops on the landed segment, `off` per mille into it
+    let (segs, at, off) = &spun[step];
+    let total = segs.iter().map(|s| s.1).sum::<usize>().max(1) as f32;
+    let before = segs[..*at].iter().map(|s| s.1).sum::<usize>() as f32;
+    let goal = (before + segs[*at].1 as f32 * *off as f32 / 1000.0) / total;
+    let turn = -goal - 3.0 * (1.0 - t).powi(3); // (ease-out: three turns more at the start)
+    let (top, bottom) = (y1 + line * 2 + 8, y2 - line * 2);
+    // ponytail: every pixel of the wheel blended each frame (25 a second); cap r if a big screen stutters
+    let r = ((bottom - top) * 45 / 100).min((x2 - x1) / 3).clamp(20, 300);
+    let cy = top + (bottom - top) / 2 + r / 20;
+    wheel(cx, cy, r, line, segs, turn, (t >= 1.0).then_some(*at));
+    // under the wheel the segment at the pointer, in full
+    let mut acc = 0.0;
+    let under = (-turn).rem_euclid(1.0);
+    let k = segs.iter().position(|s| {
+        acc += s.1 as f32 / total;
+        under < acc
+    });
+    let said = to_latin1(&segs[k.unwrap_or(*at)].0);
+    text_at(cx, bottom + line / 4, bottom + line * 5 / 4, f(4), if t >= 1.0 { GOLD } else { INK }, &clip_text(f(4), &said, x2 - x1 - 24), 1);
+}
+
+/// A wheel of fortune at (cx, cy): `segs` (label, weight) clockwise, turned by `turn` (in whole
+/// turns), the pointer at the top; `landed` the segment that won, lit while the others dim.
+unsafe fn wheel(cx: i32, cy: i32, r: i32, line: i32, segs: &[(String, usize)], turn: f32, landed: Option<usize>) {
+    const COLOURS: [[u8; 3]; 7] = [[0x3a, 0x5f, 0x9a], [0x2f, 0x7d, 0x5a], [0x9a, 0x4a, 0x44], [0x6a, 0x52, 0x9a], [0x9a, 0x70, 0x34], [0x2f, 0x7f, 0x86], [0x7a, 0x3e, 0x6e]];
+    let n = segs.len();
+    let total = segs.iter().map(|s| s.1).sum::<usize>().max(1) as f32;
+    let mut ends = Vec::with_capacity(n);
+    let mut acc = 0.0;
+    for s in segs {
+        acc += s.1 as f32 / total;
+        ends.push(acc);
+    }
+    // (the last segment never takes the first's colour, its neighbour across the start)
+    let colour = |k: usize| COLOURS[if k > 0 && k == n - 1 && k % COLOURS.len() == 0 { 1 } else { k % COLOURS.len() }];
+    let shades: Vec<u16> = (0..n).map(|k| rgb565(match landed {
+        Some(l) if l == k => GOLD,
+        Some(_) => mix(colour(k), DARK, 45),
+        None => colour(k),
+    })).collect();
+    let (edge, hub) = (rgb565(DARK), rgb565(BORDER));
+    let (rf, tau) = (r as f32, std::f32::consts::TAU);
+    blend(cx - r - 1, cy - r - 1, 2 * r + 3, 2 * r + 3, |col, row| {
+        let (dx, dy) = ((col - r - 1) as f32 + 0.5, (row - r - 1) as f32 + 0.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let a = ((rf + 0.5 - d).clamp(0.0, 1.0) * 255.0) as u32;
+        if a == 0 {
+            return (0, 0);
+        }
+        if d < rf * 0.12 {
+            return (hub, 255);
+        }
+        if d > rf - 3.0 || d < rf * 0.12 + 2.0 {
+            return (edge, a);
+        }
+        // (where on the wheel this pixel is, 0..1 clockwise from the first segment's start)
+        let q = (dx.atan2(-dy) / tau - turn).rem_euclid(1.0);
+        let k = ends.iter().position(|&e| q < e).unwrap_or(n - 1);
+        let from = if k == 0 { 0.0 } else { ends[k - 1] };
+        if n > 1 && (q - from).min(ends[k] - q) * tau * d < 1.2 {
+            return (edge, a);
+        }
+        (shades[k], a)
+    });
+    // the labels, level, at each segment's middle; as much as fits its width there
+    let font = if r > 140 { f(3) } else { f(2) };
+    let mut from = 0.0;
+    for (k, s) in segs.iter().enumerate() {
+        let (span, middle) = (ends[k] - from, (from + ends[k]) / 2.0 + turn);
+        from = ends[k];
+        let (px, py) = (cx + (rf * 0.6 * (middle * tau).sin()) as i32, cy - (rf * 0.6 * (middle * tau).cos()) as i32);
+        let room = ((span * tau * rf * 0.6) as i32).min(r * 3 / 4) - 6;
+        if room > 12 {
+            let ink = if landed == Some(k) { DARK } else { INK };
+            text_at(px, py - line / 3, py + line / 3, font, ink, &clip_text(font, &to_latin1(&s.0), room), 1);
+        }
+    }
+    // the pointer
+    let (w, h) = ((r / 12).max(6) as f32, (r / 8).max(9) as f32);
+    let (x, y) = (cx as f32, (cy - r) as f32);
+    polygon(&[(x - w, y - h * 0.6), (x + w, y - h * 0.6), (x, y + h * 0.5)], GOLD, 255);
 }
 
 /// A challenge: its box (the host's click ticks it), the text, what the game has read so far, the

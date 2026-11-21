@@ -33,6 +33,18 @@ right his challenges of one season, grouped by where they stand; `<` and `>` cha
 new one says "New" in the list. Reached means reached, the points come when the season turns:
 points count when `done` is set, at the season's turn or by the host.
 
+The spin (2026-11-21): the host's click draws at once (`mod.rs` `roll`, the same rules as before:
+one challenge per category a season, a fresh one while the category has any, none another manager
+has this season, archived ones never), then three wheels turn over the whole RAD tab, about 8.7 s:
+the categories, the landed category's sub-categories (rules.tsv column 6; none: the category's
+name), their challenges. Each eases to a stop on the drawn segment and stands lit 0.7 s; a row of
+three steps above says what each gave. **Weighting**: a segment is as wide as the drawable
+challenges behind it, so the one pick over all of them is one pick per wheel weighted by count and
+every challenge stays as likely as before the wheels. The wheels (`League::spun`, not saved) and
+the animation (`draw.rs` `spin_stage`, `wheel`) are the host's only; a client sees the new row when
+it next asks for the page. Leaving the page mid-spin keeps the draw. Sizes follow the tab
+(radius 45 % of its height, at most a third of its width, 300 px), so 800x600 and 1280x800 fit.
+
 Seasons: the running season (page, spins, RAD rows, readings) turns on 1 July (`RUNNING_FROM`), so
 a game started in July has 2025/26 from its first day. Results from the game's history are placed
 by `SEASON_FROM` (day 200), because supercups fall around it. The button stands under the lowest

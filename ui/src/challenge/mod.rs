@@ -465,7 +465,11 @@ struct League {
     points: Vec<(String, i32, bool)>, // item, points, a trophy
     prizes: Vec<(String, String, i32, bool)>, // the same with their category, for the Regels page
     ranks: Vec<(String, i32)>,
-    tasks: Vec<(String, String, i32)>, // category, text, points
+    tasks: Vec<(String, String, i32, String)>, // category, text, points, sub-category
+    /// The host's last spin as three wheels (draw.rs turns them): category, its sub-categories,
+    /// their challenges; each wheel's segments (label, how many of the pool stand behind it), the
+    /// one landed on and where in it (per mille). Not saved.
+    spun: Vec<(Vec<(String, usize)>, usize, u32)>,
     archived: Vec<String>, // challenges kept for old rows, never drawn again (the RAD review, 2026-11-06)
     best: Vec<(String, i32, i32)>,     // a manager's best player on 1 January: name, season, staff index
     notes: Vec<String>, // the rule book's lines on how the RAD challenges count (rules.tsv `X`)
@@ -489,7 +493,7 @@ impl League {
                 // (a reading was written as G at first, the rank's letter: five fields tell it apart)
                 "G" if c.len() < 5 => l.ranks.push((text(1), number(2))),
                 "C" => {
-                    l.tasks.push((text(1), text(2), number(3)));
+                    l.tasks.push((text(1), text(2), number(3), text(5)));
                     if number(4) != 0 {
                         l.archived.push(text(2));
                     }
@@ -621,21 +625,44 @@ impl League {
     /// the manager had before while his category has others left, none another manager has this
     /// season. Which of those by `pick`, a random number.
     fn roll(&mut self, name: &str, year: i32, pick: usize) -> bool {
+        self.spun.clear();
         let mine: Vec<&Rad> = self.rads.iter().filter(|r| r.name == name).collect();
         let category = |text: &str| self.tasks.iter().find(|t| t.1 == text).map(|t| t.0.clone());
         let used: Vec<String> = mine.iter().filter(|r| r.year == year).filter_map(|r| category(&r.text)).collect();
         let others: Vec<&str> = self.rads.iter().filter(|r| r.year == year).map(|r| r.text.as_str()).collect();
-        let mut pool: Vec<&(String, String, i32)> = Vec::new();
-        let live = |t: &&(String, String, i32)| !self.archived.contains(&t.1);
+        type Task = (String, String, i32, String);
+        let mut pool: Vec<&Task> = Vec::new();
+        let live = |t: &&Task| !self.archived.contains(&t.1);
         let mut cats: Vec<&String> = self.tasks.iter().filter(live).map(|t| &t.0).collect();
         cats.dedup();
         for cat in cats.into_iter().filter(|c| !used.contains(c)) {
-            let all: Vec<&(String, String, i32)> = self.tasks.iter().filter(live).filter(|t| t.0 == *cat).collect();
-            let fresh: Vec<&(String, String, i32)> = all.iter().copied().filter(|t| !mine.iter().any(|r| r.text == t.1)).collect();
+            let all: Vec<&Task> = self.tasks.iter().filter(live).filter(|t| t.0 == *cat).collect();
+            let fresh: Vec<&Task> = all.iter().copied().filter(|t| !mine.iter().any(|r| r.text == t.1)).collect();
             pool.extend((if fresh.is_empty() { all } else { fresh }).into_iter().filter(|t| !others.contains(&t.1.as_str())));
         }
-        let Some(&(_, text, points)) = pool.get(pick % pool.len().max(1)).map(|t| (&t.0, &t.1, t.2)).as_ref() else { return false };
-        let (text, id) = (text.clone(), self.rads.iter().map(|r| r.id).max().unwrap_or(0) + 1);
+        let Some(&t) = pool.get(pick % pool.len().max(1)) else { return false };
+        // the wheels: one pick over the pool is one pick per wheel with each segment weighing the
+        // challenges behind it, so every challenge stays as likely as before (user 2026-11-21)
+        // (a challenge without a sub-category stands under its category's name)
+        let sub = |x: &Task| if x.3.is_empty() { x.0.clone() } else { x.3.clone() };
+        let wheel = |of: Vec<String>, at: &str, k: u32| {
+            let mut segs: Vec<(String, usize)> = Vec::new();
+            for s in of {
+                match segs.iter_mut().find(|g| g.0 == s) {
+                    Some(g) => g.1 += 1,
+                    None => segs.push((s, 1)),
+                }
+            }
+            let landed = segs.iter().position(|g| g.0 == at).unwrap_or(0);
+            (segs, landed, (pick as u32 / (7 + 13 * k)) % 600 + 200)
+        };
+        let spun = vec![
+            wheel(pool.iter().map(|x| x.0.clone()).collect(), &t.0, 0),
+            wheel(pool.iter().filter(|x| x.0 == t.0).map(|x| sub(x)).collect(), &sub(t), 1),
+            wheel(pool.iter().filter(|x| x.0 == t.0 && sub(x) == sub(t)).map(|x| x.1.clone()).collect(), &t.1, 2),
+        ];
+        let (text, points, id) = (t.1.clone(), t.2, self.rads.iter().map(|r| r.id).max().unwrap_or(0) + 1);
+        self.spun = spun;
         self.rads.push(Rad { id, name: name.to_string(), year, points, text, ..Default::default() });
         true
     }
@@ -1699,8 +1726,17 @@ mod tests {
             let mut l2 = sample();
             assert!(l2.roll("Ann", 2032, pick));
             assert_eq!(l2.rads.last().unwrap().text, "C");
+            // three wheels, each landed on the drawn challenge's own segment
+            let w: Vec<&str> = l2.spun.iter().map(|w| w.0[w.1].0.as_str()).collect();
+            assert_eq!(w, ["Staff", "Staff", "C"]);
         }
         assert!(l.roll("Ann", 2032, 0));
         assert!(!l.roll("Ann", 2032, 0)); // nothing left this season
+        assert!(l.spun.is_empty());
+        // a segment weighs the challenges behind it: Bob may draw all three, Age twice as heavy
+        let mut l = League::parse("C\tAge\tA\t6\t0\tOld\nC\tAge\tB\t3\t0\tYoung\nC\tStaff\tC\t3\t0\tSize\n", "");
+        assert!(l.roll("Bob", 2032, 1));
+        assert_eq!(l.spun[0].0, [("Age".to_string(), 2), ("Staff".to_string(), 1)]);
+        assert_eq!((l.spun[1].0.len(), l.spun[1].0[l.spun[1].1].0.as_str(), l.rads[0].text.as_str()), (2, "Young", "B"));
     }
 }
