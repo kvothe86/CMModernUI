@@ -650,9 +650,21 @@ fn same_manager(file_name: &str, game_name: &str) -> bool {
 static mut LEAGUE: Option<League> = None;
 static mut FILE: String = String::new(); // this game's file, empty until `use_game`
 
+/// The rules file the editor writes (`ui\challenge_editor.html`, user 2026-11-21), in the game
+/// folder: when it is there the host's rules are its, else the built-in ones. Read at each game
+/// load. A challenge text the game does not know (`track::rule` None) is the host's to tick.
+const RULES_FILE: &str = "cmui_rules.tsv";
+
+fn rules_text() -> String {
+    match std::fs::read(RULES_FILE) {
+        Ok(own) if !own.is_empty() => latin1(&own).into_owned(),
+        _ => latin1(RULES).into_owned(),
+    }
+}
+
 #[allow(static_mut_refs)]
 fn league() -> &'static mut League {
-    unsafe { LEAGUE.get_or_insert_with(|| League::parse(&latin1(RULES), "")) }
+    unsafe { LEAGUE.get_or_insert_with(|| League::parse(&rules_text(), "")) }
 }
 
 /// A league's file belongs to a game with these managers: a line of it names one of them.
@@ -693,9 +705,9 @@ unsafe fn use_game() {
     }
     // (a game without a file yet, a single player's first opening or a save from before: the rules
     // alone, results from the save's history, the file made at the first change)
-    LEAGUE = Some(League::parse(&latin1(RULES), &latin1(&std::fs::read(&file).unwrap_or_default())));
+    LEAGUE = Some(League::parse(&rules_text(), &latin1(&std::fs::read(&file).unwrap_or_default())));
     TABLE = best_table();
-    log(&format!("challenge: league file {file}"));
+    log(&format!("challenge: league file {file}, rules {}", if std::path::Path::new(RULES_FILE).exists() { RULES_FILE } else { "built in" }));
     FILE = file;
 }
 

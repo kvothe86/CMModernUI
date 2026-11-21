@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>CM Challenge editor</title>
+<style>
+:root { --bg:#14181f; --card:#1d232d; --line:#2c3440; --ink:#e6e9ee; --muted:#8a94a3; --gold:#e8b63b; --cyan:#4fc3d9; --bad:#e0605a; --ok:#4cc07a; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.4 "Segoe UI", system-ui, sans-serif; }
+header { position:sticky; top:0; z-index:2; background:#10141a; border-bottom:1px solid var(--line); padding:10px 18px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+h1 { font-size:17px; margin:0 14px 0 0; color:var(--gold); }
+button { background:#2b4766; color:var(--ink); border:0; border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+button:hover { background:#3a5c82; } button.quiet { background:transparent; color:var(--muted); padding:2px 6px; } button.quiet:hover { color:var(--bad); }
+#status { color:var(--muted); margin-left:auto; } #status.dirty { color:var(--gold); }
+nav { display:flex; gap:4px; padding:12px 18px 0; }
+nav button { background:var(--card); border-radius:6px 6px 0 0; } nav button.on { background:#2b4766; color:var(--gold); }
+main { padding:0 18px 40px; }
+section { display:none; background:var(--card); border-radius:0 8px 8px 8px; padding:14px; } section.on { display:block; }
+.tools { display:flex; gap:10px; margin-bottom:10px; align-items:center; flex-wrap:wrap; }
+input, textarea { background:#121720; color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
+input:focus, textarea:focus { outline:1px solid var(--cyan); }
+table { width:100%; border-collapse:collapse; } th { text-align:left; color:var(--muted); font-weight:600; font-size:12px; padding:4px; border-bottom:1px solid var(--line); }
+td { padding:3px 4px; border-bottom:1px solid #232a34; vertical-align:middle; } td input { width:100%; }
+td.n input { width:64px; } td.c { width:150px; } td.s { width:150px; } td.chk { width:70px; text-align:center; } td.del { width:30px; }
+tr.group td { color:var(--cyan); font-weight:600; padding-top:12px; border-bottom:1px solid var(--line); }
+tr.archived td input:not([type=checkbox]) { color:var(--muted); text-decoration:line-through; }
+.badge { font-size:11px; border-radius:4px; padding:1px 6px; white-space:nowrap; } .game { background:#1f4a33; color:#9ee6b8; } .host { background:#4a3b1f; color:#f1cf86; }
+.note textarea { width:100%; min-height:54px; } .hint { color:var(--muted); font-size:12px; margin:6px 0 12px; }
+</style></head><body>
+<header>
+  <h1>CM Challenge editor</h1>
+  <button id="open">Open cmui_rules.tsv</button>
+  <button id="builtin">Start from the built-in rules</button>
+  <button id="save">Save</button>
+  <button id="saveas">Save as...</button>
+  <span id="status">Nothing open</span>
+</header>
+<nav><button data-tab="rad" class="on">RAD challenges</button><button data-tab="goals">Career goals</button><button data-tab="notes">Rule book</button></nav>
+<main>
+<section id="rad" class="on">
+  <div class="tools"><button id="addrad">Add challenge</button><input id="radfilter" placeholder="Filter..." size="30"><span class="hint">Category and sub-category are the wheel's first two spins. "Can be drawn" off: kept for old rows, never drawn again. <span class="badge game">game</span> the game judges it; <span class="badge host">host ticks</span> a text the game does not know.</span></div>
+  <table><thead><tr><th>Category</th><th>Sub-category</th><th>Challenge</th><th>Points</th><th>Can be drawn</th><th></th><th></th></tr></thead><tbody id="radrows"></tbody></table>
+</section>
+<section id="goals">
+  <div class="tools"><button id="addgoal">Add goal</button><input id="goalfilter" placeholder="Filter..." size="30"><span class="hint">Each manager picks ten. A goal the game does not know is ticked by the host.</span></div>
+  <table><thead><tr><th>Category</th><th>Goal</th><th>Points</th><th></th><th></th></tr></thead><tbody id="goalrows"></tbody></table>
+</section>
+<section id="notes">
+  <div class="tools"><button id="addnote">Add line</button><span class="hint">Shown at the top of the Rules tab, under "How the RAD challenges count".</span></div>
+  <div id="noterows"></div>
+</section>
+</main>
+<datalist id="cats"></datalist><datalist id="subs"></datalist><datalist id="gcats"></datalist>
+<script>
+const BUILTIN = "P\tEurope\tCL Phase 2\t3\t0\nP\tEurope\tCL Winner\t20\t1\nP\tEurope\tCL Finalist\t12\t0\nP\tEurope\tCL Quarter final\t5\t0\nP\tEurope\tCL Semi final\t8\t0\nP\tEurope\tUEFA Cup Winner\t12\t1\nP\tEurope\tUEFA Cup Finalist\t7\t0\nP\tEurope\tUEFA Cup Quarter final\t3\t0\nP\tEurope\tUEFA Cup Semi final\t5\t0\nP\tSupercups\tNational Supercup\t3\t1\nP\tSupercups\tEuropean Supercup Winner\t3\t1\nP\tNational\tChampion\t10\t1\nP\tNational\t2nd place\t6\t0\nP\tNational\t3rd place\t4\t0\nP\tNational\tLower league champion\t5\t1\nP\tNational\tLower league promotion\t3\t0\nP\tNational\tCup winner\t6\t1\nP\tNational\tCup finalist\t2\t0\nP\tNational\tEuropean football\t2\t0\nP\tClub changes\t3+ seasons\t0\t0\nP\tClub changes\tLeft after 1 season\t-10\t0\nP\tClub changes\tLeft after 2 seasons\t-5\t0\nP\tClub changes\t5+ seasons (loyalty)\t3\t0\nP\tNational teams\tWorld Cup Winner\t20\t1\nP\tNational teams\tWorld Cup Finalist\t12\t0\nP\tNational teams\tWorld Cup Quarter final\t5\t0\nP\tNational teams\tWorld Cup Semi final\t8\t0\nP\tNational teams\tContinental tournament Winner\t10\t1\nP\tNational teams\tContinental tournament Finalist\t6\t0\nP\tNational teams\tContinental tournament Semi final\t4\t0\nP\tTrophy Drought\tFirst prize in 10+ years\t3\t0\nP\tTrophy Drought\tFirst prize in 20+ years\t6\t0\nP\tTrophy Drought\tFirst prize in 30+ years\t10\t0\nP\tWorld (clubs)\tClub World Cup Winner\t15\t1\nP\tWorld (clubs)\tClub World Cup Finalist\t8\t0\nP\tWorld (clubs)\tClub World Cup Semi final\t4\t0\nG\tGold\t150\nG\tBronze\t25\nG\tLegend\t1000\nG\tSilver\t75\nG\tDiamond\t350\nG\tChampion\t700\nG\tPlatinum\t500\nX\tStarting XI challenges (age, squad, nationality): every league match counts on its own, with the eleven you start it with (substitutes do not count). A challenge is met when it held in more than half of your league matches of the season, and at least 10 were played.\nX\tAges are on the match day. Homegrown: joined the club at 18 or younger. Youth player: homegrown and 21 or younger. International: has played for his country. Foreign and own country go by the country of your club's league.\nX\tKeeper + 4 defenders all 28+: your keeper and every defender you start (sweeper, D, wing back), at least four defenders.\nX\tTactics challenges: the formation of your active tactic in every league match. Defenders are SW, D and WB; midfielders DM, M and AMC; attackers F and ST; attacking wingers AML and AMR.\nX\tPlay with (a sweeper, three attackers, five defenders, five midfielders, one defender): every league match, at least 10. Without wing backs, without attacking wingers and Always 4-4-2 fail at the first league match that breaks them. Without a striker: 15 league matches.\nX\tTransfers: a season's deals run from the end of May to the end of May, as the game dates them. Winter is December to February for every country, whatever its own transfer window.\nX\tRelease five players: players let go to no club, from the start of the season up to the end of February. A contract running out at the end of a season does not count.\nC\tStaff\tNo staff\t6\t0\tStaff size\nC\tStaff\tAssistant manager <10\t3\t0\tStaff quality\nC\tStaff\tMax 2 staff members in total\t3\t0\tStaff size\nC\tStaff\tDutch staff only\t3\t0\tStaff origin\nC\tStaff\tNo physio and no scout\t3\t0\tStaff size\nC\tStaff\tAll coaches with coaching attributes below 5\t6\t0\tStaff quality\nC\tPlayers\tKeeper 10+ clean sheets\t3\t0\tDefence\nC\tPlayers\tPlayer scores 20+ goals\t6\t0\tGoals and assists\nC\tPlayers\tAt least 3 players with 10+ goals\t6\t0\tGoals and assists\nC\tPlayers\tAt least 3 players with 5+ assists\t3\t0\tGoals and assists\nC\tPlayers\tTeam gets no more than 1 red card\t9\t0\tDiscipline\nC\tPlayers\tTeam gets no more than 3 red cards\t6\t0\tDiscipline\nC\tPlayers\tTeam gets no more than 5 red cards\t3\t0\tDiscipline\nC\tPlayers\tPlayer becomes top scorer OR top assists OR highest average rating\t9\t0\tLeague leaders\nC\tPlayers\tPlayer gets two of three (top scorer/assists/average rating)\t20\t0\tLeague leaders\nC\tPlayers\tPlayer becomes top scorer, top assists and highest average rating\t20\t0\tLeague leaders\nC\tAge\t3 players 35+ in the starting XI\t20\t0\tOld\nC\tAge\t5 players 30+ in the starting XI\t9\t0\tOld\nC\tAge\t5 players 32+ in the starting XI\t20\t0\tOld\nC\tAge\t5 players under 21 in the starting XI\t20\t0\tYoung\nC\tAge\t5 players under 23 in the starting XI\t20\t0\tYoung\nC\tAge\tAverage age starting XI <=23\t20\t0\tYoung\nC\tAge\tAverage age starting XI >=30\t20\t0\tOld\nC\tAge\tNo player younger than 18 in the starting XI\t3\t1\tYoung\nC\tAge\tFirst team average age <=20\t20\t1\tYoung\nC\tAge\tFirst team average age <=23\t20\t1\tYoung\nC\tAge\tFirst team average age >=30\t20\t1\tOld\nC\tAge\tFirst team average age >=32\t20\t1\tOld\nC\tSquad\t5 left-footed players in the starting XI\t12\t0\tFeet\nC\tSquad\t5 right-footed players in the starting XI\t3\t1\tFeet\nC\tSquad\tKeeper + 4 defenders all 28+\t12\t0\tExperience\nC\tSquad\tAt least 3 homegrown players in the starting XI\t6\t0\tHomegrown\nC\tSquad\tNo player worth more than \u20ac10M in the starting XI\t6\t0\tBudget\nC\tSquad\tAt least 2 youth players promoted to the starting XI\t6\t0\tHomegrown\nC\tSquad\tAt least 3 internationals in the starting XI\t3\t0\tExperience\nC\tTransfers\tMax 1 purchase\t9\t0\tPurchases\nC\tTransfers\tMax 3 purchases\t6\t0\tPurchases\nC\tTransfers\tNo winter transfers\t3\t0\tWinter\nC\tTransfers\tNo purchases > \u20ac2M\t6\t0\tPurchases\nC\tTransfers\tNo sales in winter\t3\t0\tWinter\nC\tTransfers\tOnly buy players <23\t6\t0\tPurchases\nC\tTransfers\tBiggest purchase < \u20ac5M\t6\t0\tPurchases\nC\tTransfers\tOnly Bosman/free transfers\t6\t0\tPurchases\nC\tTransfers\tSell your best player (avg rating 1 January)\t6\t0\tDepartures\nC\tTransfers\tRelease five players from your squad (no fee)\t6\t0\tDepartures\nC\tNationality\t5 players from Africa in the starting XI\t12\t0\tContinents\nC\tNationality\t5 players from South America in the starting XI\t12\t0\tContinents\nC\tNationality\t5 players from Eastern Europe in the starting XI\t20\t0\tContinents\nC\tNationality\t5 players from Scandinavia in the starting XI\t20\t0\tContinents\nC\tNationality\t5 foreigners in the starting XI\t3\t0\tMix\nC\tNationality\t5 players from NED/BEL/POR/TUR in the starting XI\t6\t0\tLeagues\nC\tNationality\t5 players from ENG/SPA/GER/ITA/FRA in the starting XI\t3\t0\tLeagues\nC\tNationality\t3 players from the same country (not your own) in the starting XI\t6\t0\tMix\nC\tNationality\tNo player from your own country in the starting XI\t12\t0\tMix\nC\tNationality\tAt least 5 different nationalities in the starting XI\t3\t0\tMix\nC\tNationality\tTeam of 1 nationality from NED/BEL/POR/TUR\t20\t1\tContinents\nC\tNationality\tTeam of 1 nationality from ENG/SPA/GER/ITA/FRA\t20\t1\tContinents\nC\tNationality\tTeam of 1 nationality from the other countries\t20\t1\tContinents\nC\tNationality\tFatbike kids challenge (African players only)\t20\t1\tContinents\nC\tNationality\tFavela challenge (South American players only)\t20\t1\tContinents\nC\tNationality\tMurica challenge (North American players only)\t20\t1\tContinents\nC\tNationality\tPrawn cracker challenge (Asian players only)\t20\t1\tContinents\nC\tNationality\tDown Under challenge (Oceanian players only)\t20\t1\tContinents\nC\tNationality\tNo players from your own country (competition)\t9\t1\tMix\nC\tTactics\tPlay with a sweeper in the starting XI\t6\t0\tPositions\nC\tTactics\tPlay without wing backs\t6\t0\tPositions\nC\tTactics\tPlay with at least three attackers\t3\t0\tFormation\nC\tTactics\tAlways 4-4-2 (no other formation)\t3\t0\tFormation\nC\tTactics\tPlay with at least five defenders\t3\t0\tFormation\nC\tTactics\tPlay with at least five midfielders\t3\t0\tFormation\nC\tTactics\tPlay without attacking wingers\t6\t0\tPositions\nC\tTactics\tPlay without a striker (min. 15 competitive matches)\t6\t0\tPositions\nC\tTactics\tPlay park the bus, defensive, long ball, counter\t6\t1\tPositions\nC\tTactics\tPlay with 1 defender (Kamikaze)\t6\t0\tFormation\nQ\tNational honours\tWin the league title in a country of your choice\t25\nQ\tNational honours\tWin the national cup in a country of your choice\t10\nQ\tNational honours\tWin the national Super Cup in a country of your choice\t10\nQ\tNational honours\tWin the league title in three different countries\t50\nQ\tNational honours\tWin the national cup in three different countries\t50\nQ\tNational honours\tWin the league and the cup in the same season\t25\nQ\tNational honours\tWin the league, the cup and the Super Cup in one season\t50\nQ\tNational honours\tWin five league titles with the same club\t50\nQ\tNational honours\tWin promotion with three different clubs\t25\nQ\tNational honours\tWin the league title straight after promotion\t50\nQ\tEuropean and international honours\tWin the Champions League\t50\nQ\tEuropean and international honours\tWin the Champions League with two different clubs\t100\nQ\tEuropean and international honours\tWin the UEFA Cup / Europa League\t25\nQ\tEuropean and international honours\tWin the Conference League\t10\nQ\tEuropean and international honours\tWin the European Super Cup\t25\nQ\tEuropean and international honours\tWin the Club World Cup\t25\nQ\tEuropean and international honours\tWin the Champions League and the league title in the same season\t50\nQ\tEuropean and international honours\tWin the Champions League with a club outside the big five leagues\t100\nQ\tEuropean and international honours\tWin the World Cup as a national team manager\t100\nQ\tEuropean and international honours\tWin a continental tournament as a national team manager\t50\nQ\tIndividual player achievements\tHave the top flight's top scorer in your team\t10\nQ\tIndividual player achievements\tHave the top flight's top assist maker in your team\t10\nQ\tIndividual player achievements\tHave the top flight's highest average rating in your team\t10\nQ\tIndividual player achievements\tHave the Ballon d'Or winner of the year in your team\t50\nQ\tIndividual player achievements\tHave the Champions League top scorer in your team\t25\nQ\tIndividual player achievements\tHave the European Golden Boot winner in your team\t25\nQ\tIndividual player achievements\tHave three players in the league's Team of the Year\t25\nQ\tIndividual player achievements\tHave the top flight's top scorer three seasons in a row\t50\nQ\tRivalries and derbies\tWin the Revierderby (Dortmund v Schalke 04) ten times\t50\nQ\tRivalries and derbies\tWin the Old Firm (Celtic v Rangers) ten times\t50\nQ\tRivalries and derbies\tWin Le Classique (PSG v Marseille) ten times\t50\nQ\tRivalries and derbies\tWin the Derby della Madonnina (AC Milan v Inter) ten times\t50\nQ\tRivalries and derbies\tWin De Klassieker (Ajax v Feyenoord) ten times\t50\nQ\tRivalries and derbies\tWin El Cl\u00e1sico (Barcelona v Real Madrid) ten times\t50\nQ\tRivalries and derbies\tWin the North London Derby (Arsenal v Tottenham) ten times\t50\nQ\tCareer and club building\tWork in three different countries\t25\nQ\tCareer and club building\tWork in five different countries\t50\nQ\tCareer and club building\tWin a trophy in three different countries\t50\nQ\tCareer and club building\tWin the league title in all of the big five leagues\t150\nQ\tCareer and club building\tManage ten different clubs\t50\nQ\tCareer and club building\tStay ten seasons at the same club\t50\nQ\tCareer and club building\tTake a club from the lowest playable division to the top flight\t50\nQ\tCareer and club building\tTake a club from the lowest playable division to the Champions League\t100\nQ\tCareer and club building\tWin a trophy with five different clubs\t50\nQ\tSpecial achievements\tGo a full league season unbeaten\t50\nQ\tSpecial achievements\tWin a competitive match with double figures (10+ goals)\t25\nQ\tSpecial achievements\tWin the league after trailing the leader by 10+ points at the halfway mark\t50\nQ\tSpecial achievements\tWin the Champions League, the league and the cup in one season\t100\n";
+const FOLLOWED_RAD = new Set(["3 players 35+ in the starting XI", "3 players from the same country (not your own) in the starting XI", "5 foreigners in the starting XI", "5 left-footed players in the starting XI", "5 players 30+ in the starting XI", "5 players 32+ in the starting XI", "5 players from Africa in the starting XI", "5 players from ENG/SPA/GER/ITA/FRA in the starting XI", "5 players from Eastern Europe in the starting XI", "5 players from NED/BEL/POR/TUR in the starting XI", "5 players from Scandinavia in the starting XI", "5 players from South America in the starting XI", "5 players under 21 in the starting XI", "5 players under 23 in the starting XI", "5 right-footed players in the starting XI", "All coaches with coaching attributes below 5", "Always 4-4-2 (no other formation)", "Assistant manager <10", "At least 2 youth players promoted to the starting XI", "At least 3 homegrown players in the starting XI", "At least 3 internationals in the starting XI", "At least 3 players with 10+ goals", "At least 3 players with 5+ assists", "At least 5 different nationalities in the starting XI", "Average age starting XI <=23", "Average age starting XI >=30", "Biggest purchase < \u20ac5M", "Down Under challenge (Oceanian players only)", "Dutch staff only", "Fatbike kids challenge (African players only)", "Favela challenge (South American players only)", "First team average age <=20", "First team average age <=23", "First team average age >=30", "First team average age >=32", "Keeper + 4 defenders all 28+", "Keeper 10+ clean sheets", "Max 1 purchase", "Max 2 staff members in total", "Max 3 purchases", "Murica challenge (North American players only)", "No physio and no scout", "No player from your own country in the starting XI", "No player worth more than \u20ac10M in the starting XI", "No player younger than 18 in the starting XI", "No purchases > \u20ac2M", "No sales in winter", "No staff", "No winter transfers", "Only Bosman/free transfers", "Only buy players <23", "Play with 1 defender (Kamikaze)", "Play with a sweeper in the starting XI", "Play with at least five defenders", "Play with at least five midfielders", "Play with at least three attackers", "Play without a striker (min. 15 competitive matches)", "Play without attacking wingers", "Play without wing backs", "Player becomes top scorer OR top assists OR highest average rating", "Player becomes top scorer, top assists and highest average rating", "Player gets two of three (top scorer/assists/average rating)", "Player scores 20+ goals", "Prawn cracker challenge (Asian players only)", "Release five players from your squad (no fee)", "Sell your best player (avg rating 1 January)", "Team gets no more than 1 red card", "Team gets no more than 3 red cards", "Team gets no more than 5 red cards", "Team of 1 nationality from ENG/SPA/GER/ITA/FRA", "Team of 1 nationality from NED/BEL/POR/TUR", "Team of 1 nationality from the other countries"]);
+const FOLLOWED_GOAL = new Set(["Go a full league season unbeaten", "Have the Ballon d'Or winner of the year in your team", "Have the Champions League top scorer in your team", "Have the European Golden Boot winner in your team", "Have the top flight's highest average rating in your team", "Have the top flight's top assist maker in your team", "Have the top flight's top scorer in your team", "Have the top flight's top scorer three seasons in a row", "Have three players in the league's Team of the Year", "Manage ten different clubs", "Stay ten seasons at the same club", "Take a club from the lowest playable division to the Champions League", "Take a club from the lowest playable division to the top flight", "Win De Klassieker (Ajax v Feyenoord) ten times", "Win El Cl\u00e1sico (Barcelona v Real Madrid) ten times", "Win Le Classique (PSG v Marseille) ten times", "Win a competitive match with double figures (10+ goals)", "Win a continental tournament as a national team manager", "Win a trophy in three different countries", "Win a trophy with five different clubs", "Win five league titles with the same club", "Win promotion with three different clubs", "Win the Champions League", "Win the Champions League and the league title in the same season", "Win the Champions League with a club outside the big five leagues", "Win the Champions League with two different clubs", "Win the Champions League, the league and the cup in one season", "Win the Club World Cup", "Win the Conference League", "Win the Derby della Madonnina (AC Milan v Inter) ten times", "Win the European Super Cup", "Win the North London Derby (Arsenal v Tottenham) ten times", "Win the Old Firm (Celtic v Rangers) ten times", "Win the Revierderby (Dortmund v Schalke 04) ten times", "Win the UEFA Cup / Europa League", "Win the World Cup as a national team manager", "Win the league after trailing the leader by 10+ points at the halfway mark", "Win the league and the cup in the same season", "Win the league title in a country of your choice", "Win the league title in all of the big five leagues", "Win the league title in three different countries", "Win the league title straight after promotion", "Win the league, the cup and the Super Cup in one season", "Win the national Super Cup in a country of your choice", "Win the national cup in a country of your choice", "Win the national cup in three different countries", "Work in five different countries", "Work in three different countries"]);
+let keep = [], rad = [], goals = [], notes = [], handle = null, dirty = false;
+const $ = id => document.getElementById(id);
+// the file is Windows-1252 (the euro sign 0x80): decode and encode by its table
+const dec = new TextDecoder('windows-1252');
+const enc = new Map([...Array(256).keys()].map(b => [dec.decode(new Uint8Array([b])), b]));
+const toBytes = s => new Uint8Array([...s].map(ch => enc.get(ch) ?? 63));
+
+function parse(text) {
+  keep = []; rad = []; goals = []; notes = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    if (c[0] === 'C') rad.push({ cat: c[1] || '', text: c[2] || '', points: +c[3] || 0, archived: c[4] === '1', sub: c[5] || '' });
+    else if (c[0] === 'Q') goals.push({ cat: c[1] || '', text: c[2] || '', points: +c[3] || 0 });
+    else if (c[0] === 'X') notes.push(c.slice(1).join(' '));
+    else keep.push(line);
+  }
+  render(); setDirty(false);
+}
+function serialise() {
+  const clean = s => String(s).replace(/[\t\r\n]+/g, ' ').trim();
+  const out = keep.filter(l => !l.startsWith('C\t') && !l.startsWith('Q\t') && !l.startsWith('X\t'));
+  notes.filter(n => clean(n)).forEach(n => out.push('X\t' + clean(n)));
+  rad.filter(r => clean(r.text)).forEach(r => out.push(['C', clean(r.cat), clean(r.text), Math.round(r.points) || 0, r.archived ? 1 : 0, clean(r.sub)].join('\t')));
+  goals.filter(g => clean(g.text)).forEach(g => out.push(['Q', clean(g.cat), clean(g.text), Math.round(g.points) || 0].join('\t')));
+  return out.join('\n') + '\n';
+}
+function setDirty(d) { dirty = d; const s = $('status'); s.className = d ? 'dirty' : ''; s.textContent = (handle ? handle.name : (keep.length ? 'built-in rules (not saved yet)' : 'Nothing open')) + (d ? ' - unsaved changes' : ''); }
+function lists() {
+  const fill = (id, vals) => $(id).innerHTML = [...new Set(vals.filter(Boolean))].sort().map(v => `<option value="${esc(v)}">`).join('');
+  fill('cats', rad.map(r => r.cat)); fill('subs', rad.map(r => r.sub)); fill('gcats', goals.map(g => g.cat));
+}
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+function input(obj, key, attrs = '') {
+  const el = document.createElement('input'); el.value = obj[key];
+  if (attrs) attrs.split(' ').forEach(a => { const [k, v] = a.split('='); el.setAttribute(k, v ?? ''); });
+  el.oninput = () => { obj[key] = el.type === 'number' ? +el.value : el.value; setDirty(true); if (key !== 'points') { lists(); badge(el); } };
+  return el;
+}
+function badge(el) { const tr = el.closest('tr'); if (tr && tr._badge) tr._badge(); }
+function render() {
+  lists();
+  const f = $('radfilter').value.toLowerCase(), body = $('radrows'); body.innerHTML = '';
+  const order = rad.map((r, i) => i).sort((a, b) => (rad[a].cat + '\u0001' + rad[a].sub).localeCompare(rad[b].cat + '\u0001' + rad[b].sub) || a - b);
+  let group = null;
+  for (const i of order) {
+    const r = rad[i];
+    if (f && !(r.cat + ' ' + r.sub + ' ' + r.text).toLowerCase().includes(f)) continue;
+    const g = r.cat + ' / ' + (r.sub || '-');
+    if (g !== group) { group = g; const tr = body.insertRow(); tr.className = 'group'; const td = tr.insertCell(); td.colSpan = 7; td.textContent = g; }
+    const tr = body.insertRow(); if (r.archived) tr.className = 'archived';
+    tr.insertCell().className = 'c'; tr.cells[0].append(input(r, 'cat', 'list=cats'));
+    tr.insertCell().className = 's'; tr.cells[1].append(input(r, 'sub', 'list=subs'));
+    tr.insertCell().append(input(r, 'text'));
+    tr.insertCell().className = 'n'; tr.cells[3].append(input(r, 'points', 'type=number min=-50 max=200'));
+    const chk = document.createElement('input'); chk.type = 'checkbox'; chk.checked = !r.archived;
+    chk.onchange = () => { r.archived = !chk.checked; tr.className = r.archived ? 'archived' : ''; setDirty(true); };
+    tr.insertCell().className = 'chk'; tr.cells[4].append(chk);
+    const b = tr.insertCell(); tr._badge = () => b.innerHTML = FOLLOWED_RAD.has(r.text) ? '<span class="badge game">game</span>' : '<span class="badge host">host ticks</span>'; tr._badge();
+    const del = document.createElement('button'); del.className = 'quiet'; del.textContent = '\u2715'; del.title = 'Delete (old rows with it become the host\'s)';
+    del.onclick = () => { if (confirm('Delete "' + r.text + '"? Old rows with it become the host\'s to tick. Unticking "Can be drawn" keeps them judged.')) { rad.splice(i, 1); setDirty(true); render(); } };
+    tr.insertCell().className = 'del'; tr.cells[6].append(del);
+  }
+  const gf = $('goalfilter').value.toLowerCase(), gb = $('goalrows'); gb.innerHTML = '';
+  goals.forEach((g, i) => {
+    if (gf && !(g.cat + ' ' + g.text).toLowerCase().includes(gf)) return;
+    const tr = gb.insertRow();
+    tr.insertCell().className = 'c'; tr.cells[0].append(input(g, 'cat', 'list=gcats'));
+    tr.insertCell().append(input(g, 'text'));
+    tr.insertCell().className = 'n'; tr.cells[2].append(input(g, 'points', 'type=number min=0 max=1000'));
+    const b = tr.insertCell(); tr._badge = () => b.innerHTML = FOLLOWED_GOAL.has(g.text) ? '<span class="badge game">game</span>' : '<span class="badge host">host ticks</span>'; tr._badge();
+    const del = document.createElement('button'); del.className = 'quiet'; del.textContent = '\u2715';
+    del.onclick = () => { if (confirm('Delete "' + g.text + '"? Managers who picked it lose it.')) { goals.splice(i, 1); setDirty(true); render(); } };
+    tr.insertCell().className = 'del'; tr.cells[4].append(del);
+  });
+  const nb = $('noterows'); nb.innerHTML = '';
+  notes.forEach((n, i) => {
+    const d = document.createElement('div'); d.className = 'note';
+    const t = document.createElement('textarea'); t.value = n; t.oninput = () => { notes[i] = t.value; setDirty(true); };
+    const del = document.createElement('button'); del.className = 'quiet'; del.textContent = '\u2715 remove line';
+    del.onclick = () => { notes.splice(i, 1); setDirty(true); render(); };
+    d.append(t, del); nb.append(d);
+  });
+}
+async function writeTo(h) {
+  const w = await h.createWritable(); await w.write(toBytes(serialise())); await w.close();
+  handle = h; setDirty(false);
+}
+function download() {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([toBytes(serialise())])); a.download = 'cmui_rules.tsv'; a.click();
+  setDirty(false); $('status').textContent = 'Downloaded cmui_rules.tsv: put it in the game folder (next to cm0102_ui.exe)';
+}
+const picker = { types: [{ description: 'CM Challenge rules', accept: { 'text/tab-separated-values': ['.tsv'] } }], suggestedName: 'cmui_rules.tsv' };
+$('open').onclick = async () => {
+  if (dirty && !confirm('Unsaved changes: open another file anyway?')) return;
+  if (window.showOpenFilePicker) {
+    try { const [h] = await showOpenFilePicker(picker); parse(dec.decode(await (await h.getFile()).arrayBuffer())); handle = h; setDirty(false); } catch (e) { if (e.name !== 'AbortError') alert(e); }
+  } else {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = '.tsv';
+    i.onchange = async () => { parse(dec.decode(await i.files[0].arrayBuffer())); handle = null; setDirty(false); }; i.click();
+  }
+};
+$('builtin').onclick = () => { if (dirty && !confirm('Unsaved changes: replace them with the built-in rules?')) return; handle = null; parse(BUILTIN); setDirty(true); };
+$('save').onclick = async () => { if (!keep.length && !rad.length) return; try { if (handle) await writeTo(handle); else $('saveas').onclick(); } catch (e) { alert(e); } };
+$('saveas').onclick = async () => {
+  if (window.showSaveFilePicker) { try { await writeTo(await showSaveFilePicker(picker)); } catch (e) { if (e.name !== 'AbortError') alert(e); } }
+  else download();
+};
+$('addrad').onclick = () => { const last = rad[rad.length - 1] || {}; rad.push({ cat: last.cat || '', sub: last.sub || '', text: 'New challenge', points: 3, archived: false }); setDirty(true); render(); };
+$('addgoal').onclick = () => { goals.push({ cat: (goals[goals.length - 1] || {}).cat || '', text: 'New goal', points: 25 }); setDirty(true); render(); };
+$('addnote').onclick = () => { notes.push(''); setDirty(true); render(); };
+$('radfilter').oninput = render; $('goalfilter').oninput = render;
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button, section').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); $(b.dataset.tab).classList.add('on');
+});
+window.onbeforeunload = e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); $('save').onclick(); } });
+</script></body></html>
