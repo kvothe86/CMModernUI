@@ -32,7 +32,7 @@ const TABS: [&[u8]; 6] = [b"Dashboard", b"Season", b"RAD", b"Stats", b"History",
 const TAB_RAD: usize = 2;
 const TAB_GOALS: usize = 6; // shown after RAD when the host has career goals on
 const WHEEL_MS: u128 = 2200; // a wheel turning to its stop
-const STEP_MS: u128 = 2900; // and standing on it a while, lit, before the next
+pub(super) const STEP_MS: u128 = 2900; // and standing on it a while, lit, before the next
 
 /// The game's menu bar seen this frame: its lowest button's box, font and colour, and whether it
 /// is the bar of the plain game days (Game Options; a match has another); ours under it.
@@ -62,6 +62,10 @@ static mut HOVERED: Option<Spot> = None; // the spot of `HOVER`, while `SPOTS` i
 static mut SPOTS: Vec<(Rect, Spot)> = Vec::new();
 static mut SPIN: Option<(std::time::Instant, Vec<u8>)> = None; // the host's wheel: since when, for whom
 static mut SPIN_DRAWN: Option<std::time::Instant> = None;
+static mut WHEELS: Vec<(Vec<(String, usize)>, usize, u32)> = Vec::new(); // the spin's wheels (`League::spun`; a client's from the host)
+static mut WATCH_KEY: Vec<u8> = Vec::new(); // a client on RAD: its question whether the host spins
+static mut WATCHED: Option<std::time::Instant> = None;
+static mut SEEN_SPIN: u32 = 0; // the host's last spin a client played (its new row's id)
 static mut NEW_FROM: Option<i32> = None; // the highest RAD row when the wheel started
 static mut NEW_ROW: Option<i32> = None; // the row the wheel gave, marked in the list
 static mut NOTHING_LEFT: bool = false; // the wheel found no challenge left
@@ -240,6 +244,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         redraw |= SPIN_DRAWN.is_none_or(|t| t.elapsed().as_millis() > 40);
         if since.elapsed().as_millis() > STEP_MS * 3 {
             SPIN = None;
+            // (a client watched the host's spin: now the page with the new row)
+            if remote::CLIENT {
+                request(ACT_NONE, 0, &[]);
+            }
             redraw = true;
         }
     } else if let (true, Some(k)) = (released, hover) {
@@ -282,7 +290,8 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                 (NEW_ROW, NOTHING_LEFT, BACK_YEARS) = (None, false, 0);
                 // (drawn first, then the wheels turn to it: leaving the page mid-spin keeps the draw)
                 request(ACT_ROLL, 0, &name);
-                if !league().spun.is_empty() {
+                WHEELS = league().spun.clone();
+                if !WHEELS.is_empty() {
                     SPIN = Some((std::time::Instant::now(), name));
                 }
             }
@@ -312,6 +321,25 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             }
         }
         redraw = true;
+    }
+    // a client on RAD watches the host's wheels: a small question a second (`watch_text`), sent
+    // here as the page may stand still; a new spin plays here too, a second behind at most
+    if remote::CLIENT && TAB == TAB_RAD && SPIN.is_none() {
+        let late = WATCHED.is_none_or(|t| t.elapsed().as_millis() > if WATCH_KEY.is_empty() { 1000 } else { 3000 });
+        if late {
+            ASKS += 1;
+            WATCH_KEY = key(b'c', &[ASKS, STATS_YEAR as u32, ACT_WATCH, 0]);
+            WATCHED = Some(std::time::Instant::now());
+        }
+        if !WATCH_KEY.is_empty() {
+            match ask_host(&WATCH_KEY) {
+                Some(v) => {
+                    WATCH_KEY.clear();
+                    redraw |= watch(&v);
+                }
+                None => remote::ask(),
+            }
+        }
     }
     if remote::CLIENT && WAITING {
         let arrived = std::mem::take(&mut remote::ARRIVED) | remote::hold_over();
@@ -800,7 +828,8 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, head: &[&[u8]], names: &[&[
     let word = |s: &[u8]| s.split(|&c| c == b' ').next().unwrap_or(b"").to_vec();
     let of_season = |n: &[u8]| rows.iter().filter(|r| number(r[6]) == year && word(r[2]).eq_ignore_ascii_case(&word(n))).collect::<Vec<_>>();
     // what the wheel gave
-    if SPIN.is_none() {
+    // (a client's page with the new row may still be on its way)
+    if SPIN.is_none() && !(remote::CLIENT && WAITING) {
         if let Some(before) = NEW_FROM.take() {
             let top = rows.iter().map(|r| number(r[1])).max().unwrap_or(0);
             (NEW_ROW, NOTHING_LEFT) = (Some(top).filter(|&t| t > before), top <= before);
@@ -914,12 +943,43 @@ unsafe fn rads((x1, y1, x2, y2): Rect, rows: &Lines, head: &[&[u8]], names: &[&[
     text_at(rx, y2 - line * 7 / 10, y2 - 2, f(2), MUTED, foot.as_bytes(), 0);
 }
 
+/// A client: the host's spin (`watch_text`); a new one starts the same wheels here.
+#[allow(static_mut_refs)]
+unsafe fn watch(v: &[u8]) -> bool {
+    let Some((id, ms, name, wheels)) = read_spin(v) else { return false };
+    if id == SEEN_SPIN {
+        return false;
+    }
+    (SEEN_SPIN, WHEELS) = (id, wheels);
+    // (up to a second behind the host: the first wheel whole when the answer came soon)
+    let ms = ms.saturating_sub(1000);
+    let since = std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).unwrap_or_else(std::time::Instant::now);
+    (NEW_FROM, NEW_ROW, NOTHING_LEFT, BACK_YEARS) = (Some(id as i32 - 1), None, false, 0);
+    SPIN = Some((since, name));
+    true
+}
+
+type Wheels = Vec<(Vec<(String, usize)>, usize, u32)>;
+
+/// `spin_text` read back: the row's id, ms since the spin began, the manager, three wheels.
+pub(super) fn read_spin(v: &[u8]) -> Option<(u32, u64, Vec<u8>, Wheels)> {
+    let lines: Vec<Vec<&[u8]>> = v.split(|&c| c == b'\n').map(fields).collect();
+    let z = lines.iter().find(|l| l[0] == b"Z")?;
+    let text = |s: &[u8]| latin1(s).into_owned();
+    let wheels: Wheels = lines.iter().filter(|l| l[0] == b"z").map(|l| {
+        let segs = l.get(3..).unwrap_or(&[]).chunks(2).map(|p| (text(p[0]), number(field(p, 1)).max(1) as usize)).collect();
+        (segs, number(field(l, 1)) as usize, number(field(l, 2)) as u32)
+    }).collect();
+    (wheels.len() == 3 && wheels.iter().all(|w| w.1 < w.0.len())).then_some(())?;
+    Some((number(field(z, 1)) as u32, number(field(z, 2)).max(0) as u64, field(z, 3).to_vec(), wheels))
+}
+
 /// The host's spin (`League::spun`, drawn before the wheels turn): a wheel of the categories, then
 /// of the landed one's sub-categories, then of their challenges, each easing to a stop on the
 /// drawn segment and standing there lit a while. Clients see the result only.
 #[allow(static_mut_refs)]
 unsafe fn spin_stage((x1, y1, x2, y2): Rect, ms: u128, name: &[u8], line: i32) {
-    let spun = &league().spun;
+    let spun = &WHEELS;
     let Some(last) = spun.len().checked_sub(1) else { return };
     let (step, t) = match (ms / STEP_MS) as usize {
         k if k > last => (last, 1.0),

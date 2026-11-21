@@ -1392,6 +1392,32 @@ const ACT_PICK: u32 = 4;
 const ACT_GOAL_TICK: u32 = 5;
 const ACT_COUNTRY: u32 = 6;
 pub(crate) const ACT_RATE: u32 = 7;
+/// A client on RAD asking whether the host's wheels turn (`watch_text`), not the page.
+const ACT_WATCH: u32 = 8;
+
+/// The host's last spin: when, its new row's id, for whom (clients watch it, `watch_text`).
+static mut SPUN_AT: Option<(std::time::Instant, u32, String)> = None;
+
+/// Host: the spin while it turns, for a client watching RAD: `Z` the row's id, ms since it began,
+/// the manager; a `z` line a wheel: the landed segment, where in it, then each segment's label and
+/// weight. "-" when nothing turns, so a question a second stays small.
+#[allow(static_mut_refs)]
+unsafe fn watch_text() -> Vec<u8> {
+    let Some((at, id, name)) = SPUN_AT.as_ref().filter(|s| s.0.elapsed().as_millis() < draw::STEP_MS * 3) else { return b"-".to_vec() };
+    page_bytes(&spin_text(*id, at.elapsed().as_millis(), name, &league().spun))
+}
+
+fn spin_text(id: u32, ms: u128, name: &str, spun: &[(Vec<(String, usize)>, usize, u32)]) -> String {
+    let mut out = format!("Z\t{id}\t{ms}\t{name}\n");
+    for (segs, landed, off) in spun {
+        out += &format!("z\t{landed}\t{off}");
+        for (s, w) in segs {
+            out += &format!("\t{s}\t{w}");
+        }
+        out += "\n";
+    }
+    out
+}
 
 /// The host does a click: a new RAD row for a manager, a row ticked (his word then stands over the
 /// game's) or a row taken away.
@@ -1405,6 +1431,7 @@ unsafe fn act(action: u32, arg: u32, name: &[u8]) {
             let who = l.rads.iter().find(|r| same_manager(&r.name, &who)).map_or(who, |r| r.name.clone());
             let pick = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |t| t.subsec_micros()) as usize;
             if l.roll(&who, this_season(), pick) {
+                SPUN_AT = l.rads.last().map(|r| (std::time::Instant::now(), r.id, who.clone()));
                 track::update();
                 save();
             }
@@ -1487,6 +1514,9 @@ fn page_bytes(text: &str) -> Vec<u8> {
 pub unsafe fn remote(channel: i16, stats_year: u32, action: u32, arg: u32) -> Vec<u8> {
     let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
     let me = humans().into_iter().find(|h| h.0 == manager).map_or(String::new(), |h| h.1);
+    if action == ACT_WATCH {
+        return watch_text();
+    }
     // (the one thing a client does itself: the mark for its own manager's season; asked again
     // with the same words it sets the same mark)
     if action == ACT_RATE && !me.is_empty() {
@@ -1738,5 +1768,9 @@ mod tests {
         assert!(l.roll("Bob", 2032, 1));
         assert_eq!(l.spun[0].0, [("Age".to_string(), 2), ("Staff".to_string(), 1)]);
         assert_eq!((l.spun[1].0.len(), l.spun[1].0[l.spun[1].1].0.as_str(), l.rads[0].text.as_str()), (2, "Young", "B"));
+        // a client watching reads the same wheels back
+        let back = draw::read_spin(spin_text(7, 1234, "Bob Jones", &l.spun).as_bytes()).unwrap();
+        assert_eq!(back, (7, 1234, b"Bob Jones".to_vec(), l.spun.clone()));
+        assert!(draw::read_spin(b"-").is_none());
     }
 }

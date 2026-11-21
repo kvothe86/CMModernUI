@@ -41,8 +41,11 @@ name), their challenges. Each eases to a stop on the drawn segment and stands li
 three steps above says what each gave. **Weighting**: a segment is as wide as the drawable
 challenges behind it, so the one pick over all of them is one pick per wheel weighted by count and
 every challenge stays as likely as before the wheels. The wheels (`League::spun`, not saved) and
-the animation (`draw.rs` `spin_stage`, `wheel`) are the host's only; a client sees the new row when
-it next asks for the page. Leaving the page mid-spin keeps the draw. Sizes follow the tab
+the animation (`draw.rs` `spin_stage`, `wheel`) are the host's; a client on the RAD tab asks the
+host once a second whether it spins (key `c`, action 8 `ACT_WATCH`, answer "-" or the spin,
+`watch_text`; not while the pointer is on the game's menu bar) and plays the same wheels up to 1 s
+behind, then fetches the page with the new row; a client elsewhere sees the new row when it next
+asks for the page. Leaving the page mid-spin keeps the draw. Sizes follow the tab
 (radius 45 % of its height, at most a third of its width, 300 px), so 800x600 and 1280x800 fit.
 
 Seasons: the running season (page, spins, RAD rows, readings) turns on 1 July (`RUNNING_FROM`), so
