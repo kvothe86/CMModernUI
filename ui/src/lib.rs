@@ -403,10 +403,11 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         // blue, column heads go flat, a stats cell without a value goes altogether
         // (not the scrollbars' narrow parts: `news::scrollbars` draws those)
         if theme && on(MODERN_BUTTONS) && on(FLAT_BUTTONS) && flags & !0x40 == 0x30 && !small_screen() && y1 < sy(70) && x1 > sw / 2
-            && y2 - y1 < sy(60) && x2 - x1 < sw / 4 && (low == 0 || is_colour(low, 0xffe0))
+            && y2 - y1 < sy(60) && x2 - x1 < sw / 4
         {
             // the title band's small dropdown (Export, Funds, the profile's Action): black with half
-            // a bevel, or pure yellow, in the game; the flat rounded widget of the other buttons
+            // a bevel, or pure yellow, in the game, or the band's own colour on a competition's red
+            // band (night 10: Export was a bare label there); the flat rounded widget of the other buttons
             // (user 2026-11-13 polish), light text (HEADER_WIDGET, the text hook)
             let face = if flags & 0x40 != 0 { [0x3a, 0x5c, 0x82] } else { [0x2b, 0x47, 0x66] };
             fill(x1, y1, x2 + 1, y2 + 1, pixel_at(x1 - 3, (y1 + y2) / 2).unwrap_or(AREA));
@@ -445,6 +446,7 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
                     // label still is)
                     fill(x1, y1, x2 + 1, y2 + 1, pixel_at((x1 + x2) / 2, y1 - 2).unwrap_or(AREA));
                     rounded(x1 + 2, y1 + 1, x2 - 1, y2, face, 6);
+                    BLUE_BUTTON = (x1, y1, x2, y2);
                     note_title(x1, y1, x2, y2);
                     return;
                 }
@@ -477,6 +479,8 @@ static mut COLUMN_FONTS: Vec<((i32, i32, u32), u32)> = Vec::new();
 /// The last short filled panel (a menu row, if its text says so) and the last outline panel (a
 /// menu's frame); the last menu row darkened, and its index in its menu.
 static mut ROW_PANEL: (i32, i32, i32, i32) = (0, 0, 0, 0);
+/// The last game button cmui drew as a flat steel blue face (its label follows in the text hook).
+static mut BLUE_BUTTON: (i32, i32, i32, i32) = (0, 0, 0, 0);
 static mut LAST_FRAME: (i32, i32, i32, i32) = (0, 0, 0, 0);
 static mut MENU_ROW: (i32, i32, i32, i32) = (0, 0, 0, 0);
 static mut MENU_INDEX: i32 = 0;
@@ -485,6 +489,9 @@ static mut FRAME_DRAWN: bool = false;
 /// The rows of the open menus (left edge, top) in drawing order: a network client redraws only
 /// the rows the pointer left and entered, which take their shade from their place here.
 static mut MENU_ROWS: Vec<(i32, i32)> = Vec::new();
+/// Each menu column's right edge and row height (left edge, right, height): a menu and its open
+/// submenu each get their box put back over the flip pass (`menu_boxes`).
+static mut MENU_COLS: Vec<(i32, i32, i32)> = Vec::new();
 
 /// A dropdown menu row: dark (alternating), its frame dark under the first row drawn after the
 /// frame; the text goes light.
@@ -505,11 +512,21 @@ unsafe fn menu_row(x1: i32, y1: i32, x2: i32, y2: i32, colour: &mut u32) {
     if !MENU_ROWS.contains(&(x1, y1)) {
         MENU_ROWS.push((x1, y1));
     }
+    MENU_COLS.retain(|c| c.0 != x1);
+    MENU_COLS.push((x1, x2, y2 - y1));
     let f = LAST_FRAME;
     if fresh && f.0 <= x1 && f.2 >= x2 && f.1 <= y1 && f.3 >= y2 {
         fill(f.0, f.1, f.2 + 1, f.3 + 1, [0x26, 0x29, 0x2f]);
     }
     fill(x1, y1, x2 + 1, y2 + 1, if MENU_INDEX % 2 == 0 { [0x2a, 0x2e, 0x35] } else { [0x30, 0x34, 0x3b] });
+    // the row under the pointer: lit, a gold mark at its left (the game draws the rows the
+    // pointer leaves and enters again, so this follows it; user 2026-11-19: no feedback before)
+    let (mx, my) = (*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
+    let hovered = (x1..=x2).contains(&mx) && (y1..=y2).contains(&my);
+    if hovered {
+        fill(x1, y1, x2 + 1, y2 + 1, SELECTED);
+        fill(x1 + 1, y1, x1 + 4, y2 + 1, GOLD);
+    }
     // a 1 px edge so the menu does not melt into the list under it (user 2026-11-13 polish):
     // the frame's outline when it comes, each row's sides
     if !small_screen() {
@@ -526,6 +543,9 @@ unsafe fn menu_row(x1: i32, y1: i32, x2: i32, y2: i32, colour: &mut u32) {
         fill(r, y1, r + 1, y2 + 1, edge);
     }
     MENU_ROW = (x1, y1, x2, y2);
+    if trace() {
+        log(&format!("menu row {x1},{y1}-{x2},{y2} index {MENU_INDEX} fresh {fresh} hovered {hovered}"));
+    }
     if *colour & 0xffff == 0 {
         *colour = rgb(LIGHT) as u32;
     }
@@ -549,6 +569,29 @@ unsafe fn menu_box() -> Option<(i32, i32, i32, i32)> {
     let tops = MENU_ROWS.iter().filter(|r| r.0 == mx1).map(|r| r.1);
     let (top, bottom) = tops.fold((MENU_ROW.1, MENU_ROW.3), |(t, b), y| (t.min(y), b.max(y + row)));
     Some((mx1, top, mx2 + 1, bottom + 1))
+}
+
+/// The boxes of every dropdown column on screen this frame: the newest menu's (`menu_box`) and each
+/// other column whose rows are still drawn (a parent menu under its open submenu: with only the
+/// submenu's box the story was painted over the parent, Fable's review 2026-11-19).
+#[allow(static_mut_refs)]
+unsafe fn menu_boxes() -> Vec<(i32, i32, i32, i32)> {
+    let Some(newest) = menu_box() else { return Vec::new() };
+    let mut out = vec![newest];
+    for &(x1, x2, h) in MENU_COLS.iter().filter(|c| c.0 != newest.0) {
+        let tops: Vec<i32> = MENU_ROWS.iter().filter(|r| r.0 == x1).map(|r| r.1).collect();
+        let (Some(&top), Some(&last)) = (tops.iter().min(), tops.iter().max()) else { continue };
+        // (still shown: a row of it in a menu row's shade at both ends, as `menu_still_shown`)
+        let shade = |x: i32| {
+            pixel_at(x, top + h / 2).is_some_and(|p| {
+                [[0x2a, 0x2e, 0x35], [0x30, 0x34, 0x3b], SELECTED, GOLD].iter().any(|c| (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 8))
+            })
+        };
+        if x2 > x1 + 8 && shade(x1 + 2) && shade(x2 - 3) {
+            out.push((x1, top, x2 + 1, last + h + 1));
+        }
+    }
+    out
 }
 
 /// The back buffer's pixels in a box: read (`back` None), or those read written back.
@@ -593,7 +636,9 @@ pub(crate) unsafe fn menu_still_shown() -> bool {
     // dropdown opens, a closed one was taken for open, night 6 C-1)
     let row = |x: i32| {
         pixel_at(x, (y1 + y2) / 2).is_some_and(|p| {
-            [[0x2a, 0x2e, 0x35], [0x30, 0x34, 0x3b]].iter().any(|c| (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 8))
+            // (and the lit row under the pointer, its gold mark at the left: a lit last row read
+            // as a closed menu, the story's overlays drawn over it, user 2026-11-19)
+            [[0x2a, 0x2e, 0x35], [0x30, 0x34, 0x3b], SELECTED, GOLD].iter().any(|c| (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 8))
         })
     };
     x2 > x1 + 8 && row(x1 + 2) && row(x2 - 3)
@@ -880,10 +925,19 @@ unsafe fn crests_named(text: &[u8]) -> Vec<Vec<u8>> {
 /// the date under it.
 unsafe fn story_header(rect: (i32, i32, i32, i32), head: &[u8], date: &[u8], font: u32, body: &[u8]) {
     let (x1, y1, x2, y2) = rect;
+    if trace() {
+        log(&format!("story header {rect:?} {:?}", latin1(head)));
+    }
     // the story text was moved down by STORY_SHIFT: the header takes that room too
     let y2 = y2 + story_shift(rect);
     let h = y2 - y1;
-    let panel = pixel_at(x1 + 3, y2 + 6).unwrap_or(AREA);
+    // (the body panel's colour, not read while a dropdown is open: the Competitions menu lies over
+    // this point, and a glyph of its row there made the whole band light, user 2026-11-19, Fable)
+    static mut PANEL: [u8; 3] = AREA;
+    if !(news::MENU_OPEN || news::MENU_SEEN) {
+        PANEL = pixel_at(x1 + 3, y2 + 6).unwrap_or(AREA);
+    }
+    let panel = PANEL;
     fill(x1, y1, x2, y2, panel);
     let mut tx = x1 + 16;
     let key = story_crest(head, body);
@@ -1063,6 +1117,10 @@ extern "C" fn background(x: i32, y: i32, picture: usize) {
         }
         #[allow(static_mut_refs)]
         LAST_MINUTES.clear();
+        // (an open menu's rows are drawn again in a full frame: a closed submenu's rows must not
+        // keep a protected box, `menu_boxes`)
+        #[allow(static_mut_refs)]
+        MENU_ROWS.clear();
         #[allow(static_mut_refs)]
         EMPTIED.clear();
         news::MENU_SEEN = false; // (an open menu is drawn again in this frame)
@@ -1226,6 +1284,23 @@ extern "C" fn flip_through(left: i32, top: i32, right: i32, bottom: i32) {
     }
 }
 
+/// Area::close_popup (0x402d80) puts back the picture it saved when the popup was drawn: saved in
+/// the game's own drawing, before the flip pass themed the screen, so the game's raw look comes
+/// back under a closed submenu (the news story's header white, user 2026-11-19), and cmui's 1 px
+/// menu edges outside that picture stay as outlines. The screen is drawn again on the next poll
+/// (an open parent menu with it: the flip pass puts the menu on top).
+extern "C" fn popup_closed(left: i32, top: i32, right: i32, bottom: i32) {
+    unsafe {
+        if on(BACKGROUND_SHOW) {
+            let_picture_through(left, top, right, bottom);
+        }
+        game::<extern "C" fn(i32, i32, i32, i32)>(FLIP_RECT)(left, top, right, bottom);
+        if on(THEME_ON) {
+            REDRAW = true;
+        }
+    }
+}
+
 /// Points the one direct call to `target` inside [func, func + len) at `hook`.
 unsafe fn patch_call(func: usize, len: usize, target: usize, hook: usize) {
     patch_calls(func, len, target, hook, 1);
@@ -1340,6 +1415,9 @@ fn sx(v: i32) -> i32 {
 fn sy(v: i32) -> i32 {
     v * screen().1.max(1) / 1050
 }
+
+/// A squad name of a player out on loan at another club.
+const AWAY_NAME: [u8; 3] = [0xb8, 0xa4, 0xe8];
 
 fn rgb565(c: [u8; 3]) -> u16 {
     (c[0] as u16 >> 3) << 11 | (c[1] as u16 >> 2) << 5 | c[2] as u16 >> 3
@@ -1590,7 +1668,10 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 }
             }
             #[allow(static_mut_refs)]
-            if let Some(story) = STORY.as_mut().filter(|s| y1 > s.0 .3) {
+            // (a dropdown's row is no story text: a submenu over the story lost its labels to it,
+            // "Ligue 3 Coupe de France ..." in the text, its rows the game's plain green, 2026-11-19)
+            let menu_text = dropdown && (x1, y1, x2, y2) == ROW_PANEL;
+            if let Some(story) = STORY.as_mut().filter(|s| y1 > s.0 .3 && !menu_text) {
                 if story_len_ok(&story.4) {
                     story.4.extend_from_slice(t);
                     story.4.push(b' ');
@@ -1615,6 +1696,16 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             // (text inside the header widget: light on its blue face, user 2026-11-13 polish)
             if HEADER_WIDGET.2 > HEADER_WIDGET.0 && !small_screen() && x1 >= HEADER_WIDGET.0 && x2 <= HEADER_WIDGET.2 + 2 && y1 >= HEADER_WIDGET.1 - 2 && y2 <= HEADER_WIDGET.3 + 2 && !dropdown {
                 colour = rgb(LIGHT) as u32;
+            }
+            // (a dark label on one of cmui's steel blue buttons: light. The news' Confirm / Respond
+            // read badly, user 2026-11-19)
+            {
+                let b = BLUE_BUTTON;
+                let c = colour & 0xffff;
+                let dark = (c >> 11 & 31) * 2 + (c >> 5 & 63) + (c & 31) * 2 < 90;
+                if b.2 > b.0 && dark && x1 >= b.0 - 2 && x2 <= b.2 + 2 && y1 >= b.1 - 2 && y2 <= b.3 + 2 {
+                    colour = colour & !0xffff | rgb(LIGHT) as u32;
+                }
             }
             if on(THEME_ON) && (x1, y1, x2, y2) == ROW_PANEL && s.starts_with(b"     ") {
                 menu_row(x1, y1, x2, y2, &mut colour);
@@ -1742,6 +1833,13 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                     ROW_NAME = (y1, staff);
                     SQUAD_ROWS = true;
                     assistant::note_member(y1, x1, staff);
+                    // a player out on loan (in this club's list, at another club now) in violet,
+                    // apart from the grey fill-in players (user 2026-11-19: Francis). Not by the
+                    // game's grey: it greys real players at the club too (Verheijen)
+                    // (+0x39 0: without a club, released: no loan)
+                    if !plays_for(staff, SQUAD_CLUB) && rd::<usize>(staff + 0x39) != 0 {
+                        colour = rgb(AWAY_NAME) as u32;
+                    }
                     // (a name too long wraps and shows its first word: the column one smaller font)
                     if small_screen() && !packed {
                         font = column_font(x1, x2, font, fit_font(font, text, x2 - x1));
@@ -1908,7 +2006,9 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 // (user 2026-11-16); a wide one (a date) stays flat
                 // (not on the match screen: Player Ratings' away numbers are such cells, the home
                 // side's plain text, and got boxes on one side only, user 2026-11-16)
-                if !MATCH && (t.is_empty() || x2 - x1 < sx(80)) {
+                // (not in Player & Staff Search: its left column is no place to drop a player, user
+                // 2026-11-20 "die grid bij player search links hoort niet, wel bij squads")
+                if !MATCH && !SEARCH && (t.is_empty() || x2 - x1 < sx(80)) {
                     const SLOT: [u8; 3] = [0x5a, 0x62, 0x6e];
                     fill(x1 + 2, y1 + 2, x2 - 1, y1 + 3, SLOT);
                     fill(x1 + 2, y2 - 2, x2 - 1, y2 - 1, SLOT);
@@ -2602,9 +2702,18 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     let c = colour as u16 as u32;
     // (the game's "you are here" colour for the section's button, a dim grey-blue 0xbe19 that read
     // as unavailable: gold, user 2026-11-16)
-    let rgb = if is_colour(colour, 0xbe19) { GOLD } else { [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8] };
     let h = y2 - y1;
     let label = latin1(t).replace('\n', " ").to_lowercase();
+    // (Game Options is no section: that colour is the game's "unavailable" for it, grey; it is
+    // gold itself when it can be clicked, friend's report 2026-11-19. The manager's own button
+    // also comes in a pink 0xe0d0 (logged on F:\CM2627's news screen, read or unread): gold too)
+    let rgb = if is_colour(colour, 0xe0d0) {
+        GOLD
+    } else if is_colour(colour, 0xbe19) {
+        if label.contains("options") { GREY } else { GOLD }
+    } else {
+        [((c >> 11 & 31) * 255 / 31) as u8, ((c >> 5 & 63) * 255 / 63) as u8, ((c & 31) * 255 / 31) as u8]
+    };
     // (the coach's own button is no bar item for either: it would walk down the bar)
     if on(CHALLENGE) && label != "coach" {
         challenge::bar_item(x1, y1, x2, y2, font, colour, &label);
@@ -3017,6 +3126,11 @@ pub(crate) fn BUTTON_DOWN_NOW() -> bool {
 extern "thiscall" fn poll_input(display: usize) -> i16 {
     unsafe {
         OWN_DISPLAY = display;
+        static GUARDED: std::sync::Once = std::sync::Once::new();
+        GUARDED.call_once(|| {
+            squad_buffer_guard();
+            quiet_network_scan();
+        });
         // (a quiet screen draws no frames: the trace switch is looked at here too, at most every
         // 200 ms, so a click's handlers are traced)
         static mut LOOKED: Option<std::time::Instant> = None;
@@ -3263,6 +3377,20 @@ unsafe fn note_label(x1: i32, y1: i32, x2: i32, y2: i32, s: &[u8]) {
 /// A scripted mouse message at game pixel (x, y): a window shown larger than the game (cnc-ddraw
 /// scaling, aspect kept and centred) takes window pixels, so the point is scaled into it. The
 /// window's real size from GetWindowInfo: cnc-ddraw's GetClientRect answers the game's size.
+/// Shuts an open game popup (Game Options' menu) the way a player does: a click on the title
+/// band, which the popup takes as the click outside it. A click on cmui's own bar buttons
+/// doesn't count for the game: they stand on empty bar (night 10).
+unsafe fn close_game_popup() {
+    let (w, h) = screen();
+    // (as a script click: move + press now, the release on a later poll: a press and release in
+    // one poll is no click for the window procedure 0x68d630)
+    let (x, y) = (w / 2, h * 70 / 1050);
+    post_mouse(0x200, 0, x, y);
+    post_mouse(0x201, 1, x, y);
+    SCRIPT.push_front(format!("up {x} {y}"));
+    SCRIPT_NEXT = Some(std::time::Instant::now() + std::time::Duration::from_millis(200));
+}
+
 unsafe fn post_mouse(msg: u32, wparam: usize, x: i32, y: i32) {
     let window = *(GAME_WINDOW as *const usize);
     let (gw, gh) = screen();
@@ -3271,7 +3399,10 @@ unsafe fn post_mouse(msg: u32, wparam: usize, x: i32, y: i32) {
     let real = GetWindowInfo(window, &mut info) != 0;
     let r = [0, 0, info[7] - info[5], info[8] - info[6]];
     let (mut x, mut y) = (x, y);
-    if real && gw > 0 && gh > 0 && r[2] > 0 && r[3] > 0 && (r[2], r[3]) != (gw, gh) {
+    // cmui.rawmouse (test file): game pixels as they are. On a network game's resized window
+    // (26/27, night 10) the wrapper passed window pixels to the game unscaled, so scaled clicks missed.
+    let raw = std::path::Path::new("cmui.rawmouse").exists();
+    if !raw && real && gw > 0 && gh > 0 && r[2] > 0 && r[3] > 0 && (r[2], r[3]) != (gw, gh) {
         let s = (r[2] as f32 / gw as f32).min(r[3] as f32 / gh as f32);
         x = ((r[2] as f32 - gw as f32 * s) / 2.0 + (x as f32 + 0.5) * s) as i32;
         y = ((r[3] as f32 - gh as f32 * s) / 2.0 + (y as f32 + 0.5) * s) as i32;
@@ -4074,11 +4205,17 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         // before the frame is shown (the info strip over the Action menu, the news story over the
         // manager's menu, user's shots 2026-11-04; skipping overlays instead left tables without
         // their grid and lists)
-        let mut menu = menu_box().map(|b| (b, buffer_box(b, None)));
+        let mut menus: Vec<_> = menu_boxes().into_iter().map(|b| (b, buffer_box(b, None))).collect();
+        // (trace 2026-11-19: the story under an open menu with a submenu, white header, a stray row)
+        if trace() {
+            #[allow(static_mut_refs)]
+            let rows = MENU_ROWS.clone();
+            log(&format!("flip {left},{top}-{right},{bottom} full {FULL_FRAME} menu open {} seen {} row {:?} still {} box {:?} rows {rows:?}", news::MENU_OPEN, news::MENU_SEEN, MENU_ROW, menu_still_shown(), menus.iter().map(|m| m.0).collect::<Vec<_>>()));
+        }
         // a 1 px edge round the open menu (user 2026-11-13 polish), inside its own box: the pixels
         // put back below carry it, and the game's restore on closing takes it away with the menu
         // (a shadow outside the box would stay behind, so none)
-        if let (Some(((bx1, by1, bx2, by2), pixels)), true) = (menu.as_mut(), !small_screen() && on(THEME_ON)) {
+        for ((bx1, by1, bx2, by2), pixels) in menus.iter_mut().filter(|_| !small_screen() && on(THEME_ON)) {
             let (w, h) = ((*bx2 - *bx1) as usize, (*by2 - *by1) as usize);
             if w > 4 && h > 4 && pixels.len() == w * h {
                 let edge = rgb([0x4e, 0x56, 0x63]);
@@ -4248,7 +4385,7 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
                 text_at(sw / 2, y1, y2, SMALL_FONT.unwrap_or(0xffff0001), GOLD, b"Waiting for the host ...", 1);
             }
         }
-        if let Some((b, pixels)) = menu {
+        for (b, pixels) in menus {
             buffer_box(b, Some(&pixels));
         }
         let_picture_through(left, top, right, bottom);
@@ -5184,9 +5321,21 @@ unsafe fn match_text(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u32,
     if let Some(((mx1, my1, mx2, my2), minutes, bottom)) = LAST_MINUTES.iter_mut().find(|m| (m.0 .0, m.0 .2) == (x1, x2)) {
         if digits && x1 == *mx1 && x2 == *mx2 && y1 > *bottom && y1 - *bottom <= 8 && y2 - y1 < 40 {
             let joined = join_minutes(minutes, t);
+            // (one row step: from the row above, not from the scorer's top; a third minutes row
+            // counted two and lifted the next scorer onto him, Haaland 6 goals 2026-11-19)
+            let step = y2 - *bottom;
+            // (too long for one cell even two sizes down: this row stays a row of its own, gold, and
+            // the next minutes join onto it)
+            if text_width(smaller(font, 2), &joined) > *mx2 - *mx1 - 12 {
+                let lift = event_lift(x1, x2, y1);
+                fill(x1 - 2, y1 - lift, x2, y2 - lift, [0x26, 0x2b, 0x31]);
+                text_at(x2 - 14, y1 - lift, y2 - lift, minutes_font(font, x2 - x1 - 12, t.trim_ascii()), GOLD, t.trim_ascii(), 2);
+                (*my1, *my2, *minutes, *bottom) = (y1, y2, t.trim_ascii().to_vec(), y2);
+                return true;
+            }
             *minutes = joined;
             *bottom = y2;
-            let (top, step) = (*my1, y1 - *my1);
+            let top = *my1;
             let up = event_lift(*mx1, *mx2, top);
             fill(*mx1 - 2, top - up, *mx2, *my2 - up, [0x26, 0x2b, 0x31]);
             text_at(*mx2 - 14, top - up, *my2 - up, minutes_font(font, *mx2 - *mx1 - 12, minutes), GOLD, minutes, 2);
@@ -7120,8 +7269,9 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
             (player(staff) && player(arg(1))).then(|| assistant::staff_views(channel, staff, arg(1)))
         }
         b'B' => prefetch::valid_club(arg(1)).then(|| assistant::remote_scout(channel, arg(1))),
-        // a club's star players
-        b'E' => Some(challenge::remote(channel, arg(1) as u32, arg(2) as u32, arg(3) as u32)),
+        // the CM Challenge page for a client ('c': its old 'E' was taken by the export slices
+        // above since a242db1, so a client's page stayed "Fetching the standings...", night 10)
+        b'c' => Some(challenge::remote(channel, arg(1) as u32, arg(2) as u32, arg(3) as u32)),
         // the coach's game data for a client's manager (a number); the client asks Claude itself
         // ('K' is taken: a club's page)
         b'k' => Some(coach::remote_data(channel)),
@@ -7417,6 +7567,63 @@ unsafe fn export_button() {
 /// was drawn (another database than the save was started with). NewsItem::write_text 0x77bc80
 /// now goes from 0x77deaa straight to what follows the error box (0x782ac4: returns 0, the text
 /// empty), as before but without the box. Same stack depth at both.
+/// NickDLL (Restructured 26/27) lets squad numbers run to 99 by turning several 50s in
+/// comp\squad_manager.cpp into 99, among them the cap of `SQUAD_MANAGER::assign_club_squad_numbers`
+/// (0x859fe0) on the squad it gathers on its stack: a club's own players, then those of its pair
+/// (Jong Ajax and Ajax), 50 at most into a buffer of 50 ([esp+0x1d8]). With 99 a pair of more than
+/// 50 people writes over the saved registers and the return address: the game jumps into its heap
+/// and is gone, on the league's squad numbers day (night 2026-11-20: MVV TEst.sav on holiday, 24.7,
+/// Eerste Divisie). Run once at the first input poll, after NickDLL has patched: the gathering cap
+/// back to 50; NickDLL's numbers up to 99 stay.
+unsafe fn squad_buffer_guard() {
+    const AT: usize = 0x85a070; // cmp bl, 0x32
+    let code = std::slice::from_raw_parts(AT as *const u8, 3);
+    if code == [0x80, 0xfb, 0x63] {
+        let mut old = 0;
+        VirtualProtect((AT + 2) as *mut u8, 1, 0x40, &mut old);
+        *((AT + 2) as *mut u8) = 0x32;
+        VirtualProtect((AT + 2) as *mut u8, 1, old, &mut old);
+        log("0x85a072: squad numbers' gathering cap back to 50 (NickDLL had 99: a stack overflow on squad numbers day)");
+    }
+}
+
+/// Network Play's adapter scan `tcpip_scan_adapter_addresses` (0x8aee20, si\tcpip.cpp): on NT it
+/// first switches a full-screen game to a window (0x8aeeb7: `graphics_is_full_screen`, then
+/// display init windowed) and never back, then runs `system("%windir%\system32\ipconfig >
+/// ~net.out")`, whose console takes the focus (a full-screen game minimises on losing it, WndProc
+/// 0x68d81d). Both made scripted clicks miss on the network screens (night 10) and leave players
+/// in a small window. Now: no switch, and ipconfig runs without a console; ~net.out is the same.
+unsafe fn quiet_network_scan() {
+    const SCAN: usize = 0x8aee20;
+    const FULL_CHECK: usize = 0x8aeeb7; // call graphics_is_full_screen 0x5e2ea0
+    let code = std::slice::from_raw_parts(FULL_CHECK as *const u8, 5);
+    let rel = i32::from_le_bytes(code[1..5].try_into().unwrap());
+    if code[0] != 0xe8 || (FULL_CHECK + 5).wrapping_add(rel as usize) != 0x5e2ea0 {
+        log(&format!("{FULL_CHECK:#x}: not the adapter scan's full-screen check, network scan left alone"));
+        return;
+    }
+    let mut old = 0;
+    VirtualProtect(FULL_CHECK as *mut u8, 5, 0x40, &mut old);
+    std::ptr::copy_nonoverlapping([0x31u8, 0xc0, 0x90, 0x90, 0x90].as_ptr(), FULL_CHECK as *mut u8, 5); // xor eax, eax
+    VirtualProtect(FULL_CHECK as *mut u8, 5, old, &mut old);
+    log(&format!("{FULL_CHECK:#x}: network scan keeps full screen"));
+    patch_call(SCAN, 1136, 0x9473ea, quiet_system as usize); // the CRT's system()
+}
+
+/// `system(cmd)` without a console window (cdecl, as the CRT's): `cmd.exe /c <cmd>`, waits.
+extern "C" fn quiet_system(cmd: *const i8) -> i32 {
+    use std::os::windows::process::CommandExt;
+    let line = unsafe { std::ffi::CStr::from_ptr(cmd) }.to_string_lossy().into_owned();
+    let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+    match std::process::Command::new(comspec).raw_arg(format!("/c {line}")).creation_flags(0x0800_0000).status() {
+        Ok(s) => s.code().unwrap_or(-1),
+        Err(e) => {
+            log(&format!("quiet system \"{line}\": {e}"));
+            -1
+        }
+    }
+}
+
 unsafe fn news_without_competition() {
     const AT: usize = 0x77deaa;
     const TO: usize = 0x782ac4;
@@ -7632,12 +7839,14 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             // scrolled list) let the picture through too: without it a cell redrawn alone stayed
             // solid AREA, a black box behind a name being typed (26/27, 2026-11-16)
             if on(BACKGROUND_SHOW) {
-                for (func, len, count) in [(0x402d10, 112, 1), (0x402d80, 240, 1), (0x403ee0, 752, 1), (0x55f2c0, 64, 1), (0x561050, 448, 1),
+                for (func, len, count) in [(0x402d10, 112, 1), (0x403ee0, 752, 1), (0x55f2c0, 64, 1), (0x561050, 448, 1),
                     (0x561210, 1456, 3), (0x5617c0, 1872, 2), (0x561f10, 736, 2), (0x5e30e0, 1440, 1), (0x5e8290, 1552, 2), (0x5eec20, 144, 1),
                     (0x5eecb0, 160, 1), (0x5eed50, 432, 1), (0x7fdc00, 2208, 1)] {
                     patch_calls(func, len, FLIP_RECT, flip_through as usize, count);
                 }
             }
+            // Area::close_popup's flip: after it the whole screen once more (see `popup_closed`)
+            patch_call(0x402d80, 240, FLIP_RECT, popup_closed as usize);
             patch_calls(AREA_DRAW, 816, DRAW_LINE, no_grid_line as usize, 2);
             patch_calls(GUIO_DRAW, 1680, DRAW_GLYPH, glyph as usize, 5);
             #[cfg(cmui_local)]

@@ -34,9 +34,9 @@ by hand. Now a button under the menu bar opens it as a game screen, and nobody t
   Bronze to Legend; Season and History show every season of every manager, Stats each one's points
   by season, numbers and trophy cabinet.
 - **RAD challenges.** Each season every manager spins a wheel for a random challenge on top of his
-  job: "Max 1 purchase", "Play with a sweeper", "5 players from South America", "No staff"... 58 in
-  all, worth 3 to 9 points. The game checks 23 of them itself and settles them when the season
-  turns; the host ticks the rest.
+  job: "Max 1 purchase", "Play with a sweeper", "5 players from South America", "No staff"... 70 in
+  all, worth 3 to 20 points. The game checks every one itself and settles them when the season
+  turns; the host can still overrule a verdict.
 - **Career goals** (switch `career_goals`). Each manager picks ten lifelong goals from 48, worth 10
   to 150 points: from "win the league title in a country of your choice" to "take a club from the
   lowest playable division to the Champions League" or "win De Klassieker ten times". The game ticks

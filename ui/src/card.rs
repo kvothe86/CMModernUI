@@ -337,7 +337,18 @@ unsafe fn lineups((px1, py1, px2, py2): (i32, i32, i32, i32), ty: i32, d: &CardD
         // the bench on one line (not on a small screen), then the manager
         if !bench.is_empty() && !small_screen() {
             let names: Vec<Vec<u8>> = bench.iter().map(|&s| assistant::short_name(s)).collect();
-            let line = [b"Subs: ".as_slice(), &names.join(&b", "[..])].concat();
+            // whole names only, the rest as "+n" (cut by width it ended "Farah," with 2 of 9 gone, night 10)
+            let mut line = b"Subs: ".to_vec();
+            for (i, n) in names.iter().enumerate() {
+                let next = [line.as_slice(), if i > 0 { b", " } else { b"" }, n].concat();
+                let more = names.len() - i - 1;
+                let tail = if more > 0 { format!(" +{more}") } else { String::new() };
+                if crate::text_width(small, &[next.as_slice(), tail.as_bytes()].concat()) > colw {
+                    line.extend_from_slice(format!(" +{}", names.len() - i).as_bytes());
+                    break;
+                }
+                line = next;
+            }
             text_at(cx, y + 4, y + 4 + row_h, small, muted, &clip_text(small, &line, colw), 0);
         }
         let boss = if club == own { manager } else { [0xcf, 0xd3].into_iter().map(|at| rd::<usize>(club + at)).find(|&b| readable(b, 0x6e)).unwrap_or(0) };

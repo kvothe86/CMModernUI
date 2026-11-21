@@ -37,7 +37,7 @@ pub(crate) unsafe fn squad_of(club: usize) -> Vec<usize> {
 pub(crate) unsafe fn season_stat(staff: usize, row: i32, field: i32) -> f32 {
     track::stat(staff, row, field)
 }
-pub use draw::{bar_item, button_shown, flip, input, overlay};
+pub use draw::{bar_item, button_shown, close, flip, input, overlay};
 
 /// The CM Challenge page is up (over the screen).
 pub(crate) fn page_open() -> bool {

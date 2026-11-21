@@ -504,8 +504,21 @@ pub unsafe fn flip(full_frame: bool) {
         for k in 0..menu_len() {
             let name = item_name(k);
             let r = item_rect(b, k);
-            fill(r.0, r.1, r.2, r.3, if HOVER == Some(k) { SELECTED } else { [0x22, 0x25, 0x2a] });
-            fill(r.0, r.3 - 1, r.2, r.3, [0x34, 0x38, 0x40]);
+            // (the game's dropdowns' look, `menu_row`: alternating rows, 1 px edge round the menu,
+            // the row under the pointer lit with a gold mark; user 2026-11-19)
+            let edge = [0x4e, 0x56, 0x63];
+            fill(r.0, r.1, r.2, r.3, if HOVER == Some(k) { SELECTED } else if k % 2 == 0 { [0x2a, 0x2e, 0x35] } else { [0x30, 0x34, 0x3b] });
+            if HOVER == Some(k) {
+                fill(r.0 + 1, r.1, r.0 + 4, r.3, GOLD);
+            }
+            fill(r.0, r.1, r.0 + 1, r.3, edge);
+            fill(r.2 - 1, r.1, r.2, r.3, edge);
+            if k == 0 {
+                fill(r.0, r.1, r.2, r.1 + 1, edge);
+            }
+            if k + 1 == menu_len() {
+                fill(r.0, r.3 - 1, r.2, r.3, edge);
+            }
             put(r.0 + 14, r.1, r.2, r.3, 0x9, size, if HOVER == Some(k) { GOLD } else { LIGHT }, name);
         }
     }

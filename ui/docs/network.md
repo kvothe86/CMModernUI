@@ -43,7 +43,7 @@ silences the client's questions (test switch).
 | `D` staff, staff | what the channel's club's staff say on a compare pair | `assistant::staff_views`; text, a line each |
 | `B` n, club | the scout's report on a club for the channel's manager (n: a new one each time) | `assistant::remote_scout`, as `T` but reads no screen parameter |
 | `U` club | a club's three best by the intrinsic score | `scout::best_three`, staff pointers |
-| `E` n | the CM Challenge page for the channel's manager, read only (n: a new one each time) | `challenge::remote`, text; reads no screen parameter |
+| `c` n | the CM Challenge page for the channel's manager, read only (n: a new one each time; was `E` until 2026-11-21, which the export slices took) | `challenge::remote`, text; reads no screen parameter |
 | `p` height | sent with every click: its answer says the host is there; the client's screen height, for its table rows | `remote::clicked`, `comp::client_height`; no answer in 1.5 s: "Waiting for the host ..." |
 | `k` n | the coach's game data for the channel's manager | `coach::remote_data` |
 | `l` club | the three saved line-ups' shapes (the strip); the actions themselves go by `H` codes 100 Fill subs, 110+k load, 120+k save, 130+k clear | `lineups::remote_summary` |
@@ -251,3 +251,30 @@ kept beside them as cm0102_ui_before_night7.exe. E:\CM25_c is a copy of E:\CM25 
 `ui\night8\pair.ps1` / `pair25.ps1` start a pair screen by screen.
 
 `NETWORK_PLAN.md` now marks history title counts (step 5) as done (`comp::history_block`).
+
+## Planned, not built: cmnet send thread (option A, 2026-11-17)
+
+Why: `cmnet_send` (`net\src\lib.rs`) packs, flushes and sends every packet on the game thread
+and waits (`wait_writable`, 20 ms select) while the socket is full, so the host's game stalls on
+the slowest client (the match-day "Not responding"; it happened on one PC too, so not bandwidth).
+
+Plan:
+- `cmnet_send` on a packed socket only appends the game's bytes to a per-socket queue and
+  returns `len` (keep the four-length-bytes rule: no block per lone byte).
+- One writer thread per packed socket: takes all that is queued, one zstd write + flush (one
+  block for many widget packets: fewer blocks, better ratio), then the send loop; only this
+  thread waits on a full socket.
+- Cap the queue (~8 MB): above it the game thread waits as now.
+- `closesocket` / `shutdown` (now plain ws2_32 forwards in `wsock32.def`) must first drain the
+  queue (with a time limit), and `set_packed` must stop an old writer when a socket number comes back.
+- Optional: a reader thread per socket unpacking into `ready`, so `cmnet_recv` only copies.
+- Timing log: count bytes when queued (game side) and when sent (wire side).
+- Unpacked connections (old or no cmnet on the other side) stay as they are.
+
+Size ~200-300 lines, cmnet only, no exe addresses. Check: a local pair on a many-match day
+(Latest Scores), host never "Not responding", cmnet.log wire bytes and timing.
+
+After it: B (host drops `ScreenManager::set_widget_*` 0x800890-0x8022d0 updates whose value
+equals the last one sent to that channel, reset per screen), then the memory mirror for cmui
+reads over A's queue (no third port). Considered and set aside: cmui drawing recorded on the
+host and replayed on the client (weeks, every module), a client running its own game copy.

@@ -613,6 +613,14 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if !OPEN {
         let over = !assistant::REPORT_OPEN && BUTTON.is_some_and(inside);
         let changed = std::mem::replace(&mut BUTTON_HOVER, over) != over;
+        // (a game popup open, Game Options': the click goes to the game, which shuts the popup;
+        // taken here it left the popup open and modal over the page, night 10)
+        if over && released && crate::news::MENU_OPEN {
+            // (as the game's own buttons: this click only shuts the popup; the next opens the page)
+            *(LEFT_CLICK as *mut u32) = 0;
+            crate::close_game_popup();
+            return Some(true);
+        }
         if over && released {
             // (the button stands on Game Options' box: its click must not reach the game)
             *(LEFT_CLICK as *mut u32) = 0;
@@ -681,10 +689,16 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
 }
 
 #[allow(static_mut_refs)]
+/// Shuts the page (the Challenge opening: one cmui page at a time, night 10 lit both).
+pub unsafe fn close() {
+    OPEN = false;
+}
+
 unsafe fn open() {
     if FONT == 0 {
         return;
     }
+    crate::challenge::close();
     if DAY != today() {
         DAY = today();
         ANSWERS.iter_mut().for_each(Vec::clear);

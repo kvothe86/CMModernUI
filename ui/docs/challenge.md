@@ -15,7 +15,7 @@ RAD list, `renames.tsv`, `comps_*.tsv`).
 
 ## Who does what
 
-The host's game works everything out; a client asks for the page (key `E`) and only reads it.
+The host's game works everything out; a client asks for the page (key `c`; `E` until 2026-11-21, a clash with the export) and only reads it.
 
 | What | How |
 |---|---|
@@ -132,6 +132,6 @@ Remove it: delete `src\challenge\`, `challenge_import.py` and `comp_names.py`, t
 |---|---|
 | `src\lib.rs` | `mod challenge;`, `"challenge"` and `"career_goals"` in `FEATURES` (size back to 29), `const CHALLENGE`, `const CAREER_GOALS`, the `has("challenge")` icon line, the `challenge::bar_item` block in `sidebar_item`, the block in `poll_input`, the block in the flip pass, the `b'E'` line in `host_answer` |
 | `make_exe.py`, `make_patches.py`, `install.py`, `cmui_config.ps1` | the switch |
-| `docs\` | this file, its row in `INDEX.md` and `switches.md`, key `E` in `network.md` |
+| `docs\` | this file, its row in `INDEX.md` and `switches.md`, key `c` in `network.md` |
 
 The `pub`s it added in `history.rs`, `comp.rs` and `assistant.rs` and `history::sentence` do no harm.

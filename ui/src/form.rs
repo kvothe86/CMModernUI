@@ -106,6 +106,11 @@ pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year)
             if !played || hg == 0xff || ag == 0xff || hg > 40 || ag > 40 || (h != club && a != club) {
                 continue;
             }
+            // (the club's reserve team shares its index: its matches came in, 0-4 and 4-4 on the
+            // season card's last six, night 10; dash.rs filters the same way)
+            if comp_name(rd::<i32>(f)).starts_with(b"Reserve") {
+                continue;
+            }
             let home = h == club;
             out.push(Result_ {
                 opponent: if home { a } else { h },

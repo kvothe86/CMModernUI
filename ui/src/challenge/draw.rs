@@ -153,10 +153,16 @@ pub unsafe fn flip(full_frame: bool) {
 }
 
 #[allow(static_mut_refs)]
+/// Shuts the page (the Coach opening: one cmui page at a time).
+pub unsafe fn close() {
+    OPEN = false;
+}
+
 unsafe fn open() {
     if FONT == 0 {
         return;
     }
+    crate::coach::close();
     OPEN = true;
     PAGE.clear();
     (TAB, PICK, FILTER, SCROLL, BACK_YEARS, HOVER, SPIN) = (0, 0, 0, 0, 0, None, None);
@@ -172,7 +178,7 @@ unsafe fn request(action: u32, arg: u32, name: &[u8]) {
         ASKS += 1;
         // (a mark for his own season goes with the question: the host sets it)
         let (a, b) = if action == ACT_RATE { (action, arg) } else { (0, 0) };
-        KEY = key(b'E', &[ASKS, STATS_YEAR as u32, a, b]);
+        KEY = key(b'c', &[ASKS, STATS_YEAR as u32, a, b]); // ('E' is the export's, lib.rs host_answer)
         WAITING = true;
         LOOKED = None;
         return;
@@ -197,6 +203,13 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if !OPEN {
         let over = !assistant::REPORT_OPEN && BUTTON.is_some_and(inside);
         let changed = std::mem::replace(&mut BUTTON_HOVER, over) != over;
+        // (a game popup open: the click goes to the game, which shuts it; see coach.rs, night 10)
+        if over && released && crate::news::MENU_OPEN {
+            // (as the game's own buttons: this click only shuts the popup; the next opens the page)
+            *(LEFT_CLICK as *mut u32) = 0;
+            crate::close_game_popup();
+            return Some(true);
+        }
         if over && released {
             // (the button stands on Game Options' box: its click must not reach the game)
             *(LEFT_CLICK as *mut u32) = 0;
@@ -1298,7 +1311,19 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
         };
         let m = mark(*g);
         let s = Spot::Goal(*g);
+        // (a goal's every line takes its click and lights with it, the whole row wide but for a
+        // country chip: only the first line's left part did, friend's report 2026-11-19 "hard to
+        // pick")
+        let asks = latin1(defs[*g][3]).contains(goals::CHOICE);
+        let chip_room = if asks && m.is_some() && picking { status + 56 } else { 0 };
         if !first {
+            if host && (picking || m.is_some()) {
+                let r = (x, y - 2, x + cw, y + rh - 2);
+                if lit(&s) {
+                    fill(r.0, r.1, r.2, r.3, CARD);
+                }
+                spot(r, s.clone());
+            }
             text_at(x + 24, y - 4, y + rh - 4, f(2), if m.is_some() || !picking { INK } else { MUTED }, text, 0);
             continue;
         }
@@ -1308,7 +1333,7 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
                 fill(r.0, r.1, r.2, r.3, CARD);
             }
             // (left of the status column and the points: the country chip there has its own click)
-            spot((r.0, r.1, r.2 - status - 56, r.3), s);
+            spot((r.0, r.1, r.2 - chip_room, r.3), s);
         }
         let done = m.is_some_and(|m| reached(m));
         let size = rh * 55 / 100;
@@ -1320,7 +1345,6 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
         text_at(x + 24, y, y + rh, f(2), if m.is_some() || !picking { INK } else { MUTED }, text, 0);
         text_at(r.2, y, y + rh, f(2), PRIMARY, &[b"+", defs[*g][4]].concat(), 2);
         // where it stands: the season reached, a country to choose, or the host's to tick
-        let asks = latin1(defs[*g][3]).contains(goals::CHOICE);
         let at = r.2 - 44;
         if let Some(m) = m.filter(|m| reached(m)) {
             let y0 = number(field(m, 3));
