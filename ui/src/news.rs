@@ -39,6 +39,8 @@ enum Kind {
     Award,
     Match,
     Club,
+    /// The youth intake (the Rust Tweaks' "Youth intake: ..." message): a seedling (user, 2026-11-21).
+    Youth,
     Other,
 }
 
@@ -112,7 +114,9 @@ fn kind(head: &[u8]) -> Kind {
     // (whole words: "fine" is no "Finland", "finest" or "final")
     let word = |ws: &[&str]| h.split(|c: char| !c.is_alphanumeric()).any(|x| ws.contains(&x));
     // ("fine" also an adjective: "Kolvar in fine form"; a fine has the FA, "over", wages with it)
-    if word(&["fined"]) || (word(&["fine", "fines"]) && word(&["fa", "over", "wages", "for", "club"])) {
+    if any(&["youth intake", "youngster"]) {
+        Kind::Youth
+    } else if word(&["fined"]) || (word(&["fine", "fines"]) && word(&["fa", "over", "wages", "for", "club"])) {
         Kind::Fine
     } else if any(&["banned", "suspen", "sent off", "disciplin", "warning", "reprimand", "outburst", "complaint", "referee", "touchline"]) {
         Kind::Ban
@@ -166,6 +170,7 @@ fn label(k: Kind) -> (&'static [u8], [u8; 3]) {
         Kind::Award => (b"AWARD", GOLD),
         Kind::Match => (b"MATCH", [0x4c, 0xc0, 0x7a]),
         Kind::Club => (b"CLUB", [0x8a, 0x98, 0xb0]),
+        Kind::Youth => (b"YOUTH", [0x8c, 0xd0, 0x5a]),
         Kind::Other => (b"NEWS", [0x6a, 0x70, 0x78]),
     }
 }
@@ -271,6 +276,13 @@ unsafe fn icon(k: Kind, cx: i32, cy: i32, r: i32) {
             dot(cx, cy + r / 4, r * 6 / 10, c);
         }
         Kind::Club => dot(cx, cy, r * 6 / 10, c),
+        Kind::Youth => {
+            // a seedling: a stem from the bottom, a leaf either side near the top
+            let a = (r / 6).max(1);
+            fill(cx - a, cy - r / 3, cx + a + 1, cy + r + 1, c);
+            dot(cx - r / 2, cy - r / 3, (r * 4 / 10).max(2), c);
+            dot(cx + r / 2, cy - r * 6 / 10, (r * 4 / 10).max(2), c);
+        }
         Kind::Other => dot(cx, cy, r * 4 / 10, c),
     }
 }

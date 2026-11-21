@@ -577,6 +577,115 @@ pub(super) unsafe fn league_leaders(club: usize) -> [usize; 3] {
     best.map(|b| b.1)
 }
 
+/// The European Golden Boot's weight of a league by its nation, as the real award: the five
+/// strongest x2, the next sixteen of the UEFA ranking x1.5, the rest x1.
+fn boot_weight(nation: &str) -> f32 {
+    const NEXT: [&str; 16] = ["Portugal", "Netherlands", "Belgium", "Turkey", "Czech Republic", "Greece", "Norway", "Poland",
+        "Denmark", "Austria", "Switzerland", "Scotland", "Sweden", "Israel", "Cyprus", "Croatia"];
+    if goals::BIG_FIVE.contains(&nation) { 2.0 } else if NEXT.contains(&nation) { 1.5 } else { 1.0 }
+}
+
+/// The European Golden Boot as it stands (user, 2026-11-21: "only with leagues loaded from
+/// europe"): the player with the most weighted league goals (`boot_weight`) in the first division
+/// of a European nation the game plays (a League object); 0 for nobody. Not an award in the
+/// databases. Worked out once a day.
+pub(super) unsafe fn golden_boot() -> usize {
+    static mut KEPT: (i32, usize) = (-1, 0);
+    let today = rd::<i16>(TODAY + 2) as i32 * 366 + rd::<i16>(TODAY) as i32;
+    if KEPT.0 == today {
+        return KEPT.1;
+    }
+    let (table, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT));
+    let mut weights: Vec<(usize, f32)> = Vec::new(); // the leagues seen: European top flight played -> weight, else 0
+    let mut best = (0.0f32, 0usize);
+    for k in 0..count.max(0) as usize {
+        let club = table + k * CLUB_SIZE;
+        let league = rd::<usize>(club + 0x57);
+        if league == 0 {
+            continue;
+        }
+        let weight = match weights.iter().find(|w| w.0 == league) {
+            Some(w) => w.1,
+            None => {
+                let nation = if readable(league, COMP_SIZE) { rd::<usize>(league + COMP_NATION) } else { 0 };
+                let continent = if readable(nation, 0x78) { rd::<usize>(nation + 0x71) } else { 0 };
+                let europe = readable(continent, 0x40) && latin1(&game_text(continent + 4, 51)).eq_ignore_ascii_case("Europe");
+                let w = if europe && first_division(league) && league_object(league) != 0 { boot_weight(&nation_name(nation)) } else { 0.0 };
+                weights.push((league, w));
+                w
+            }
+        };
+        if weight == 0.0 {
+            continue;
+        }
+        for s in squad(club) {
+            let points = stat(s, 2, 2) * weight;
+            if points > best.0 {
+                best = (points, s);
+            }
+        }
+    }
+    if trace() && best.1 != 0 {
+        log(&format!("challenge golden boot: {} ({} weighted), {} leagues", latin1(&staff_name(best.1)), best.0, weights.iter().filter(|w| w.1 > 0.0).count()));
+    }
+    KEPT = (today, best.1);
+    best.1
+}
+
+/// The Champions League's top scorer this season (user, 2026-11-21: "CL from champions league
+/// seperate top scorer screen"): the competition's own Comp_Stats (object [0xadadfc][id] +8), its
+/// player table (+0x19, count +0x21, 0x2d-byte entries: +0 the player id, +0xe goals), the same
+/// numbers as its stats screen; read raw, not sorted. The player id with the most goals; 0 for
+/// none (no goals yet, the competition not played). Once a day.
+pub(super) unsafe fn cl_top_scorer() -> i32 {
+    static mut KEPT: (i32, i32) = (-1, 0);
+    let today = rd::<i16>(TODAY + 2) as i32 * 366 + rd::<i16>(TODAY) as i32;
+    if KEPT.0 == today {
+        return KEPT.1;
+    }
+    let (comps, count, objects) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT), rd::<usize>(LEAGUES));
+    let mut best = (0i32, 0u8);
+    for k in 0..count.max(0) as usize {
+        let comp = comps + k * COMP_SIZE;
+        // (by the UEFA name: the AFC, OFC and CAF Champions Leagues come earlier in the table and
+        // `family`'s words take "afc champions league two" for it too, seen 2026-11-21)
+        let name = latin1(&game_text(comp + 4, 51)).to_lowercase();
+        if !readable(comp, COMP_SIZE) || !(name.contains("uefa champions") || name.contains("european champions")) {
+            continue;
+        }
+        let id = rd::<i32>(comp);
+        let at = objects + id.max(0) as usize * 4;
+        let object = if id >= 0 && readable(at, 4) { rd::<usize>(at) } else { 0 };
+        let stats = if readable(object, 0xc) { rd::<usize>(object + 8) } else { 0 };
+        if !readable(stats, 0x25) {
+            continue;
+        }
+        let (table, n) = (rd::<usize>(stats + 0x19), rd::<i32>(stats + 0x21));
+        if !(1..20_000).contains(&n) || !readable(table, n as usize * 0x2d) {
+            continue;
+        }
+        for e in (0..n as usize).map(|i| table + i * 0x2d) {
+            if rd::<u8>(e + 0xe) > best.1 {
+                best = (rd::<i32>(e), rd::<u8>(e + 0xe));
+            }
+        }
+        if trace() {
+            log(&format!("challenge cl scorer: {} entries, player id {} with {} goals", n, best.0, best.1));
+        }
+        break;
+    }
+    KEPT = (today, best.0);
+    best.0
+}
+
+/// A squad player whose player record's id is `id` (the Comp_Stats key).
+unsafe fn has_player_id(club: usize, id: i32) -> bool {
+    id > 0 && squad(club).iter().any(|&s| {
+        let p = rd::<usize>(s + 0x61);
+        readable(p, 4) && rd::<i32>(p) == id
+    })
+}
+
 const LEAGUES: usize = 0xadadfc; // the League objects, by the competition's id (its first dword)
 const STAFF_COMPS: usize = 0xae23e0; // the awards: 101 bytes a row, +4 the name
 const STAFF_COMP_COUNT: usize = 0xae2388;
@@ -747,7 +856,16 @@ unsafe fn read_career(l: &mut League, name: &str, club: usize, now: i32) -> bool
     let picked = |goal: &str| l.marks.iter().any(|m| same_manager(&m.name, name) && m.goal == goal);
     let table = picked(goals::UNBEATEN) || picked(goals::COMEBACK) || goals::DERBIES.iter().any(|d| picked(d.0));
     let awards = picked(goals::BALLON) || picked(goals::TEAM_OF_YEAR);
+    let (boot, cl) = (picked(goals::GOLDEN_BOOT), picked(goals::CL_SCORER));
     let mut changed = false;
+    // (the European Golden Boot holder in the squad: the last reading of a season stands)
+    if boot {
+        let holder = golden_boot();
+        changed |= l.set_stat(name, now, "boot", (holder != 0 && squad(club).contains(&holder)) as i32);
+    }
+    if cl {
+        changed |= l.set_stat(name, now, "clscorer", has_player_id(club, cl_top_scorer()) as i32);
+    }
     if let Some(s) = standing(club).filter(|_| table) {
         if trace() {
             log(&format!("challenge standing {name}: {s:?}"));

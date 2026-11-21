@@ -6,13 +6,13 @@
 
 use super::*;
 
-const BIG_FIVE: [&str; 5] = ["England", "Spain", "Germany", "Italy", "France"];
+pub(super) const BIG_FIVE: [&str; 5] = ["England", "Spain", "Germany", "Italy", "France"];
 pub(super) const CHOICE: &str = "a country of your choice";
 /// How many goals a manager picks.
 pub(super) const PICKS: usize = 10;
 
 /// What the game knows of a manager's career.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(super) struct Career {
     pub facts: Vec<Fact>,
     pub seasons: Vec<(i32, usize, String)>, // every season up to now: the club he ended it with, its nation
@@ -26,6 +26,8 @@ pub(super) struct Career {
 pub(super) const UNBEATEN: &str = "Go a full league season unbeaten";
 pub(super) const COMEBACK: &str = "Win the league after trailing the leader by 10+ points at the halfway mark";
 pub(super) const BALLON: &str = "Have the Ballon d'Or winner of the year in your team";
+pub(super) const GOLDEN_BOOT: &str = "Have the European Golden Boot winner in your team";
+pub(super) const CL_SCORER: &str = "Have the Champions League top scorer in your team";
 pub(super) const TEAM_OF_YEAR: &str = "Have three players in the league's Team of the Year";
 
 /// A side of a derby by the words of a club's names: any of the first, none of the second ("milan"
@@ -114,6 +116,10 @@ fn holds(goal: &str, c: &Career, from: i32, upto: i32, country: &str) -> Option<
         "Have the top flight's highest average rating in your team" => led_in(2),
         "Have the top flight's top scorer three seasons in a row" => (from..=upto).any(|s| (s..s + 3).all(|y| y <= upto && led(0, y))),
         BALLON => (from..=upto).any(|s| stat(s, "ballon") == Some(1)),
+        // (a season played out: its last reading; `track::golden_boot`, the loaded European top flights)
+        GOLDEN_BOOT => (from..=upto).any(|s| s < c.now && stat(s, "boot") == Some(1)),
+        // (the same: `track::cl_top_scorer`, the competition's own stats)
+        CL_SCORER => (from..=upto).any(|s| s < c.now && stat(s, "clscorer") == Some(1)),
         TEAM_OF_YEAR => (from..=upto).any(|s| stat(s, "toty").unwrap_or(0) >= 3),
         // (a season played out with every match of it in the table)
         UNBEATEN => (from..=upto.min(c.now - 1)).any(|s| stat(s, "lost") == Some(0) && stat(s, "full").is_some_and(|n| n > 0 && stat(s, "played").unwrap_or(0) >= n)),
@@ -214,7 +220,14 @@ mod tests {
         assert_eq!(at("Work in three different countries"), None);
         assert_eq!(at("Win a trophy in three different countries"), None);
         assert_eq!(at("Stay ten seasons at the same club"), None);
-        assert_eq!(reached("Have the European Golden Boot winner in your team", &c, 2025, ""), (None, false));
+        // (followed since 2026-11-21: no "boot" reading in this career, so not reached)
+        assert_eq!(reached(GOLDEN_BOOT, &c, 2025, ""), (None, true));
+        let mut b = c.clone();
+        b.stats.push((2030, "boot".into(), 1));
+        b.now = 2031;
+        assert_eq!(reached(GOLDEN_BOOT, &b, 2025, ""), (Some(2030), true));
+        b.now = 2030; // (the season running: not played out yet)
+        assert_eq!(reached(GOLDEN_BOOT, &b, 2025, ""), (None, true));
         // only what came after the pick, in the country chosen
         assert_eq!(reached("Win the league and the cup in the same season", &c, 2032, "").0, Some(2038));
         let title = "Win the league title in a country of your choice";
@@ -267,9 +280,9 @@ mod tests {
     fn the_rules_goals() {
         let l = League::parse(&latin1(RULES), "");
         assert_eq!(l.goals.len(), 48);
-        assert_eq!(l.goals.iter().filter(|g| followed(&g.1)).count(), 46);
+        assert_eq!(l.goals.iter().filter(|g| followed(&g.1)).count(), 48);
         assert!(DERBIES.iter().all(|d| l.goals.iter().any(|q| q.1 == d.0)));
-        assert!([UNBEATEN, COMEBACK, BALLON, TEAM_OF_YEAR].iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
+        assert!([UNBEATEN, COMEBACK, BALLON, GOLDEN_BOOT, CL_SCORER, TEAM_OF_YEAR].iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
         assert!(LEADS.iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
         assert_eq!(l.goals.iter().filter(|g| g.1.contains(CHOICE)).count(), 3);
         assert!(l.goals.iter().all(|g| g.2 > 0));

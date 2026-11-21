@@ -53,9 +53,18 @@ countries can change only in the season of the manager's first pick. A goal coun
 from the season it was picked, once; its points go into the career total (Dashboard, rank, Stats'
 rank), not into a season's.
 
-The game follows 46 of the 48 (`goals::holds`); the host ticks the European Golden Boot and the
-Champions League top scorer (neither is an award in the databases, and the players' stats have one
-"Continental" row for all European cups). A tick also stands for a goal the game follows.
+The game follows all 48 (`goals::holds`, since 2026-11-21); a host's tick still stands for any.
+The Champions League top scorer (`track::cl_top_scorer`, once a day) is read from the competition's
+own statistics, the numbers of its stats screen (not an award in the databases; the players' stats
+have one "Continental" row for all European cups): the object `[0xadadfc][id]` +8 Comp_Stats, its
+player table +0x19 (count +0x21), 0x2d-byte entries (+0 the player id, the squad player's
+`[staff+0x61]+0`; +0xe goals), the UEFA one by its name (the AFC, OFC, CAF ones come first in the
+table). Its holder in the squad is a season's `clscorer` reading. The European Golden Boot is
+worked out by cmui (`track::golden_boot`, once a day): the most league goals in the first division
+of a European nation **the game plays** (loaded at the start), weighted as the real award (big five
+x2, the next 16 of the UEFA ranking x1.5, the rest x1); its holder in the squad is a season's `boot`
+reading, the last one of a season played out stands. A game with only the Dutch and English leagues
+loaded has its Golden Boot from those two.
 
 | From | Goals | How |
 |---|---|---|
@@ -63,6 +72,7 @@ Champions League top scorer (neither is an award in the databases, and the playe
 | the league's leaders | top scorer, assists, average rating, top scorer three in a row | `track::league_leaders`, the stats' league row (2), average from 10 matches, only in the nation's first division (`first_division`); a season's last reading stands (`E` lines) |
 | the league table | unbeaten, 10+ points behind at halfway, derbies | `track::standing`: League object `[0xadadfc][competition id]` (+0x3e teams, +0xb1 rows of 0x3b: +0x11 played, +0x14 lost, +0x19 points, +5 head-to-head); unbeaten: lost 0 with every match of a double round (2 x (teams - 1)) played; halfway: the gap to the leader at the first reading with half played; derbies: wins over the rival in the head-to-head entries (+5 won), added up over seasons |
 | awards | Ballon d'Or, three in the Team of the Year | the squad's staff history, kinds 0x34 (+0xd the award's row in 0xae23e0, +8 the club then, +0x19 the place: 1 winner, 2 runner up, 3 third) and 0x32; the Ballon d'Or of the running season at the club, Team of the Year lines of the last 30 days |
+| the loaded European top flights | European Golden Boot | `track::golden_boot`: every club whose league is a European nation's first division with a League object, the league row (2) goals x `boot_weight` |
 | club records | a 10+ goal win | the club's all-time biggest win (`biggest_win`, Club_Records 0xad9dac: set +0x7d), the winner's goals, at a season the manager was there |
 
 Read from the moment the switch is on: seasons before that have no table, leader or award readings.
