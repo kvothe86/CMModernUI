@@ -21,8 +21,9 @@ The host's game works everything out; a client asks for the page (key `c`; `E` u
 |---|---|
 | Results and points | from each manager's history in the save (`facts_of`, `prizes`, `moves`); nothing is typed |
 | RAD spin | the host (a single player too), **Spin for ...** |
-| RAD challenges | since 2026-11-07: 70 to draw, all read by the game (`track.rs`, squad readings, the match-day tactics tracker), 4 archived (rules.tsv C lines, flag 1); settled when the season turns; an "at least" one reached shows its box ticked and counts in "points in" at once |
-| Releases | "Release five players": from the transfer manager's past transfers (`releases`: kind 3, the club left, no club joined, not on 1 July / 1 January, when contracts run out); a release never reaches the manager's history |
+| RAD challenges | since 2026-11-07 all read by the game (`track.rs`); 2026-11-21 review (user): the whole-team ones (team of one nationality, the five continent-only ones, first team average age) archived (rules.tsv C lines, flag 1: old rows still judged), the squad / age / nationality ones are **starting XI challenges** (`XI_CHALLENGES`): each league match's starting eleven (`assistant::selection`'s first 11 when the match-day tracker sees the match, with the formation's slot labels), `Way::Majority(10)`: held in more than half of 10 or more league matches (season stats `xim_*`); renamed texts carry a `renames.tsv` line so old rows follow. Settled when the season turns; an "at least" one reached shows its box ticked at once |
+| Releases | "Release five players": from the transfer manager's past transfers (`releases`: kind 3, the club left, no club joined, not on 1 July / 1 January, when contracts run out); a release never reaches the manager's history; since 2026-11-21 only until the winter ends (before 1 March) |
+| Rule book | rules.tsv `X` lines, shown at the top of the Rules tab ("How the RAD challenges count"): the starting XI majority, ages and definitions, tactics positions and how each tactics challenge breaks, the transfer season and winter, the release deadline |
 | A wrong verdict | the host clicks the row: done, then failed, then the game's again; his word stands. The cross removes a row. |
 
 The RAD tab: at the left every manager with his Active / Done / Failed counts for the season

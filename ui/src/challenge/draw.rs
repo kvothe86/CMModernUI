@@ -491,7 +491,7 @@ pub unsafe fn overlay() {
                 3 => stats(area, &of(b"T"), &of(b"Y"), &names),
                 4 => past(area, &of(b"H"), &names),
                 TAB_GOALS if with_goals => goals(area, &of(b"Q"), &of(b"W"), &of(b"M"), &of(b"N"), head, &names),
-                _ => rules(area, &of(b"P"), &of(b"G"), &of(b"A")),
+                _ => rules(area, &of(b"P"), &of(b"G"), &of(b"A"), &of(b"X")),
             }
         }
     }
@@ -1117,13 +1117,20 @@ unsafe fn past((x1, y1, x2, y2): Rect, rows: &Lines, names: &[&[u8]]) {
 
 /// Rules: what everything is worth: prizes, ranks and the RAD list, with what the game follows.
 #[allow(static_mut_refs)]
-unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &Lines) {
+unsafe fn rules((x1, y1, x2, y2): Rect, prizes: &Lines, ranks: &Lines, tasks: &Lines, notes: &Lines) {
     let ch = (y2 - y1) * 5 / 100;
     card((x1, y1, x2, y2));
     let (x1i, x2i) = (x1 + 16, x2 - 16);
     heading(x1i, y1 + 8, x2i, ch, 0xE8A5, b"RULES");
     // every line: a head or a row (text, value, trophy or followed by the game)
     let mut all: Vec<(Vec<u8>, Vec<u8>, bool, bool)> = Vec::new();
+    // (the rule book first: how the RAD challenges count, a line each, wrapped like a long rule)
+    if !notes.is_empty() {
+        all.push((b"How the RAD challenges count".to_vec(), Vec::new(), false, true));
+        for n in notes {
+            all.push((n[1].to_vec(), Vec::new(), false, false));
+        }
+    }
     let mut last: &[u8] = b"";
     for p in prizes {
         if p[1] != last {

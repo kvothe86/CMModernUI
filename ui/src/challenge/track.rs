@@ -23,6 +23,14 @@ pub enum Way {
     Least(i32),
     EndMost(i32),
     EndLeast(i32),
+    /// The starting XI challenges (user, 2026-11-21): held in more than half of the league matches
+    /// seen, at least this many seen; the reading is `held * 1000 + matches` (`majority`).
+    Majority(i32),
+}
+
+/// A majority reading: the matches it held in and the matches seen, as one number.
+fn majority(held: i32, matches: i32) -> i32 {
+    held * 1000 + matches
 }
 
 /// What the game says of a season's reading, while it runs.
@@ -44,6 +52,7 @@ pub(super) fn passed(way: Way, value: i32, state: u8) -> bool {
         Way::Least(_) => state == GOOD,
         Way::EndMost(n) => value <= n,
         Way::EndLeast(n) => value >= n,
+        Way::Majority(n) => value % 1000 >= n && 2 * (value / 1000) > value % 1000,
     }
 }
 
@@ -114,6 +123,127 @@ pub struct Readings {
     tac_wingers: i32,
     tac_no_striker: i32, // matches played without a striker (it wants 15)
     tac_one_back: i32,
+    // the starting XI of every league match (2026-11-21, user: "x players in starting XI for at
+    // least the majority of the matches"): `majority(held, matches)` per XI_CHALLENGES row
+    xi: [i32; XI_CHALLENGES.len()],
+}
+
+/// The starting XI challenges, each judged on every league match's starting eleven (the
+/// selection's first 11 places when the match is seen, as the formation is): its text, the season
+/// stat key that counts the matches it held in.
+pub(super) const XI_CHALLENGES: [(&str, &str); 25] = [
+    ("3 players 35+ in the starting XI", "xim_35"),
+    ("5 players 30+ in the starting XI", "xim_30"),
+    ("5 players 32+ in the starting XI", "xim_32"),
+    ("5 players under 21 in the starting XI", "xim_u21"),
+    ("5 players under 23 in the starting XI", "xim_u23"),
+    ("Average age starting XI <=23", "xim_avg23"),
+    ("Average age starting XI >=30", "xim_avg30"),
+    ("No player younger than 18 in the starting XI", "xim_u18"),
+    ("5 left-footed players in the starting XI", "xim_left"),
+    ("5 right-footed players in the starting XI", "xim_right"),
+    ("Keeper + 4 defenders all 28+", "xim_back28"),
+    ("At least 3 homegrown players in the starting XI", "xim_home"),
+    ("No player worth more than \u{80}10M in the starting XI", "xim_dear"),
+    ("At least 2 youth players promoted to the starting XI", "xim_youth"),
+    ("At least 3 internationals in the starting XI", "xim_caps"),
+    ("5 players from Africa in the starting XI", "xim_africa"),
+    ("5 players from South America in the starting XI", "xim_samerica"),
+    ("5 players from Eastern Europe in the starting XI", "xim_east"),
+    ("5 players from Scandinavia in the starting XI", "xim_scand"),
+    ("5 players from NED/BEL/POR/TUR in the starting XI", "xim_nbpt"),
+    ("5 players from ENG/SPA/GER/ITA/FRA in the starting XI", "xim_big5"),
+    ("5 foreigners in the starting XI", "xim_foreign"),
+    ("3 players from the same country (not your own) in the starting XI", "xim_same"),
+    ("No player from your own country in the starting XI", "xim_noown"),
+    ("At least 5 different nationalities in the starting XI", "xim_nations"),
+];
+
+/// One starting player as the XI challenges see him.
+pub(super) struct XiMan {
+    pub age: i32,
+    pub joined_age: i32,
+    pub nation: usize,
+    pub nation_name: String,
+    pub continent: String,
+    pub left: bool,
+    pub right: bool,
+    pub caps: i32,
+    pub value: i32,
+    pub label: Vec<u8>, // his formation slot ("GK", "DC", "WBL" ...)
+}
+
+/// Which XI challenges a starting eleven keeps, in XI_CHALLENGES order; `own`: the club's country.
+pub(super) fn xi_marks(xi: &[XiMan], own: &str) -> [bool; XI_CHALLENGES.len()] {
+    let count = |f: &dyn Fn(&XiMan) -> bool| xi.iter().filter(|m| f(m)).count() as i32;
+    let named = |m: &XiMan, set: &[&str]| set.contains(&m.nation_name.as_str());
+    let avg10 = if xi.is_empty() { 0 } else { xi.iter().map(|m| m.age * 10).sum::<i32>() / xi.len() as i32 };
+    let back_line = |l: &[u8]| l.starts_with(b"SW") || (l.starts_with(b"D") && !l.starts_with(b"DM")) || l.starts_with(b"WB");
+    let keeper = xi.iter().filter(|m| m.label == b"GK").collect::<Vec<_>>();
+    let backs = xi.iter().filter(|m| back_line(&m.label)).collect::<Vec<_>>();
+    let mut by_nation: Vec<(usize, i32)> = Vec::new();
+    for m in xi.iter().filter(|m| m.nation_name != own) {
+        match by_nation.iter_mut().find(|n| n.0 == m.nation) {
+            Some(n) => n.1 += 1,
+            None => by_nation.push((m.nation, 1)),
+        }
+    }
+    let mut nations: Vec<usize> = xi.iter().map(|m| m.nation).collect();
+    nations.sort();
+    nations.dedup();
+    [
+        count(&|m| m.age >= 35) >= 3,
+        count(&|m| m.age >= 30) >= 5,
+        count(&|m| m.age >= 32) >= 5,
+        count(&|m| m.age < 21) >= 5,
+        count(&|m| m.age < 23) >= 5,
+        !xi.is_empty() && avg10 <= 230,
+        avg10 >= 300,
+        !xi.is_empty() && count(&|m| m.age < 18) == 0,
+        count(&|m| m.left) >= 5,
+        count(&|m| m.right) >= 5,
+        keeper.len() == 1 && backs.len() >= 4 && keeper.iter().chain(backs.iter()).all(|m| m.age >= 28),
+        count(&|m| m.joined_age <= 18) >= 3,
+        !xi.is_empty() && count(&|m| m.value > 10_000_000) == 0,
+        count(&|m| m.joined_age <= 18 && m.age <= 21) >= 2,
+        count(&|m| m.caps > 0) >= 3,
+        count(&|m| m.continent == "Africa") >= 5,
+        count(&|m| m.continent == "South America") >= 5,
+        count(&|m| named(m, &EAST)) >= 5,
+        count(&|m| named(m, &SCANDINAVIA)) >= 5,
+        count(&|m| named(m, &NBPT)) >= 5,
+        count(&|m| named(m, &BIG5)) >= 5,
+        count(&|m| m.nation_name != own) >= 5,
+        by_nation.iter().any(|n| n.1 >= 3),
+        !xi.is_empty() && count(&|m| m.nation_name == own) == 0,
+        nations.len() >= 5,
+    ]
+}
+
+/// A starting player's facts (as `read_squad` reads them); None for an empty or unreadable place.
+unsafe fn xi_man(s: usize, label: &[u8]) -> Option<XiMan> {
+    let player = rd::<usize>(s + 0x61);
+    if !valid_staff(s) || !readable(player, 70) {
+        return None;
+    }
+    let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
+    let (_, _, y) = day_month(s + 0x10);
+    let (born, born_day) = if y == 1900 { (rd::<u16>(s + 0x18) as i32, 0) } else { (y, rd::<i16>(s + 0x10) as i32) };
+    let (_, _, joined) = day_month(s + 0x3e);
+    let nation = rd::<usize>(s + 0x1a);
+    let text = |p: usize| if readable(p, 0x40) { latin1(&game_text(p + 4, 51)).to_string() } else { String::new() };
+    Some(XiMan {
+        age: year - born - (day < born_day) as i32,
+        joined_age: if joined > 1900 { joined - born } else { 99 },
+        nation,
+        nation_name: text(nation),
+        continent: if readable(nation, 0x78) { text(rd::<usize>(nation + 0x71)) } else { String::new() },
+        left: rd::<i8>(player + 0x30) > rd::<i8>(player + 0x3b),
+        right: rd::<i8>(player + 0x3b) > rd::<i8>(player + 0x30),
+        caps: rd::<u8>(s + 0x22) as i32,
+        value: ((s + 0x52) as *const i32).read_unaligned(),
+        label: label.to_vec(),
+    })
 }
 
 /// What a match's formation (its eleven slot labels, "GK", "DC", "WBL", "AMR", "FC" ...) does for
@@ -176,6 +306,22 @@ unsafe fn watch_tactics(l: &mut League, name: &str, staff: usize, club: usize, n
             add(l, key, n);
         }
     }
+    // the starting eleven of the same match(es): the selection's first 11 places, each with its slot
+    let picks = assistant::selection(club);
+    let xi: Vec<XiMan> = (0..11).filter_map(|k| xi_man(picks[k], labels.get(k).copied().unwrap_or(b""))).collect();
+    let own = {
+        let league = rd::<usize>(club + 0x57);
+        if readable(league, COMP_SIZE) { super::nation_name(rd::<usize>(league + COMP_NATION)) } else { String::new() }
+    };
+    let held = xi_marks(&xi, &own);
+    if trace() {
+        log(&format!("challenge xi {name}: {} players, held {:?}", xi.len(), XI_CHALLENGES.iter().zip(held).filter(|c| c.1).map(|c| c.0 .1).collect::<Vec<_>>()));
+    }
+    for (k, c) in XI_CHALLENGES.iter().enumerate() {
+        if held[k] {
+            add(l, c.1, n);
+        }
+    }
     l.set_stat(name, now, "tac_seen", s.played);
     true
 }
@@ -195,6 +341,9 @@ fn tactic_readings(l: &League, name: &str, now: i32, r: &mut Readings) {
     r.tac_wingers = matches - kept(6);
     r.tac_no_striker = kept(7);
     r.tac_one_back = broken(8);
+    for (k, c) in XI_CHALLENGES.iter().enumerate() {
+        r.xi[k] = majority(l.stat(name, now, c.1).unwrap_or(0), matches);
+    }
 }
 
 type Reading = fn(&Readings) -> i32;
@@ -326,6 +475,15 @@ unsafe fn read_squad(club: usize, r: &mut Readings) {
 /// How the game judges a challenge, by its text (`rules.tsv`, the euro sign as the game's byte
 /// 0x80): the reading, the way, the unit. None: the host's to tick.
 pub fn rule(text: &str) -> Option<(Reading, Way, &'static str)> {
+    // the starting XI challenges: every league match's eleven, more than half of 10 or more matches
+    const XI_READ: [Reading; XI_CHALLENGES.len()] = [
+        |r| r.xi[0], |r| r.xi[1], |r| r.xi[2], |r| r.xi[3], |r| r.xi[4], |r| r.xi[5], |r| r.xi[6], |r| r.xi[7], |r| r.xi[8],
+        |r| r.xi[9], |r| r.xi[10], |r| r.xi[11], |r| r.xi[12], |r| r.xi[13], |r| r.xi[14], |r| r.xi[15], |r| r.xi[16],
+        |r| r.xi[17], |r| r.xi[18], |r| r.xi[19], |r| r.xi[20], |r| r.xi[21], |r| r.xi[22], |r| r.xi[23], |r| r.xi[24],
+    ];
+    if let Some(k) = XI_CHALLENGES.iter().position(|c| c.0 == text) {
+        return Some((XI_READ[k], Way::Majority(10), "matches"));
+    }
     let r: (Reading, Way, &'static str) = match text {
         "Max 1 purchase" => (|r| r.bought, Way::Most(1), "purchases"),
         "Max 3 purchases" => (|r| r.bought, Way::Most(3), "purchases"),
@@ -354,34 +512,11 @@ pub fn rule(text: &str) -> Option<(Reading, Way, &'static str)> {
         "Team gets no more than 1 red card" => (|r| r.reds, Way::Most(1), "red cards"),
         "Player becomes top scorer, top assists and highest average rating" => (|r| r.leads, Way::EndLeast(3), "of 3"),
         "Keeper 10+ clean sheets" => (|r| r.clean_sheets, Way::Least(10), "clean sheets"),
-        "3 players 35+ in the starting XI" => (|r| r.xi_35, Way::EndLeast(3), "players 35+"),
-        "5 players 30+ in the starting XI" => (|r| r.xi_30, Way::EndLeast(5), "players 30+"),
-        "5 players 32+ in the starting XI" => (|r| r.xi_32, Way::EndLeast(5), "players 32+"),
-        "5 players under 21 in the starting XI" => (|r| r.xi_u21, Way::EndLeast(5), "players under 21"),
-        "5 players under 23 in the starting XI" => (|r| r.xi_u23, Way::EndLeast(5), "players under 23"),
-        "Average age starting XI <=23" => (|r| r.xi_age10, Way::EndMost(230), AGE10),
-        "Average age starting XI >=30" => (|r| r.xi_age10, Way::EndLeast(300), AGE10),
-        "No player younger than 18 in the starting XI" => (|r| r.xi_u18, Way::EndMost(0), "players under 18"),
+        // (archived 2026-11-21, judged as before for the rows already drawn: whole-team ones)
         "First team average age <=20" => (|r| r.first_age10, Way::EndMost(200), AGE10),
         "First team average age <=23" => (|r| r.first_age10, Way::EndMost(230), AGE10),
         "First team average age >=30" => (|r| r.first_age10, Way::EndLeast(300), AGE10),
         "First team average age >=32" => (|r| r.first_age10, Way::EndLeast(320), AGE10),
-        "5 left-footed players in the starting XI" => (|r| r.xi_left, Way::EndLeast(5), "left-footed"),
-        "Keeper + 4 defenders all 28+" => (|r| r.back_young, Way::EndMost(0), "under 28"),
-        "At least 3 players with international caps this season" => (|r| r.capped, Way::EndLeast(3), "capped players"),
-        "At least 3 homegrown players in the starting XI" => (|r| r.xi_homegrown, Way::EndLeast(3), "homegrown"),
-        "At least 2 youth players promoted to the starting XI" => (|r| r.xi_youth, Way::EndLeast(2), "youth players"),
-        "No player worth more than \u{80}10M in the starting XI" => (|r| r.xi_dear, Way::EndMost(0), "worth over 10M"),
-        "5 players from Africa" => (|r| r.africa, Way::EndLeast(5), "players"),
-        "5 players from South America" => (|r| r.south_america, Way::EndLeast(5), "players"),
-        "5 players from Eastern Europe" => (|r| r.east, Way::EndLeast(5), "players"),
-        "5 players from Scandinavia" => (|r| r.scandinavia, Way::EndLeast(5), "players"),
-        "5 foreigners in the starting XI" => (|r| r.xi_foreign, Way::EndLeast(5), "foreigners"),
-        "5 players from NED/BEL/POR/TUR" => (|r| r.nbpt, Way::EndLeast(5), "players"),
-        "5 players from ENG/SPA/GER/ITA/FRA" => (|r| r.big5, Way::EndLeast(5), "players"),
-        "3 players from the same country (not your own)" => (|r| r.same_country, Way::EndLeast(3), "of one country"),
-        "No player from your own country in the starting XI (min. 15 times)" => (|r| r.xi_own, Way::EndMost(0), "own country"),
-        "At least 5 different nationalities in the starting XI" => (|r| r.xi_nations, Way::EndLeast(5), "nationalities"),
         "Team of 1 nationality from NED/BEL/POR/TUR" => (|r| r.xi_not_nbpt, Way::EndMost(0), "not of it"),
         "Team of 1 nationality from ENG/SPA/GER/ITA/FRA" => (|r| r.xi_not_big5, Way::EndMost(0), "not of it"),
         "Team of 1 nationality from the other countries" => (|r| r.xi_not_other, Way::EndMost(0), "not of it"),
@@ -412,6 +547,10 @@ const AGE10: &str = "average age";
 fn note(value: i32, way: Way, unit: &str) -> String {
     let limit = match way {
         Way::Most(n) | Way::Least(n) | Way::EndMost(n) | Way::EndLeast(n) => n,
+        Way::Majority(n) => {
+            let (held, matches) = (value / 1000, value % 1000);
+            return if matches < n { format!("{held} of {matches} matches ({n} needed)") } else { format!("{held} of {matches} matches (more than half)") };
+        }
     };
     if unit == AGE10 {
         return format!("{:.1} / {} {unit}", value as f32 / 10.0, limit / 10);
@@ -511,7 +650,10 @@ unsafe fn releases(club: usize, year: i32) -> i32 {
         if trace() {
             log(&format!("challenge out {index}: staff {} fee {} kind {} day {} {} (season {season})", t.0, t.3, t.4, t.5, t.6));
         }
-        n += (season == year && in_season(t.4, t.5, t.6)) as i32;
+        // (a release counts until the winter ends, 1 March: letting five go after the last match
+        // was too cheap, user 2026-11-21)
+        let late = t.6 > year && t.5 >= WINTER_TO;
+        n += (season == year && in_season(t.4, t.5, t.6) && !late) as i32;
     }
     n
 }
@@ -1270,8 +1412,27 @@ mod tests {
         for t in l.tasks.iter().filter(|t| !l.archived.contains(&t.1)) {
             assert!(rule(&t.1).is_some(), "drawn but not read: {}", t.1);
         }
-        assert_eq!(l.archived.len(), 4);
-        // (70 to draw; one archived is still read: "No player younger than 18", met 98% of the time)
-        assert_eq!(l.tasks.iter().filter(|t| rule(&t.1).is_some()).count(), 71);
+        // (2026-11-21: the whole-team and continent-only ones archived too, still read for old rows)
+        assert_eq!(l.archived.len(), 16);
+        assert_eq!(l.tasks.iter().filter(|t| rule(&t.1).is_some()).count(), 72);
+        // every starting XI challenge is in the rules file under its text
+        assert!(XI_CHALLENGES.iter().all(|c| l.tasks.iter().any(|t| t.1 == c.0)), "an XI text not in rules.tsv");
+        assert!(!l.notes.is_empty());
+    }
+
+    /// The starting XI challenges: more than half of 10 or more league matches.
+    #[test]
+    fn a_majority_of_the_matches() {
+        assert!(passed(Way::Majority(10), majority(6, 10), OPEN));
+        assert!(!passed(Way::Majority(10), majority(5, 10), OPEN)); // half is no majority
+        assert!(!passed(Way::Majority(10), majority(9, 9), OPEN)); // fewer than 10 played
+        assert_eq!(note(majority(12, 20), Way::Majority(10), "matches"), "12 of 20 matches (more than half)");
+        let man = |age: i32, nation: &str| XiMan { age, joined_age: 25, nation: nation.len(), nation_name: nation.into(), continent: "Europe".into(), left: false, right: true, caps: 0, value: 0, label: b"MC".to_vec() };
+        let xi: Vec<XiMan> = (0..11).map(|k| man(if k < 5 { 31 } else { 25 }, if k < 3 { "Sweden" } else { "Netherlands" })).collect();
+        let held = xi_marks(&xi, "Netherlands");
+        let at = |text: &str| held[XI_CHALLENGES.iter().position(|c| c.0 == text).unwrap()];
+        assert!(at("5 players 30+ in the starting XI") && !at("5 players 32+ in the starting XI"));
+        assert!(at("3 players from the same country (not your own) in the starting XI") && !at("5 foreigners in the starting XI"));
+        assert!(at("5 right-footed players in the starting XI") && !at("No player from your own country in the starting XI"));
     }
 }

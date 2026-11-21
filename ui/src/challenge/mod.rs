@@ -468,6 +468,7 @@ struct League {
     tasks: Vec<(String, String, i32)>, // category, text, points
     archived: Vec<String>, // challenges kept for old rows, never drawn again (the RAD review, 2026-11-06)
     best: Vec<(String, i32, i32)>,     // a manager's best player on 1 January: name, season, staff index
+    notes: Vec<String>, // the rule book's lines on how the RAD challenges count (rules.tsv `X`)
 }
 
 impl League {
@@ -494,6 +495,7 @@ impl League {
                     }
                 }
                 "Q" => l.goals.push((text(1), text(2), number(3))),
+                "X" => l.notes.push(text(1)),
                 "W" => l.marks.push(Mark { name: text(1), goal: text(2), picked: number(3), country: text(4), done: number(5) }),
                 "E" => l.leaders.push((text(1), number(2), [number(3) != 0, number(4) != 0, number(5) != 0])),
                 "V" | "G" => l.stats.push((text(1), number(2), text(3), number(4))),
@@ -1254,6 +1256,9 @@ unsafe fn page(me: &str, all: bool, stats_year: i32) -> String {
     out += &format!("V\t{stats_year}\n");
     for (category, item, points, trophy) in &l.prizes {
         out += &format!("P\t{category}\t{item}\t{points}\t{}\n", *trophy as i32);
+    }
+    for n in &l.notes {
+        out += &format!("X\t{n}\n");
     }
     for t in &l.tasks {
         // (an archived one stays out: the wheel and the Rules tab show what can still be drawn)
