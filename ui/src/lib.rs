@@ -1418,6 +1418,8 @@ fn sy(v: i32) -> i32 {
 
 /// A squad name of a player out on loan at another club.
 const AWAY_NAME: [u8; 3] = [0xb8, 0xa4, 0xe8];
+/// A squad name of a player here on loan from another club (light teal, apart from the violet).
+const LOAN_IN_NAME: [u8; 3] = [0x6e, 0xd6, 0xc4];
 
 fn rgb565(c: [u8; 3]) -> u16 {
     (c[0] as u16 >> 3) << 11 | (c[1] as u16 >> 2) << 5 | c[2] as u16 >> 3
@@ -1839,6 +1841,8 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                     // (+0x39 0: without a club, released: no loan)
                     if !plays_for(staff, SQUAD_CLUB) && rd::<usize>(staff + 0x39) != 0 {
                         colour = rgb(AWAY_NAME) as u32;
+                    } else if loaned_in(staff, SQUAD_CLUB) {
+                        colour = rgb(LOAN_IN_NAME) as u32;
                     }
                     // (a name too long wraps and shows its first word: the column one smaller font)
                     if small_screen() && !packed {
@@ -3302,6 +3306,11 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
         }
         LAST_POLL = Some(std::time::Instant::now());
+        // (Game Options' click area under cmui's buttons on every poll too: a screen that builds its
+        // widgets again after the last frame and then stands still kept it in its home, under CM
+        // Challenge, and the gold Game Options drawn lower could not be clicked; the Evening
+        // Results screen of a day, user 2026-11-21, widget 254 at (6,567) read live)
+        options_flip(false, true);
         script();
         // the story is laid out by cmui (news::story): over one of its links or chips the game
         // sees the pointer on its own box for it, elsewhere over the story on none (and back
@@ -3765,6 +3774,32 @@ unsafe fn main_contract(staff: usize) -> Option<usize> {
     }
     let contract = rd::<usize>(manager) + k as usize * 0x50;
     readable(contract, 0x50).then_some(contract)
+}
+
+/// The loan contract of a staff member: his state's +4 (+0 the main one), as
+/// CONTRACT_MANAGER::get_loan_contract 0x4cf6d0 reads it; a contract's +4 is the club's id.
+unsafe fn loan_contract(staff: usize) -> Option<usize> {
+    let id = rd::<i32>(staff);
+    if id < 0 || id >= rd::<i32>(0xae2364) || !readable(0xae2d0c, 4) {
+        return None;
+    }
+    let state = rd::<usize>(0xae2d0c) + id as usize * 0x4f;
+    let manager = rd::<usize>(0xae1050);
+    if !readable(state, 8) || !readable(manager, 4) {
+        return None;
+    }
+    let k = rd::<i32>(state + 4);
+    if k < 0 {
+        return None;
+    }
+    let contract = rd::<usize>(manager) + k as usize * 0x50;
+    readable(contract, 0x50).then_some(contract)
+}
+
+/// A player on loan at `club` from another (user 2026-11-21: Luijendijk at MVV, from Excelsior,
+/// showed as an own player).
+unsafe fn loaned_in(staff: usize, club: usize) -> bool {
+    readable(club, 4) && plays_for(staff, club) && loan_contract(staff).is_some_and(|c| rd::<i32>(c + 4) == rd::<i32>(club))
 }
 
 /// His main contract's wage and his value as the game writes them, in the currency and wage
