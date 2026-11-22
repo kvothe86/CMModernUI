@@ -122,8 +122,11 @@ fn kind(head: &[u8]) -> Kind {
         Kind::Ban
     } else if any(&["sacked", "sacks", " sack ", "dismiss", "fired", "relieved of"]) {
         Kind::Sacked
-    } else if any(&["facilit"]) {
-        Kind::Club // (the board's training facilities: no injury)
+    } else if any(&["facilit"]) || (any(&["board ", "chairman"]) && !any(&["bid", "transfer", "offer", "sign", "loan"])) {
+        // (the board's training facilities: no injury; a board's word before the match and mood
+        // words in it, "Board want the title" was MATCH, "Board disappointed by manager verdict"
+        // PLAYER, play2 2026-11-22)
+        Kind::Club
     } else if any(&["injur", "back in training", "fitness", "out for", "resumes", "surgery", "knock", "returns to"]) {
         Kind::Injury
     } else if any(&["scout"]) {
@@ -968,7 +971,7 @@ fn link_words(words: &mut [Word], links: &mut [Link], lines: &[((i32, i32, i32, 
         cost(p).total_cmp(&cost(q))
     }).unwrap_or(1.0);
     let picks: Vec<(usize, usize, usize)> = boxes.iter().filter_map(|&(l, li)| fit(k, l, li).map(|f| (l, f.1, f.2))).collect();
-    for (l, i, mut j) in picks {
+    for (l, mut i, mut j) in picks {
         // (the fit can end a link a word early at a long line's end: "Newcastle's Josh Thomson."
         // gave the player "Josh", the card "Josh praised", night 6 D-8 / E-2. The next words
         // still in the link's own name go with it)
@@ -981,6 +984,17 @@ fn link_words(words: &mut [Word], links: &mut [Link], lines: &[((i32, i32, i32, 
             && !words[i..=j].iter().any(|w| lower(&w.text) == lower(&words[j + 1].text))
         {
             j += 1;
+        }
+        // (and the other way: the box a word too wide takes in a word that is not the name's,
+        // "Alexandre Penetra is", "of FK Bodø/Glimt", play2 2026-11-22; only where some word of
+        // the run is the name's, a story can call a person by another name than the link's)
+        if words[i..=j].iter().any(|w| name.contains(&lower(&w.text))) {
+            while j > i && !name.contains(&lower(&words[j].text)) {
+                j -= 1;
+            }
+            while i < j && !name.contains(&lower(&words[i].text)) {
+                i += 1;
+            }
         }
         for w in &mut words[i..=j] {
             w.link = Some(l);

@@ -542,6 +542,15 @@ it changed from its last copy; trace showed no MOM_SLOT draw). `man_of_match` no
 the match record +0x3c by name: the user saw it colour something, but not as intended. Left for
 later on the user's word; check which row it lights (+0x3c may not be a staff id).
 
+### News "ERROR: No league fate yet for Eerste Divisie" (2026-11-21, not cmui, harmless)
+
+F:\CM2627, Fri 9 Oct 2026, right after "NAC reach playoffs" / "NAC win playoff place". The text is
+the game's own (exe string 0x99b4ec, `Comp::build_fate_news_text` 0x48c6d0, which names fates 0-3
+and 5 and writes this line for any other). The Dutch first division's own writer
+`HolFirst::build_fate_news_text` 0x5f7110 (byte for byte as in the original exe) handles fates 4 and
+5 itself and passes the rest to it, so the Restructured database's play-off/period setup hands it a
+fate neither knows. Only a news line; the user called it harmless. Left as it is.
+
 ### Match Overview one goal short (2026-11-17, not cmui)
 
 Hanwell v Basingstoke 0-5 (F:\CM2627, 21.11.26): ratings show five goals (Ponce 1), the
@@ -573,3 +582,12 @@ event. Nothing in cmui to fix; the trace was taken out again.
 |---|---|---|---|---|
 | CM Challenge RAD: the spin only flicked challenge texts for 4 s (user wish: categories and sub-categories on a real wheel of fortune) | one text cycle, the draw after it | `challenge\mod.rs` `roll` draws first and keeps three wheels in `League::spun` (category, its sub-categories from rules.tsv column 6, their challenges; each segment weighs the drawable challenges behind it, so every challenge is as likely as before); `draw.rs` `spin_stage` + `wheel`: three wheels over the whole RAD tab, 2.2 s ease-out each, the landed segment lit 0.7 s, steps row with what each gave; leaving the page mid-spin keeps the draw | host, RAD, Spin for ...: 1680x1050, 1280x800, 800x600; a client sees the new row | built, tests 29/0 (new asserts in `a_roll_keeps_the_rules`) |
 | Network: a client on the RAD tab saw only the new row after the host spun (user: clients should watch the wheels too, a second late is fine) | the wheels lived on the host only | `challenge\mod.rs` `watch_text` / `spin_text` (key `c` with action 8 `ACT_WATCH`: "-" or the live spin: row id, ms since its start, manager, the three wheels); `draw.rs` `input` asks once a second while a client is on RAD (`remote::ask()`, the page may stand still), `watch` / `read_spin` start the same wheels up to 1 s behind, then the page is asked again for the new row | host + client both on RAD, host spins: the client plays the same three wheels to the same result | built, tests 29/0 (round trip in `a_roll_keeps_the_rules`); not installed (a game ran), not seen live |
+
+### 2026-11-22 (play2 bugs, build 54945d, installed in all seven folders, hash checked; not seen live)
+
+| Seen | Cause | Where | Check | Status |
+|---|---|---|---|---|
+| News link chips with an extra word: "Alexandre Penetra is >", "of FK Bodø/Glimt >", "Sem van Duijn is" lit in the story (play2) | `link_words` maps the game's box onto words by a fitted factor; a box a word too wide took in the word after or before the name | `news.rs` `link_words`: after the fit, words at either end that are not in the link's name are dropped (only when some word of the run is the name's) | open such a story (Penetra, Bodø/Glimt) | built, not seen |
+| Board items tagged MATCH ("Board want the title") or PLAYER ("Board disappointed by manager verdict") | `kind` reads match and mood words before the board's | `news.rs` `kind`: "board " / "chairman" without transfer words -> CLUB, before mood and match words | News list of a new season | built, not seen |
+| Loaded saved XI note "Kenneth Goudmijn: 0 in, 1 on the bench picked." | terse note format | `assistant.rs` `fill_team`: "X filled 1 place on the bench." / "... in the eleven" / "X: the line-up is complete." | load a saved XI | built, not seen |
+| Coach "Post-match analysis" right after a match: "no match screen texts for our last match" (AZ) | `coach::flip` kept a match only when a row held the club's full name (club +4); the match title has the short name (+0x38) | `coach.rs` `flip`: also kept when a side of the match title (`MATCH_SIDES`, `club_named`) is our club | play a match, Continue, Coach > analysis | built, not seen; cause likely, not proven |

@@ -1992,7 +1992,14 @@ pub(crate) unsafe fn fill_team(club: usize, slots: &[Vec<u8>], unavailable: &[us
             taker(tactics, club, role as i32, choice as i32, s, 0);
         }
     }
-    let note = format!("{}: {} in, {} on the bench picked.", latin1(&staff_name(a)), stand_ins.len(), picked_subs.len());
+    // (it read "Kenneth Goudmijn: 0 in, 1 on the bench picked." on a loaded XI, play2 2026-11-22)
+    let places = |n: usize| if n == 1 { "1 place".to_string() } else { format!("{n} places") };
+    let note = match (stand_ins.len(), picked_subs.len()) {
+        (0, 0) => format!("{}: the line-up is complete.", latin1(&staff_name(a))),
+        (0, b) => format!("{} filled {} on the bench.", latin1(&staff_name(a)), places(b)),
+        (x, 0) => format!("{} filled {} in the eleven.", latin1(&staff_name(a)), places(x)),
+        (x, b) => format!("{} filled {} in the eleven and {} on the bench.", latin1(&staff_name(a)), places(x), places(b)),
+    };
     Some((stand_ins, picked_subs, to_latin1(&note)))
 }
 

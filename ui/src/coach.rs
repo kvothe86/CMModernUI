@@ -252,7 +252,12 @@ pub unsafe fn flip(full_frame: bool) {
         // our match on screen: live, the last frame seen is the score as it stood; after it, the
         // tabs looked at (overview, stats, ratings) are put together
         if let (true, Some(own)) = (MATCH, own) {
-            if SCREEN.iter().any(|r| r.contains(&own)) {
+            // (or a side of the match title is our club: the title has its short name, the rows
+            // may not have the long one; AZ's analysis found no texts after a match, play2)
+            let ptr = human_club_ptr();
+            #[allow(static_mut_refs)]
+            let side = MATCH_SIDES.iter().any(|s| ptr.is_some() && club_named(&s.0) == ptr);
+            if side || SCREEN.iter().any(|r| r.contains(&own)) {
                 let live = match_record().is_some_and(|r| r.1);
                 if live || LAST_MATCH.2 || LAST_MATCH.1 != today() {
                     LAST_MATCH = (SCREEN.clone(), today(), live);
