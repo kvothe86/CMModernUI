@@ -150,6 +150,7 @@ Q	Individual player achievements	Have the Champions League top scorer in your te
 Q	Individual player achievements	Have the European Golden Boot winner in your team	25
 Q	Individual player achievements	Have three players in the league's Team of the Year	25
 Q	Individual player achievements	Have the top flight's top scorer three seasons in a row	50
+Q	Individual player achievements	Have the top flight's top assist maker three seasons in a row	50
 Q	Rivalries and derbies	Win the Revierderby (Dortmund v Schalke 04) ten times	50
 Q	Rivalries and derbies	Win the Old Firm (Celtic v Rangers) ten times	50
 Q	Rivalries and derbies	Win Le Classique (PSG v Marseille) ten times	50
@@ -157,6 +158,23 @@ Q	Rivalries and derbies	Win the Derby della Madonnina (AC Milan v Inter) ten tim
 Q	Rivalries and derbies	Win De Klassieker (Ajax v Feyenoord) ten times	50
 Q	Rivalries and derbies	Win El Clásico (Barcelona v Real Madrid) ten times	50
 Q	Rivalries and derbies	Win the North London Derby (Arsenal v Tottenham) ten times	50
+Q	Rivalries and derbies	Win the Northwest Derby (Liverpool v Manchester United) ten times	50
+Q	Rivalries and derbies	Win the Manchester Derby (Manchester City v Manchester United) ten times	50
+Q	Rivalries and derbies	Win the Derby Parisien (PSG v Paris FC) ten times	50
+Q	Rivalries and derbies	Win the Choc des Olympiques (Lyon v Marseille) ten times	50
+Q	Rivalries and derbies	Win Der Klassiker (Dortmund v Bayern München) ten times	50
+Q	Rivalries and derbies	Win the Derby della Capitale (Roma v Lazio) ten times	50
+Q	Rivalries and derbies	Win the Derby dei Campioni (Juventus v AC Milan) ten times	50
+Q	Rivalries and derbies	Win the Derbi Sevillano (Sevilla v Betis) ten times	50
+Q	Rivalries and derbies	Win the Derbi Barceloní (Espanyol v Barcelona) ten times	50
+Q	Rivalries and derbies	Win El Derbi Madrileño (Atlético v Real Madrid) ten times	50
+Q	Rivalries and derbies	Win the Dundee Derby (Dundee v Dundee United) ten times	50
+Q	Rivalries and derbies	Win the Derby van het Noorden (Heerenveen v Groningen) ten times	50
+Q	Rivalries and derbies	Win the clash Netherlands v Germany as national team manager	25
+Q	Rivalries and derbies	Win the clash England v Scotland as national team manager	25
+Q	Rivalries and derbies	Win the clash Greece v Turkey as national team manager	25
+Q	Rivalries and derbies	Win the clash Argentina v Brazil as national team manager	25
+Q	Rivalries and derbies	Win the clash Spain v Portugal as national team manager	25
 Q	Career and club building	Work in three different countries	25
 Q	Career and club building	Work in five different countries	50
 Q	Career and club building	Win a trophy in three different countries	50
@@ -170,3 +188,12 @@ Q	Special achievements	Go a full league season unbeaten	50
 Q	Special achievements	Win a competitive match with double figures (10+ goals)	25
 Q	Special achievements	Win the league after trailing the leader by 10+ points at the halfway mark	50
 Q	Special achievements	Win the Champions League, the league and the cup in one season	100
+Q	Special achievements	Score 100+ league goals in one season	50
+Q	Special achievements	Concede fewer than 15 goals in one league season	50
+Q	Special achievements	Win the league title without topping the Team Discipline table	25
+Q	Dominance	Win the league title three times in a row with one club	75
+Q	Dominance	Win the national cup three times in five seasons in a country of your choice	50
+Q	Dominance	Win the Champions League with three different clubs (Seedorf Challenge)	150
+Q	Dominance	Win all three European cups (Champions League, Europa League, Conference League) and the European Super Cup	100
+Q	Dominance	Win the Champions League, the European Super Cup and the Club World Cup in a row	100
+Q	Dominance	Blast from the past: win the league with a former league winner after taking it up through at least one lower league	100

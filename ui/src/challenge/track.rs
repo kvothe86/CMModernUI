@@ -845,6 +845,8 @@ pub(super) struct Standing {
     pub leader: i32,
     pub full: i32,
     pub beaten: Vec<(usize, i32)>,
+    pub goals_for: i32,
+    pub against: i32,
 }
 
 /// A competition's League object, 0 for none: only a league the game plays (loaded at the start)
@@ -947,7 +949,8 @@ pub(super) unsafe fn standing(club: usize) -> Option<Standing> {
     if trace() {
         log(&format!("challenge table {}: teams {teams} rules {:?} h2h {h2h:#x}", latin1(&game_text(comp + 4, 51)), (0..4).map(|k| rd::<u8>(league + 0xc5 + k)).collect::<Vec<_>>()));
     }
-    Some(Standing { played: rd::<u8>(own + 0x11) as i32, lost: rd::<u8>(own + 0x14) as i32, points: rd::<i16>(own + 0x19) as i32, leader, full: 2 * (teams as i32 - 1), beaten })
+    // (goals for and against at +0x15 / +0x17, as `league_table`)
+    Some(Standing { played: rd::<u8>(own + 0x11) as i32, lost: rd::<u8>(own + 0x14) as i32, points: rd::<i16>(own + 0x19) as i32, leader, full: 2 * (teams as i32 - 1), beaten, goals_for: rd::<i16>(own + 0x15) as i32, against: rd::<i16>(own + 0x17) as i32 })
 }
 
 /// The awards of the squad's players: (award name in lower case, a team of the year, the place (1
@@ -994,12 +997,36 @@ unsafe fn club_names(club: usize) -> String {
 /// The career goals' readings of a manager's season, for the goals he picked: his league table
 /// (matches and defeats while they grow, the gap to the leader once half the matches are played,
 /// the wins over a derby's rival) and his squad's new awards.
-unsafe fn read_career(l: &mut League, name: &str, club: usize, now: i32) -> bool {
+unsafe fn read_career(l: &mut League, name: &str, staff: usize, club: usize, now: i32) -> bool {
     let picked = |goal: &str| l.marks.iter().any(|m| same_manager(&m.name, name) && m.goal == goal);
-    let table = picked(goals::UNBEATEN) || picked(goals::COMEBACK) || goals::DERBIES.iter().any(|d| picked(d.0));
+    let table = [goals::UNBEATEN, goals::COMEBACK, goals::HUNDRED, goals::TIGHT].iter().any(|g| picked(g)) || goals::DERBIES.iter().any(|d| picked(d.0));
+    let clashes: Vec<usize> = (0..goals::CLASHES.len()).filter(|&d| picked(goals::CLASHES[d].0)).collect();
     let awards = picked(goals::BALLON) || picked(goals::TEAM_OF_YEAR);
     let (boot, cl) = (picked(goals::GOLDEN_BOOT), picked(goals::CL_SCORER));
     let mut changed = false;
+    // a national team's clash (staff +0x24 the team he manages): a competitive win over the rival
+    // in the last 200 days, read every turn so none is missed. ponytail: read only for a manager
+    // with a club (`update` asks for one); a national team alone would need its own turn here.
+    let team = rd::<usize>(staff + 0x24);
+    if !clashes.is_empty() && readable(team, 0x55) {
+        let own = club_names(team);
+        let index = ((team - rd::<usize>(CLUB_TABLE)) / CLUB_SIZE) as i32;
+        let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
+        let from = if day >= 200 { (day - 200, year) } else { (day + 166, year - 1) };
+        let results = crate::form::played(index, from, (day, year), 40);
+        for d in clashes {
+            let clash = goals::CLASHES[d];
+            let rival = if goals::is_side(&own, clash.1) { clash.2 } else if goals::is_side(&own, clash.2) { clash.1 } else { continue };
+            let key = format!("clash{d}");
+            let beat = |r: &crate::form::Result_| !r.friendly && r.goals_for > r.against && goals::is_side(&club_names(rd::<usize>(CLUB_TABLE) + r.opponent as usize * CLUB_SIZE), rival);
+            if l.stat(name, now, &key).is_none() && results.iter().any(beat) {
+                if trace() {
+                    log(&format!("challenge clash {name}: {} won", clash.0));
+                }
+                changed |= l.set_stat(name, now, &key, 1);
+            }
+        }
+    }
     // (the European Golden Boot holder in the squad: the last reading of a season stands)
     if boot {
         let holder = golden_boot();
@@ -1014,6 +1041,7 @@ unsafe fn read_career(l: &mut League, name: &str, club: usize, now: i32) -> bool
         }
         if s.played >= l.stat(name, now, "played").unwrap_or(0) {
             changed |= l.set_stat(name, now, "played", s.played) | l.set_stat(name, now, "lost", s.lost) | l.set_stat(name, now, "full", s.full);
+            changed |= l.set_stat(name, now, "gf", s.goals_for) | l.set_stat(name, now, "ga", s.against);
         }
         if l.stat(name, now, "gap").is_none() && s.played > 0 && s.played * 2 >= s.full {
             changed |= l.set_stat(name, now, "gap", s.leader - s.points);
@@ -1171,7 +1199,7 @@ pub unsafe fn update() {
             }
         }
         if on(CAREER_GOALS) && readable(club, 0xd7 + 200) && l.marks.iter().any(|m| same_manager(&m.name, &name)) {
-            changed |= read_career(l, &name, club, now);
+            changed |= read_career(l, &name, staff, club, now);
         }
         // the best player of the first turn of the year
         if (0..31).contains(&day) && readable(club, 0xd7 + 200) && !l.best.iter().any(|b| b.1 == now && same_manager(&b.0, &name)) {

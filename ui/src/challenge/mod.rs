@@ -878,8 +878,15 @@ unsafe fn career_of(staff: usize, now: i32) -> goals::Career {
     let hired: Vec<(i32, usize, String)> = jobs.iter().filter(|j| j.hired).map(|j| (if j.day >= HIRED_FROM { j.year } else { j.year - 1 }, j.club, nation_of(j.club))).collect();
     let mut clubs: Vec<usize> = hired.iter().map(|j| j.1).collect();
     clubs.dedup();
-    let big_wins = clubs.into_iter().filter_map(|c| biggest_win(c)).collect();
-    goals::Career { facts, seasons, jobs: hired, now, big_wins, ..Default::default() }
+    let big_wins = clubs.iter().filter_map(|&c| biggest_win(c)).collect();
+    // the competitions' winners rows of his clubs (a league's by the year it ends: as a season, -1)
+    let (base, count) = (rd::<usize>(comp::HISTORY), rd::<i32>(comp::HISTORY_COUNT));
+    let titles = if count > 0 && readable(base, count as usize * 26) {
+        (0..count as usize).map(|k| base + k * 26).filter(|&r| clubs.contains(&rd::<usize>(r + 0xa))).map(|r| (rd::<usize>(r + 4), rd::<usize>(r + 0xa), rd::<i16>(r + 8) as i32 - 1)).collect()
+    } else {
+        Vec::new()
+    };
+    goals::Career { facts, seasons, jobs: hired, now, big_wins, titles, ..Default::default() }
 }
 
 const CLUB_RECORDS: usize = 0xad9dac; // Club_Records*: +4 the record sets (0x38b bytes), +0x1c a club's entry (0x6a bytes, +0 its all-time set)

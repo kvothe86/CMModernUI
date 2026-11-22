@@ -1,8 +1,9 @@
 //! Career goals (switch `career_goals`): aims for a whole career (`Q` lines of `rules.tsv`). The
 //! host picks ten for each manager at the start, a country with the three that ask one; the picks
 //! can change only in the season of the first pick. A goal counts from the season it was picked,
-//! once, for its points. The game reads 30 of the 48 from a manager's history: titles, cups,
-//! promotions, his clubs and their countries. The host ticks the rest.
+//! once, for its points. The game follows all but one (the discipline table): from a manager's
+//! history (titles, cups, promotions, his clubs and their countries) and the host's turns (league
+//! table, leaders, awards, national team results). The host ticks the rest.
 
 use super::*;
 
@@ -20,6 +21,7 @@ pub(super) struct Career {
     pub leads: Vec<(i32, [bool; 3])>,       // a season: the first division's top scorer, assists, average in his squad
     pub stats: Vec<(i32, String, i32)>,     // a season's readings by name (`track::read_career`)
     pub big_wins: Vec<(i32, usize, i32)>,   // each club's all-time biggest win: the season, the club, the winner's goals
+    pub titles: Vec<(usize, usize, i32)>,   // the competitions' history rows of his clubs: the competition, the club, the season
     pub now: i32,
 }
 
@@ -33,15 +35,44 @@ pub(super) const TEAM_OF_YEAR: &str = "Have three players in the league's Team o
 /// A side of a derby by the words of a club's names: any of the first, none of the second ("milan"
 /// is in Internazionale Milano too).
 type Side = (&'static [&'static str], &'static [&'static str]);
-pub(super) const DERBIES: [(&str, Side, Side); 7] = [
+/// (a derby's index is its stat key "derby{d}": new ones go at the end)
+pub(super) const DERBIES: [(&str, Side, Side); 19] = [
     ("Win the Revierderby (Dortmund v Schalke 04) ten times", (&["dortmund"], &[]), (&["schalke"], &[])),
     ("Win the Old Firm (Celtic v Rangers) ten times", (&["celtic"], &[]), (&["rangers"], &[])),
     ("Win Le Classique (PSG v Marseille) ten times", (&["paris saint", "paris sg", "psg"], &[]), (&["marseille"], &[])),
     ("Win the Derby della Madonnina (AC Milan v Inter) ten times", (&["milan"], &["inter"]), (&["inter"], &[])),
     ("Win De Klassieker (Ajax v Feyenoord) ten times", (&["ajax"], &[]), (&["feyenoord"], &[])),
-    ("Win El Cl\u{e1}sico (Barcelona v Real Madrid) ten times", (&["barcelona"], &[]), (&["real madrid"], &[])),
+    // ("R.C.D. Espanyol" is "Espanyol Barcelona" too)
+    ("Win El Cl\u{e1}sico (Barcelona v Real Madrid) ten times", (&["barcelona"], &["espanyol"]), (&["real madrid"], &[])),
     ("Win the North London Derby (Arsenal v Tottenham) ten times", (&["arsenal"], &[]), (&["tottenham"], &[])),
+    // (2026-11-22, the user's list; names as the 26/27 database has them)
+    ("Win the Northwest Derby (Liverpool v Manchester United) ten times", (&["liverpool"], &[]), (&["manchester united", "man utd"], &[])),
+    ("Win the Manchester Derby (Manchester City v Manchester United) ten times", (&["manchester city", "man city"], &[]), (&["manchester united", "man utd"], &[])),
+    ("Win the Derby Parisien (PSG v Paris FC) ten times", (&["paris saint", "paris sg", "psg"], &[]), (&["paris fc"], &[])),
+    ("Win the Choc des Olympiques (Lyon v Marseille) ten times", (&["olympique lyon", "olympique lyonnais"], &[]), (&["olympique marseille", "olympique de marseille"], &[])),
+    ("Win Der Klassiker (Dortmund v Bayern M\u{fc}nchen) ten times", (&["dortmund"], &[]), (&["bayern m"], &[])),
+    ("Win the Derby della Capitale (Roma v Lazio) ten times", (&["as roma"], &[]), (&["lazio"], &[])),
+    ("Win the Derby dei Campioni (Juventus v AC Milan) ten times", (&["juventus"], &[]), (&["milan"], &["inter"])),
+    ("Win the Derbi Sevillano (Sevilla v Betis) ten times", (&["sevilla"], &["betis"]), (&["betis"], &[])),
+    ("Win the Derbi Barcelon\u{ed} (Espanyol v Barcelona) ten times", (&["espanyol"], &[]), (&["barcelona"], &["espanyol"])),
+    ("Win El Derbi Madrile\u{f1}o (Atl\u{e9}tico v Real Madrid) ten times", (&["tico madrid", "tico de madrid"], &[]), (&["real madrid"], &[])),
+    ("Win the Dundee Derby (Dundee v Dundee United) ten times", (&["dundee fc"], &[]), (&["dundee united", "dundee utd"], &[])),
+    ("Win the Derby van het Noorden (Heerenveen v Groningen) ten times", (&["heerenveen"], &[]), (&["fc groningen"], &[])),
 ];
+
+/// National teams' clashes: one competitive win (not a friendly) as the manager of either side.
+/// (index = stat key "clash{d}")
+pub(super) const CLASHES: [(&str, Side, Side); 5] = [
+    ("Win the clash Netherlands v Germany as national team manager", (&["netherlands", "holland"], &[]), (&["germany"], &[])),
+    ("Win the clash England v Scotland as national team manager", (&["england"], &[]), (&["scotland"], &[])),
+    ("Win the clash Greece v Turkey as national team manager", (&["greece"], &[]), (&["turkey", "t\u{fc}rkiye", "turkiye"], &[])),
+    ("Win the clash Argentina v Brazil as national team manager", (&["argentina"], &[]), (&["brazil", "brasil"], &[])),
+    ("Win the clash Spain v Portugal as national team manager", (&["spain"], &[]), (&["portugal"], &[])),
+];
+
+pub(super) const HUNDRED: &str = "Score 100+ league goals in one season";
+pub(super) const TIGHT: &str = "Concede fewer than 15 goals in one league season";
+pub(super) const BLAST: &str = "Blast from the past: win the league with a former league winner after taking it up through at least one lower league";
 
 /// Whether a club (its names in lower case) is that side of a derby.
 pub(super) fn is_side(names: &str, side: Side) -> bool {
@@ -49,11 +80,12 @@ pub(super) fn is_side(names: &str, side: Side) -> bool {
 }
 
 /// The goals of the first division's leaders: read on the host's every turn (`track::update`).
-pub(super) const LEADS: [&str; 4] = [
+pub(super) const LEADS: [&str; 5] = [
     "Have the top flight's top scorer in your team",
     "Have the top flight's top assist maker in your team",
     "Have the top flight's highest average rating in your team",
     "Have the top flight's top scorer three seasons in a row",
+    "Have the top flight's top assist maker three seasons in a row",
 ];
 
 /// Whether a goal is reached by what happened from season `from` to `upto`; None for a goal the
@@ -86,9 +118,16 @@ fn holds(goal: &str, c: &Career, from: i32, upto: i32, country: &str) -> Option<
     let led = |k: usize, s: i32| s < c.now && c.leads.iter().any(|e| e.0 == s && e.1[k]);
     let led_in = |k: usize| (from..=upto).any(|s| led(k, s));
     let stat = |s: i32, key: &str| c.stats.iter().find(|e| e.0 == s && e.1 == key).map(|e| e.2);
+    // (a league season played out with every match of it in the table)
+    let played_out = |s: i32| s < c.now && stat(s, "full").is_some_and(|n| n > 0 && stat(s, "played").unwrap_or(0) >= n);
+    let date = |f: &Fact| f.year * 366 + f.day as i32;
     if let Some(d) = DERBIES.iter().position(|d| d.0 == goal) {
         let key = format!("derby{d}");
         return Some((from..=upto).filter_map(|s| stat(s, &key)).sum::<i32>() >= 10);
+    }
+    if let Some(d) = CLASHES.iter().position(|d| d.0 == goal) {
+        let key = format!("clash{d}");
+        return Some((from..=upto).any(|s| stat(s, &key) == Some(1)));
     }
     Some(match goal {
         "Win the league title in a country of your choice" => chosen(&title),
@@ -122,7 +161,19 @@ fn holds(goal: &str, c: &Career, from: i32, upto: i32, country: &str) -> Option<
         CL_SCORER => (from..=upto).any(|s| s < c.now && stat(s, "clscorer") == Some(1)),
         TEAM_OF_YEAR => (from..=upto).any(|s| stat(s, "toty").unwrap_or(0) >= 3),
         // (a season played out with every match of it in the table)
-        UNBEATEN => (from..=upto.min(c.now - 1)).any(|s| stat(s, "lost") == Some(0) && stat(s, "full").is_some_and(|n| n > 0 && stat(s, "played").unwrap_or(0) >= n)),
+        UNBEATEN => (from..=upto).any(|s| played_out(s) && stat(s, "lost") == Some(0)),
+        // (2026-11-22, the user's list)
+        "Have the top flight's top assist maker three seasons in a row" => (from..=upto).any(|s| (s..s + 3).all(|y| y <= upto && led(1, y))),
+        HUNDRED => (from..=upto).any(|s| stat(s, "gf").unwrap_or(0) >= 100),
+        TIGHT => (from..=upto).any(|s| played_out(s) && stat(s, "ga").is_some_and(|n| n < 15)),
+        "Win the league title three times in a row with one club" => facts.iter().any(|f| title(f) && club(f.season).is_some() && (1..3).all(|k| facts.iter().any(|g| title(g) && g.season == f.season + k && club(g.season) == club(f.season)))),
+        "Win the national cup three times in five seasons in a country of your choice" => !country.is_empty() && (from..=upto).any(|s| facts.iter().filter(|f| cup(f) && f.nation == country && (s..s + 5).contains(&f.season)).count() >= 3),
+        "Win the Champions League with three different clubs (Seedorf Challenge)" => clubs_of(&cl) >= 3,
+        "Win all three European cups (Champions League, Europa League, Conference League) and the European Super Cup" => facts.iter().any(|f| cl(f)) && facts.iter().any(|f| won(f, 1)) && facts.iter().any(|f| f.kind == KIND_WON && conference(f)) && facts.iter().any(|f| won(f, 2)),
+        // (the Super Cup and the Club World Cup within a year after the final, by their dates)
+        "Win the Champions League, the European Super Cup and the Club World Cup in a row" => facts.iter().any(|f| cl(f) && [2, 3].iter().all(|&k| facts.iter().any(|g| won(g, k) && (1..400).contains(&(date(g) - date(f)))))),
+        // (a club promoted by him that won its league before he came up with it: the competitions' history)
+        BLAST => facts.iter().any(|p| promoted(p) && p.team != 0 && facts.iter().any(|t| title(t) && t.team == p.team && t.season > p.season && c.titles.iter().any(|h| h.1 == t.team && h.0 == t.table && h.2 < p.season))),
         COMEBACK => facts.iter().any(|f| title(f) && stat(f.season, "gap").unwrap_or(0) >= 10),
         "Win a competitive match with double figures (10+ goals)" => c.big_wins.iter().any(|w| (from..=upto).contains(&w.0) && w.2 >= 10 && club(w.0) == Some(w.1)),
         "Work in three different countries" => count(jobs.iter().map(|j| j.2.clone()).collect()) >= 3,
@@ -275,16 +326,59 @@ mod tests {
         assert!(is_side("fc internazionale milano inter", DERBIES[3].2));
     }
 
-    /// Every goal of the rules: the game follows 46, the host ticks the rest.
+    /// Every goal of the rules: the game follows all but the discipline table, the host ticks that.
     #[test]
     fn the_rules_goals() {
         let l = League::parse(&latin1(RULES), "");
-        assert_eq!(l.goals.len(), 48);
-        assert_eq!(l.goals.iter().filter(|g| followed(&g.1)).count(), 48);
-        assert!(DERBIES.iter().all(|d| l.goals.iter().any(|q| q.1 == d.0)));
-        assert!([UNBEATEN, COMEBACK, BALLON, GOLDEN_BOOT, CL_SCORER, TEAM_OF_YEAR].iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
+        assert_eq!(l.goals.len(), 75);
+        let not: Vec<&String> = l.goals.iter().map(|g| &g.1).filter(|g| !followed(g)).collect();
+        // (not the goal's whole text: make_challenge_editor.py marks a text found here as followed)
+        assert!(not.len() == 1 && not[0].contains("Discipline"));
+        assert!(DERBIES.iter().chain(CLASHES.iter()).all(|d| l.goals.iter().any(|q| q.1 == d.0)));
+        assert!([UNBEATEN, COMEBACK, BALLON, GOLDEN_BOOT, CL_SCORER, TEAM_OF_YEAR, HUNDRED, TIGHT, BLAST].iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
         assert!(LEADS.iter().all(|g| l.goals.iter().any(|q| q.1 == *g)));
-        assert_eq!(l.goals.iter().filter(|g| g.1.contains(CHOICE)).count(), 3);
+        assert_eq!(l.goals.iter().filter(|g| g.1.contains(CHOICE)).count(), 4);
         assert!(l.goals.iter().all(|g| g.2 > 0));
+    }
+
+    /// The goals of 2026-11-22: dominance, the former winner taken up, the European run.
+    #[test]
+    fn dominance_goals() {
+        let mut c = career();
+        let at = |c: &Career, goal: &str, country: &str| reached(goal, c, 2025, country).0;
+        // (Go Ahead, club 1, promoted in 2025 and 2026, champions 2027: a former winner by the history)
+        c.facts.iter_mut().filter(|f| f.season <= 2027).for_each(|f| f.team = 1);
+        assert_eq!(at(&c, BLAST, ""), None);
+        c.titles = vec![(0, 1, 1950)];
+        assert_eq!(at(&c, BLAST, ""), Some(2027));
+        c.titles = vec![(0, 1, 2027)]; // (his own title is no former one)
+        assert_eq!(at(&c, BLAST, ""), None);
+        // three titles in a row at PSV (club 2)
+        for s in [2032, 2033] {
+            c.facts.push(fact(s, KIND_CHAMPIONS, "dutch premier division", "Netherlands", true, None));
+        }
+        assert_eq!(at(&c, "Win the league title three times in a row with one club", ""), Some(2033));
+        // the cup three times in five seasons
+        let cup = "Win the national cup three times in five seasons in a country of your choice";
+        for s in [2033, 2035] {
+            c.facts.push(fact(s, KIND_WON, "dutch cup", "Netherlands", true, Some(6)));
+        }
+        assert_eq!(at(&c, cup, "Netherlands"), Some(2035));
+        assert_eq!(at(&c, cup, "Portugal"), None);
+        // CL (May 2039), Super Cup (August), Club World Cup (December): in a row by their dates
+        let run = "Win the Champions League, the European Super Cup and the Club World Cup in a row";
+        let dated = |season, year, day, family| Fact { year, day, ..fact(season, KIND_WON, "", "", false, Some(family)) };
+        c.facts.push(dated(2038, 2039, 140, 0));
+        c.facts.push(dated(2039, 2039, 230, 2));
+        assert_eq!(at(&c, run, ""), None);
+        c.facts.push(dated(2039, 2039, 350, 3));
+        assert_eq!(at(&c, run, ""), Some(2039));
+        // league goals and a tight defence from the host's readings
+        let st = |s: i32, k: &str, v: i32| (s, k.to_string(), v);
+        c.stats = vec![st(2033, "gf", 101), st(2034, "ga", 14), st(2034, "played", 20), st(2034, "full", 34), st(2035, "ga", 14), st(2035, "played", 34), st(2035, "full", 34), st(2036, "clash1", 1)];
+        assert_eq!(at(&c, HUNDRED, ""), Some(2033));
+        assert_eq!(at(&c, TIGHT, ""), Some(2035)); // (2034 not played out)
+        assert_eq!(at(&c, CLASHES[1].0, ""), Some(2036));
+        assert_eq!(at(&c, CLASHES[0].0, ""), None);
     }
 }
