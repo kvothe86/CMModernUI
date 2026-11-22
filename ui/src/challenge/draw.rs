@@ -97,7 +97,13 @@ enum Spot {
 
     StatsEarlier,
     StatsLater,
+    Random,
 }
+
+/// The Goals tab's Random ten: the chosen manager has goals (a click then asks first), and the
+/// manager it was clicked for once (the next click draws).
+static mut HAS_GOALS: bool = false;
+static mut ARMED: Option<usize> = None;
 
 /// A name's first word, as the page's lines match managers.
 fn first_word(s: &[u8]) -> Vec<u8> {
@@ -257,7 +263,18 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                 (TAB, SCROLL, BACK_YEARS, PICKING) = (t, 0, 0, None);
                 request(ACT_NONE, 0, &[]);
             }
-            Spot::Manager(m) => (PICK, PICKING, SCROLL) = (m, None, 0),
+            Spot::Manager(m) => (PICK, PICKING, SCROLL, ARMED) = (m, None, 0, None),
+            // the host's Random ten: at once while the manager has no goals, else the second click
+            Spot::Random => {
+                let lines: Vec<Vec<&[u8]>> = PAGE.split(|&c| c == b'\n').map(fields).collect();
+                let name = lines.iter().filter(|l| l[0] == b"K").nth(PICK).map_or(Vec::new(), |l| l[1].to_vec());
+                if HAS_GOALS && ARMED != Some(PICK) {
+                    ARMED = Some(PICK);
+                } else {
+                    ARMED = None;
+                    request(ACT_RANDOM, 0, &name);
+                }
+            }
             // a career goal: picked or dropped while the manager's goals can change, else ticked off
             Spot::Goal(k) => {
                 let (name, picking) = {
@@ -1390,17 +1407,19 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
         fill(r.0, r.1, r.2, r.3, if PICK == k { SELECTED } else if lit(&s) { CARD } else { BG });
         let mine = of(n);
         let points: i32 = mine.iter().filter(|m| reached(m)).map(|m| worth(m)).sum();
+        // (what his ten are worth: reached of possible, user 2026-11-22)
+        let possible: i32 = mine.iter().map(|m| worth(m)).sum();
         let h = r.3 - r.1;
         text_at(lx, r.1, r.1 + h * 58 / 100, f(3), if PICK == k { GOLD } else { INK }, &clip_text(f(3), n, lr - lx - 50), 0);
         let done = mine.iter().filter(|m| reached(m)).count();
         text_at(lx, r.1 + h * 50 / 100, r.3, f(2), MUTED, format!("{done} of {} reached", mine.len()).as_bytes(), 0);
-        text_at(lr, r.1, r.3, f(4), GOLD, format!("+{points}").as_bytes(), 2);
+        text_at(lr, r.1, r.3, f(4), GOLD, format!("{points}/{possible}").as_bytes(), 2);
         spot(r, s);
         y += line;
     }
     let says: &[u8] = match (host, picking) {
-        (true, true) => b"Pick ten goals: a click picks or drops one. They are fixed when this season ends. Each counts from the season it is picked, once, for its points.",
-        (true, false) => b"The game ticks off what it follows. Click a goal to tick off the rest.",
+        (true, true) => b"Pick ten goals: a click picks or drops one, or Random ten (one of each category, about the others' points). They are fixed when this season ends. Each counts from the season it is picked, once, for its points.",
+        (true, false) => b"The game ticks off what it follows. Click a goal to tick off the rest. Random ten draws new goals (the ones reached stay).",
         (false, true) => b"The host picks the ten goals.",
         (false, false) => b"The host ticks off what the game does not follow.",
     };
@@ -1410,12 +1429,24 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
     let (rx, rr) = (mid + 20, x2 - 14);
     let mine = of(chosen);
     let mark = |k: usize| mine.iter().find(|m| number(m[2]) == k as i32).copied();
+    let (got, possible): (i32, i32) = (mine.iter().filter(|m| reached(m)).map(|m| worth(m)).sum(), mine.iter().map(|m| worth(m)).sum());
     let title = if picking { format!("{} of 10 picked", mine.len()) } else { format!("{} of {} reached", mine.iter().filter(|m| reached(m)).count(), mine.len()) };
+    let title = format!("{title}  -  {got}/{possible} points");
     text_at(rx, y1 + 2, y1 + line, f(4), GOLD, chosen, 0);
     text_at(rx + text_width(f(4), chosen) + 16, y1 + 2, y1 + line, f(3), MUTED, title.as_bytes(), 0);
     fill(rx, y1 + line + 2, rr, y1 + line + 3, BORDER);
     let top = y1 + line + 10;
     let step = line * 6 / 10;
+    // the host's Random ten (user 2026-11-22): one goal of each category, three a second, about the
+    // others' points; over goals he has after a second click (those reached stay)
+    HAS_GOALS = !mine.is_empty();
+    // (its width: the goal list's page arrows go left of it, they stood over its end)
+    let mut random_w = 0;
+    if host && !chosen.is_empty() && PICKING.is_none() {
+        let label: &[u8] = if ARMED == Some(PICK) { b"Sure? Draw new ten" } else { b"Random ten" };
+        random_w = text_width(f(3), label) + 28;
+        button((rr - random_w, y1 + 6, rr, y1 + 6 + step), label, Spot::Random, ARMED == Some(PICK));
+    }
     // the country list of a goal that asks one
     if let (Some(k), true) = (PICKING, host) {
         let goal = defs.get(k).map_or(&b""[..], |d| d[3]);
@@ -1543,5 +1574,5 @@ unsafe fn goals((x1, y1, x2, y2): Rect, defs: &Lines, marks: &Lines, open: &Line
             text_at(at, y, y + rh, f(2), MUTED, b"Host ticks", 2);
         }
     }
-    pager(rr, y1 + 6, step, SCROLL > 0, SCROLL + per * (columns as usize) < all.len());
+    pager(if random_w > 0 { rr - random_w - 10 } else { rr }, y1 + 6, step, SCROLL > 0, SCROLL + per * (columns as usize) < all.len());
 }

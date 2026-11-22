@@ -66,7 +66,15 @@ A Goals tab after RAD (`goals.rs`, the `Q` lines of `rules.tsv`): 48 goals for a
 picks **ten** for each manager (a click picks or drops one), and a country for the three that ask
 "a country of your choice" (the chip opens the list of nations whose league the game plays: only the leagues loaded at the
 start, `track::league_object`). Picks and
-countries can change only in the season of the manager's first pick. A goal counts what happens
+countries can change only in the season of the manager's first pick.
+
+**Random ten** (host, 2026-11-22; `goals::random_ten`, action 9 `ACT_RANDOM`): one goal of each of
+the seven categories, three categories a second (none more than twice), and points close to the
+other managers' sets (their average; with none yet, what ten come to by chance, `usual_points`):
+among 4000 draws one within 5% of that at random, else the nearest. It works in any season, also
+over a set that exists (a second click then): goals reached so far stay, frozen at the season
+reached (`done`), the rest are drawn again, and the manager's season picked becomes this one, so
+his goals and countries can change again until it ends. Test `ten_at_random_by_the_rules`. A goal counts what happens
 from the season it was picked, once; its points go into the career total (Dashboard, rank, Stats'
 rank), not into a season's.
 

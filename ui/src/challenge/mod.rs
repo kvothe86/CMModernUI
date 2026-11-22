@@ -708,6 +708,20 @@ fn game_key(name: &str, year: i32, day: i16, club: usize) -> u32 {
     format!("{name} {year} {day} {club}").bytes().fold(0x811c9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x01000193))
 }
 
+/// The loaded game's number, as its league file has it (`cmchallenge_<n>.tsv`), for other files
+/// kept per game (`diary`); None before a human manager has a first job.
+pub(crate) unsafe fn game_number() -> Option<u32> {
+    let humans = humans();
+    let (first, name) = humans.last()?;
+    let j = facts_of(*first).1.first().map(|j| (j.year, j.day, j.club - rd::<usize>(CLUB_TABLE)))?;
+    Some(game_key(name, j.0, j.1, j.2))
+}
+
+/// The human managers: staff record, name.
+pub(crate) unsafe fn human_list() -> Vec<(usize, String)> {
+    humans()
+}
+
 /// The league of the game that is loaded: read when the game changes.
 #[allow(static_mut_refs)]
 unsafe fn use_game() {
@@ -1401,6 +1415,8 @@ const ACT_COUNTRY: u32 = 6;
 pub(crate) const ACT_RATE: u32 = 7;
 /// A client on RAD asking whether the host's wheels turn (`watch_text`), not the page.
 const ACT_WATCH: u32 = 8;
+/// The host's Random ten: a manager's ten career goals drawn (`name` the manager).
+const ACT_RANDOM: u32 = 9;
 
 /// The host's last spin: when, its new row's id, for whom (clients watch it, `watch_text`).
 static mut SPUN_AT: Option<(std::time::Instant, u32, String)> = None;
@@ -1474,6 +1490,51 @@ unsafe fn act(action: u32, arg: u32, name: &[u8]) {
             match l.seasons.iter_mut().find(|s| s.year == year && same_manager(&s.name, &who)) {
                 Some(s) => s.rating = mark,
                 None => l.seasons.push(Season { name: who, year, rating: mark, ..Default::default() }),
+            }
+            save();
+        }
+        // ten goals at random for a manager (the host's button, user 2026-11-22), also over a set he
+        // has, in any season: his goals reached so far stay, frozen at the season reached (the
+        // game's own ticks are worked out from the season picked, which starts again now)
+        ACT_RANDOM => {
+            let text = latin1(name).to_string();
+            let Some((staff, who)) = humans().into_iter().find(|h| same_manager(&h.1, &text)) else { return };
+            let who = l.marks.iter().find(|m| same_manager(&m.name, &who)).map_or(who, |m| m.name.clone());
+            let now = this_season();
+            let mut c = career_of(staff, now);
+            c.leads = l.leaders.iter().filter(|e| same_manager(&e.0, &who)).map(|e| (e.1, e.2)).collect();
+            c.stats = l.stats.iter().filter(|e| same_manager(&e.0, &who)).map(|e| (e.1, e.2.clone(), e.3)).collect();
+            for m in l.marks.iter_mut().filter(|m| same_manager(&m.name, &who) && m.done == 0) {
+                if let Some(y) = goals::reached(&m.goal, &c, m.picked, &m.country).0 {
+                    m.done = y;
+                }
+            }
+            let index = |g: &str| l.goals.iter().position(|d| d.1 == g);
+            let keep: Vec<usize> = l.marks.iter().filter(|m| same_manager(&m.name, &who) && m.done > 0).filter_map(|m| index(&m.goal)).collect();
+            // the aim: the other managers' tens on average (so no one can earn far more than
+            // another), else what ten come to by chance
+            let mut sums: Vec<(String, i32, usize)> = Vec::new();
+            for m in l.marks.iter().filter(|m| !same_manager(&m.name, &who)) {
+                let p = l.goals.iter().find(|g| g.1 == m.goal).map_or(0, |g| g.2);
+                match sums.iter_mut().find(|s| same_manager(&s.0, &m.name)) {
+                    Some(s) => (s.1, s.2) = (s.1 + p, s.2 + 1),
+                    None => sums.push((m.name.clone(), p, 1)),
+                }
+            }
+            let full: Vec<i32> = sums.iter().filter(|s| s.2 == goals::PICKS).map(|s| s.1).collect();
+            let target = if full.is_empty() { goals::usual_points(&l.goals) } else { full.iter().sum::<i32>() / full.len() as i32 };
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |t| t.as_nanos() as u64);
+            let set = goals::random_ten(&l.goals, &keep, target, seed);
+            let new: Vec<String> = set.iter().filter(|i| !keep.contains(i)).map(|&i| l.goals[i].1.clone()).collect();
+            l.marks.retain(|m| !(same_manager(&m.name, &who) && m.done == 0));
+            for m in l.marks.iter_mut().filter(|m| same_manager(&m.name, &who)) {
+                m.picked = now;
+            }
+            for goal in new {
+                l.marks.push(Mark { name: who.clone(), goal, picked: now, ..Default::default() });
+            }
+            if trace() {
+                log(&format!("challenge: ten goals at random for {who}, aim {target}, kept {}", keep.len()));
             }
             save();
         }

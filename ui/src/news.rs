@@ -366,6 +366,7 @@ pub static mut PENDING_MARK: Option<i16> = None;
 #[allow(static_mut_refs)]
 pub unsafe fn note_text(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, t: &[u8]) {
     if t == b"Next Unread" {
+        LIST_SEEN = true;
         NEXT_UNREAD = Some(((x1, y1, x2, y2), font));
         NEXT_ACTIVE = flags & 0x20 == 0;
     } else if t == b"Filter :" {
@@ -408,6 +409,7 @@ pub unsafe fn mark_button(full_frame: bool) {
     let Some(((x1, y1, x2, y2), font)) = NEXT_UNREAD.take() else {
         if full_frame {
             MARK_BUTTON = None;
+            TELETEXT_BUTTON = None;
         }
         return;
     };
@@ -438,6 +440,44 @@ pub unsafe fn mark_button(full_frame: bool) {
     }
     text_at((r.0 + r.2) / 2 + 8, y1, y2, font, if active { LIGHT } else { [0x6a, 0x70, 0x78] }, b"Mark all read", 1);
     MARK_BUTTON = active.then_some(r);
+    // Teletext, left of Mark all read: a black set with yellow letters (user 2026-11-22: "a
+    // separate button on the news screen", Ceefax style)
+    let tw = text_width(font, b"Teletext") + 36;
+    let t = (r.0 - 12 - tw, y1, r.0 - 12, y2);
+    fill(t.0, t.1, t.2, t.3, [0, 0, 0]);
+    for (a, b, c, d) in [(t.0, t.1, t.2, t.1 + 1), (t.0, t.3 - 1, t.2, t.3), (t.0, t.1, t.0 + 1, t.3), (t.2 - 1, t.1, t.2, t.3)] {
+        fill(a, b, c, d, [0x5a, 0x5a, 0x10]);
+    }
+    text_at((t.0 + t.2) / 2, y1, y2, font, [0xff, 0xff, 0x00], b"Teletext", 1);
+    TELETEXT_BUTTON = Some(t);
+}
+
+/// The news screen's Teletext button while it is drawn (`teletext::input` opens the set).
+pub static mut TELETEXT_BUTTON: Option<(i32, i32, i32, i32)> = None;
+
+/// A channel's manager's news headlines, newest first (Teletext's P302): the game's own words,
+/// `NewsItem::write_text` (0x77bc80) with full text 0, into a Text object (as history.rs's).
+pub unsafe fn headlines(channel: usize, most: usize) -> Vec<Vec<u8>> {
+    const WRITE_TEXT: usize = 0x77bc80; // thiscall(NewsItem*, Staff* manager, Text* out, full, flag), ret 0x10
+    const TEXT_NEW: usize = 0x4ae590;
+    const TEXT_FREE: usize = 0x4ae630;
+    let Some((news, manager, first)) = inbox(channel) else { return Vec::new() };
+    let items = rd::<usize>(news);
+    let mut list: Vec<(i32, usize)> = (0..100).map(|i| items + (first + i) * ITEM).filter(|&it| mapped(it, ITEM) && rd::<i32>(it + 0xd6) > 0).map(|it| (rd::<i32>(it + 0xd6), it)).collect();
+    list.sort_by_key(|l| std::cmp::Reverse(l.0));
+    let mut out = Vec::new();
+    for (_, item) in list.into_iter().take(most) {
+        let mut object = [0usize; 2];
+        let text = object.as_mut_ptr() as usize;
+        game::<extern "thiscall" fn(usize, usize) -> usize>(TEXT_NEW)(text, 0);
+        game::<extern "thiscall" fn(usize, usize, usize, i32, i32)>(WRITE_TEXT)(item, manager, text, 0, 0);
+        let said = if object[0] != 0 { std::ffi::CStr::from_ptr(object[0] as *const i8).to_bytes().to_vec() } else { Vec::new() };
+        game::<extern "thiscall" fn(usize)>(TEXT_FREE)(text);
+        if !said.is_empty() {
+            out.push(said);
+        }
+    }
+    out
 }
 
 /// A row of three or more tabs or buttons (the categories above and below the news) as one flat
@@ -859,9 +899,25 @@ unsafe fn redraw_after_menu() {
     }
 }
 
+/// The news list is on screen: its Next Unread button was drawn in the last whole frame (seen in
+/// this one so far). An earlier year's dotted date is shortened only there: the screen's title,
+/// remembered from the last one known, still said News on a profile opened from a story, and
+/// its contract's "2.6.32" lost its year (user 2026-11-22).
+static mut LIST_SEEN: bool = false;
+static mut LIST_SHOWN: bool = false;
+
+pub unsafe fn list_shown() -> bool {
+    LIST_SHOWN
+}
+
 /// The end of a frame: a full frame without menu rows closes the menus.
 pub unsafe fn frame_end(full_frame: bool) {
     if full_frame {
+        let was = LIST_SHOWN;
+        LIST_SHOWN = std::mem::take(&mut LIST_SEEN);
+        if LIST_SHOWN && !was {
+            crate::REDRAW = true; // (its dates drawn again, now knowing the screen)
+        }
         let was = MENU_OPEN;
         MENU_OPEN = std::mem::take(&mut MENU_SEEN);
         if was && !MENU_OPEN {
@@ -893,7 +949,8 @@ pub static mut CLICKS: Vec<((i32, i32, i32, i32), Click)> = Vec::new();
 
 #[derive(Clone, Copy)]
 pub enum Click {
-    Cell(i16),
+    /// the cell on the host's display when it sent the screen, and what it links
+    Cell(i16, usize),
     Club(usize),
 }
 
@@ -904,7 +961,7 @@ unsafe fn click_at(l: &Link, r: (i32, i32, i32, i32)) {
     if l.rect.2 > l.rect.0 {
         REMAP.push((r, l.target()));
     } else if l.cell >= 0 {
-        CLICKS.push((r, Click::Cell(l.cell)));
+        CLICKS.push((r, Click::Cell(l.cell, l.object)));
     } else if l.club() && l.object != 0 {
         CLICKS.push((r, Click::Club(l.object)));
     }
@@ -917,8 +974,9 @@ pub unsafe fn clicked(mx: i32, my: i32) -> Option<Click> {
     CLICKS.iter().find(|c| (c.0 .0..=c.0 .2).contains(&mx) && (c.0 .1..=c.0 .3).contains(&my)).map(|c| c.1)
 }
 
-/// Host: a client's link to open, by its cell (channel, cell), done by the news screen's input.
-pub static mut PENDING_CELL: Option<(i16, i16)> = None;
+/// Host: a client's link to open, by its cell (channel, cell, its object; 0 from an older client),
+/// done by the news screen's input.
+pub static mut PENDING_CELL: Option<(i16, i16, usize)> = None;
 
 /// A screen without a story.
 #[allow(static_mut_refs)]

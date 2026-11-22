@@ -267,7 +267,7 @@ pub unsafe fn page(club: usize) -> Option<String> {
 
 /// A staff member's age on the day (staff +0x10 the birth date, +0x18 the year when only that is
 /// known).
-unsafe fn age_of(s: usize, day: i32, year: i32) -> i32 {
+pub(crate) unsafe fn age_of(s: usize, day: i32, year: i32) -> i32 {
     let (bd, bm, by) = day_month(s + 0x10);
     let born = if by == 1900 { rd::<u16>(s + 0x18) as i32 } else { by };
     let born_day = if by == 1900 { 0 } else { [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][bm] + bd - 1 };

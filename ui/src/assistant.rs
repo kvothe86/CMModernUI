@@ -563,6 +563,9 @@ unsafe fn menu_len() -> usize {
 
 const POOL_ITEM: &str = "National pool";
 const SEASON_ITEM: &str = "Season review";
+const MEDICAL_ITEM: &str = "Medical report";
+const YOUTH_ITEM: &str = "Youth report";
+const SCOUTING_ITEM: &str = "Scouting report";
 
 /// The items after the four picks that this screen has, in order.
 unsafe fn extras() -> Vec<&'static str> {
@@ -576,6 +579,15 @@ unsafe fn extras() -> Vec<&'static str> {
     }
     if squad && on(SEASON_REVIEW) {
         out.push(SEASON_ITEM);
+    }
+    // (the physio's report, user 2026-11-22: with the team report's switch, a club only)
+    // (drawn by `finreport`, which runs with the P&L switch)
+    if squad && on(TEAM_REPORT) && on(crate::PL_REPORT) && my_team().is_some_and(|t| !national_team(t)) {
+        out.push(MEDICAL_ITEM);
+        out.push(YOUTH_ITEM);
+        if on(SCOUT_SCREEN) {
+            out.push(SCOUTING_ITEM);
+        }
     }
     out
 }
@@ -1393,6 +1405,21 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                         }
                     }
                     SEASON_ITEM => crate::season::open_now(),
+                    MEDICAL_ITEM => {
+                        if let Some(team) = my_team() {
+                            crate::finreport::open_medical(team);
+                        }
+                    }
+                    YOUTH_ITEM => {
+                        if let Some(team) = my_team() {
+                            crate::finreport::open_youth(team);
+                        }
+                    }
+                    SCOUTING_ITEM => {
+                        if let Some(team) = my_team() {
+                            crate::finreport::open_scouting(team);
+                        }
+                    }
                     _ => open_report(),
                 }
                 return Some(true);
@@ -1717,11 +1744,13 @@ unsafe fn pick_for(mode: Mode, club: usize, manager: usize, slots: Vec<Vec<u8>>,
         })
     };
     // one for each position of the eleven first (a natural one where there is one), then the
-    // best of the rest (user 2026-11-17)
+    // best of the rest (user 2026-11-17). A natural fill-in is no natural pick: any real player
+    // comes before him, out of position or not (user 2026-11-22, Hertha's Behrens / Kleiner on
+    // the bench over Ogbaidze and Schuler)
     let wants = bench_wants(&starters);
     let all: Vec<&[u8]> = starters.iter().copied().filter(|l| *l != b"GK").collect();
     let natural_for = |labels: &[&[u8]], bench: &Vec<usize>| -> Option<usize> {
-        (0..pool.len()).filter(|&i| !taken(i, bench) && labels.iter().any(|l| natural(pool[i].staff, l))).max_by(|&x, &y| {
+        (0..pool.len()).filter(|&i| !taken(i, bench) && !pool[i].fill_in && labels.iter().any(|l| natural(pool[i].staff, l))).max_by(|&x, &y| {
             let s = |i: usize| labels.iter().map(|l| score(&pool[i], l)).fold(f64::MIN, f64::max);
             s(x).total_cmp(&s(y))
         })
@@ -1961,7 +1990,8 @@ pub(crate) unsafe fn fill_team(club: usize, slots: &[Vec<u8>], unavailable: &[us
         line += 1;
         let taken = |i: usize| used(i, &chosen) || eleven.contains(&pool[i].staff) || bench.contains(&pool[i].staff);
         let s = |i: usize| want.iter().map(|l| eye.score(&pool[i], l)).fold(f64::MIN, f64::max);
-        let best_of = |only_natural: bool| (0..pool.len()).filter(|&i| !taken(i) && (!only_natural || want.iter().any(|l| natural(pool[i].staff, l)))).max_by(|&x, &y| s(x).total_cmp(&s(y)));
+        // (a natural fill-in is no natural pick: real players first, user 2026-11-22)
+        let best_of = |only_natural: bool| (0..pool.len()).filter(|&i| !taken(i) && (!only_natural || (!pool[i].fill_in && want.iter().any(|l| natural(pool[i].staff, l))))).max_by(|&x, &y| s(x).total_cmp(&s(y)));
         let best = if want.len() < all.len() || want == [&b"GK"[..]] { best_of(true).or_else(|| best_of(false)) } else { best_of(false) };
         match best {
             Some(i) => {

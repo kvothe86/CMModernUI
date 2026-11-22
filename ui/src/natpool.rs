@@ -28,6 +28,10 @@ struct Man {
 }
 
 static mut OPEN: bool = false;
+/// The national pool is up (over the game's screen).
+pub(crate) fn page_open() -> bool {
+    unsafe { OPEN }
+}
 static mut TEAM: usize = 0;
 static mut MEN: Vec<Man> = Vec::new();
 static mut FILTER: usize = 0; // 0 all, 1..=4 a group

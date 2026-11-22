@@ -37,6 +37,7 @@ struct Card {
     chal: Option<Chal>,            // CM Challenge: only with the challenge on
     last: Vec<(i32, i32, u8)>,     // the last six results, oldest first: for, against, letter
     trophies: Vec<Vec<u8>>,        // the competitions won (`challenge::trophies_won`)
+    movers: Vec<(Vec<u8>, i32)>,   // the season's risers and fallers (`diary::movers`): name, change
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -53,6 +54,10 @@ static mut CARD: Option<Card> = None;
 static mut LOADED: bool = false;
 static mut DAY: i32 = -1;
 static mut OPEN: bool = false;
+/// The season card is up (over the game's screen).
+pub(crate) fn page_open() -> bool {
+    unsafe { OPEN }
+}
 /// A card worked out on a new day, opened once the game waits for the user again.
 static mut DUE: bool = false;
 /// When the card came up: a release in its first moments belongs to the click that loaded the
@@ -138,6 +143,9 @@ impl Card {
         if !self.trophies.is_empty() {
             line([b"W".as_slice()].into_iter().chain(self.trophies.iter().map(|s| s.as_slice())).collect());
         }
+        for (name, change) in &self.movers {
+            line(vec![&b"G"[..], name, change.to_string().as_bytes()]);
+        }
         o
     }
 
@@ -158,6 +166,7 @@ impl Card {
                     }
                 }
                 (b"W", _) => card.trophies = f[1..].iter().map(|t| t.to_vec()).collect(),
+                (b"G", 3) => card.movers.push((f[1].to_vec(), num(f[2]))),
                 (b"L", _) => {
                     card.last = f[1..].iter().filter_map(|r| {
                         let p: Vec<&[u8]> = r.split(|&c| c == b'-').collect();
@@ -175,7 +184,9 @@ impl Card {
 #[test]
 fn card_bytes() {
     let snap = Snap { season: 2028, club: 1808, place: 5, teams: 24, league: b"League One".to_vec(), row: [46, 24, 10, 12, 70, 50, 82], scorer: (b"Wright".to_vec(), 21), assists: (b"Wellens".to_vec(), 9), rating: (b"Ball".to_vec(), 712), manager: b"Test Manager".to_vec(), last_place: 3, shown: 2027 };
-    let mut c = Card { snap, biggest: (b"5-0".to_vec(), b"v Bury".to_vec()), signings: [b"3 / 2".to_vec(), b"1.5M".to_vec(), b"2M".to_vec(), b"+500K".to_vec()], chal: None, last: vec![(2, 1, b'W'), (0, 0, b'D')], trophies: Vec::new() };
+    let mut c = Card { snap, biggest: (b"5-0".to_vec(), b"v Bury".to_vec()), signings: [b"3 / 2".to_vec(), b"1.5M".to_vec(), b"2M".to_vec(), b"+500K".to_vec()], chal: None, last: vec![(2, 1, b'W'), (0, 0, b'D')], trophies: Vec::new(), movers: Vec::new() };
+    assert_eq!(Card::read(&c.bytes()), Some(c.clone()));
+    c.movers = vec![(b"Brobbey".to_vec(), 5), (b"de Jong".to_vec(), -3)];
     assert_eq!(Card::read(&c.bytes()), Some(c.clone()));
     c.trophies = vec![b"Dutch Premier Division".to_vec(), b"KNVB Beker".to_vec()];
     assert_eq!(Card::read(&c.bytes()), Some(c.clone()));
@@ -290,7 +301,8 @@ unsafe fn card(staff: usize, snap: &Snap) -> Card {
     last.reverse();
     let club = rd::<usize>(CLUB_TABLE) + snap.club.max(0) as usize * CLUB_SIZE;
     let trophies = if readable(club, 0x40) { challenge::trophies_won(club, snap.season) } else { Vec::new() };
-    Card { snap: snap.clone(), biggest, signings, chal, last, trophies }
+    let movers = if readable(club, 0x40) { diary::movers(club, snap.season) } else { Vec::new() };
+    Card { snap: snap.clone(), biggest, signings, chal, last, trophies, movers }
 }
 
 /// The card of the latest snapshot of a channel's manager's club for a network client; `season`
@@ -602,6 +614,23 @@ unsafe fn draw() {
         pill(px, by, px + line * 3, by + line, form::colour(r.2));
         // (1680: f3, f1 was tiny in these pills; user 2026-11-13 polish)
         text_at(px + line * 3 / 2, by, by + line, if small_screen() { f1 } else { f3 }, white, format!("{}-{}", r.0, r.1).as_bytes(), 1);
+    }
+    // RISERS / FALLERS beside the last six, in the bottom row's free right half (user 2026-11-22:
+    // the key attributes' change over the season, `diary::movers`; HONOURS keeps its rows)
+    if !card.movers.is_empty() {
+        text_at(sx, by - line - 4, by - 4, f2, GOLD, b"RISERS / FALLERS", 0);
+        let mut x = sx;
+        let fs = if small_screen() { f1 } else { f2 };
+        for (name, change) in &card.movers {
+            let short = name.split(|&c| c == b' ').next_back().unwrap_or(name).to_vec();
+            let said = [short, format!(" {change:+}").into_bytes()].concat();
+            let w = text_width(fs, &said);
+            if x + w > x2 - m {
+                break;
+            }
+            text_at(x, by, by + line, fs, if *change > 0 { [0x5a, 0xc8, 0x8c] } else { [0xe8, 0x6a, 0x5a] }, &said, 0);
+            x += w + 18;
+        }
     }
     // the card as a picture to share (friends' league): taken now, before the buttons and the
     // note, the card's own area only

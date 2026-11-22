@@ -108,6 +108,10 @@ unsafe fn poll_pending() -> bool {
 
 static mut ACTIVE: bool = false;
 static mut OPEN: bool = false;
+/// The coach's screen is up (over the game's).
+pub(crate) fn page_open() -> bool {
+    unsafe { OPEN }
+}
 static mut TAB: usize = 0;
 static mut HOVER: Option<usize> = None;
 static mut BUTTON: Option<Rect> = None;

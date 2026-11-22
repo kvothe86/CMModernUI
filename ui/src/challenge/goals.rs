@@ -220,6 +220,83 @@ pub(super) fn followed(goal: &str) -> bool {
     holds(goal, &Career::default(), 0, 0, "").is_some()
 }
 
+/// A small random number source (xorshift), seeded by the host's clock.
+struct Dice(u64);
+
+impl Dice {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % n.max(1) as u64) as usize
+    }
+}
+
+/// One random set of ten (indices into `goals`: category, text, points), the `keep` ones in it:
+/// every category at least once, none more than twice (user 2026-11-22).
+fn draw_ten(goals: &[(String, String, i32)], keep: &[usize], dice: &mut Dice) -> Vec<usize> {
+    let mut cats: Vec<&str> = Vec::new();
+    for g in goals {
+        if !cats.contains(&g.0.as_str()) {
+            cats.push(&g.0);
+        }
+    }
+    let count = |set: &[usize], c: &str| set.iter().filter(|&&i| goals[i].0 == c).count();
+    let free = |set: &[usize], c: &str| (0..goals.len()).filter(|&i| goals[i].0 == c && !set.contains(&i)).collect::<Vec<usize>>();
+    let mut set: Vec<usize> = keep.to_vec();
+    // the categories not in it yet first, in a random order (should there be more than places)
+    let mut missing: Vec<&str> = cats.iter().copied().filter(|c| count(&set, c) == 0).collect();
+    while set.len() < PICKS && !missing.is_empty() {
+        let c = missing.remove(dice.below(missing.len()));
+        let f = free(&set, c);
+        if !f.is_empty() {
+            set.push(f[dice.below(f.len())]);
+        }
+    }
+    // then a second of three of them, each category at most twice
+    while set.len() < PICKS {
+        let open: Vec<&str> = cats.iter().copied().filter(|c| count(&set, c) < 2 && !free(&set, c).is_empty()).collect();
+        if open.is_empty() {
+            break;
+        }
+        let f = free(&set, open[dice.below(open.len())]);
+        set.push(f[dice.below(f.len())]);
+    }
+    set
+}
+
+fn points_of(goals: &[(String, String, i32)], set: &[usize]) -> i32 {
+    set.iter().map(|&i| goals[i].2).sum()
+}
+
+/// What a random set of ten comes to on average: the aim while no other manager has his ten.
+pub(super) fn usual_points(goals: &[(String, String, i32)]) -> i32 {
+    let mut dice = Dice(0x9e37_79b9_7f4a_7c15);
+    let n = 2000;
+    ((0..n).map(|_| points_of(goals, &draw_ten(goals, &[], &mut dice)) as i64).sum::<i64>() / n) as i32
+}
+
+/// Ten goals for a manager at random (the host's button, user 2026-11-22): the rules of
+/// `draw_ten`, and points close to `target` (the other managers' sets), so no one gets ten cheap
+/// goals or ten dear ones: among many draws one within 5% of it at random, else the nearest.
+pub(super) fn random_ten(goals: &[(String, String, i32)], keep: &[usize], target: i32, seed: u64) -> Vec<usize> {
+    let mut dice = Dice(seed | 1);
+    let room = (target * 5 / 100).max(10);
+    let mut near: Vec<Vec<usize>> = Vec::new();
+    let mut best: Option<(i32, Vec<usize>)> = None;
+    for _ in 0..4000 {
+        let set = draw_ten(goals, keep, &mut dice);
+        let off = (points_of(goals, &set) - target).abs();
+        if off <= room {
+            near.push(set.clone());
+        }
+        if best.as_ref().is_none_or(|b| off < b.0) {
+            best = Some((off, set));
+        }
+    }
+    if near.is_empty() { best.map_or_else(Vec::new, |b| b.1) } else { near.swap_remove(dice.below(near.len())) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +457,48 @@ mod tests {
         assert_eq!(at(&c, TIGHT, ""), Some(2035)); // (2034 not played out)
         assert_eq!(at(&c, CLASHES[1].0, ""), Some(2036));
         assert_eq!(at(&c, CLASHES[0].0, ""), None);
+    }
+
+    /// The `Q` lines of the built-in rules: category, text, points.
+    fn rule_goals() -> Vec<(String, String, i32)> {
+        String::from_utf8_lossy(super::super::RULES)
+            .lines()
+            .filter_map(|l| {
+                let f: Vec<&str> = l.split('\t').collect();
+                (f.len() >= 4 && f[0] == "Q").then(|| (f[1].to_string(), f[2].to_string(), f[3].trim().parse().unwrap_or(0)))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ten_at_random_by_the_rules() {
+        let goals = rule_goals();
+        let cats: std::collections::HashSet<&str> = goals.iter().map(|g| g.0.as_str()).collect();
+        assert_eq!(cats.len(), 7);
+        let aim = usual_points(&goals);
+        assert!((300..800).contains(&aim), "{aim}");
+        let mut totals = Vec::new();
+        for seed in 1..40u64 {
+            let set = random_ten(&goals, &[], aim, seed * 7919);
+            assert_eq!(set.len(), PICKS);
+            let mut sorted = set.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(sorted.len(), PICKS, "a goal twice");
+            for c in &cats {
+                let n = set.iter().filter(|&&i| goals[i].0 == *c).count();
+                assert!((1..=2).contains(&n), "{c}: {n}");
+            }
+            let total = points_of(&goals, &set);
+            assert!((total - aim).abs() <= (aim * 5 / 100).max(10), "{total} for {aim}");
+            totals.push(set);
+        }
+        // not the same ten every time
+        totals.sort();
+        totals.dedup();
+        assert!(totals.len() > 30);
+        // a goal reached stays in the new ten
+        let kept = goals.iter().position(|g| g.2 == 150).unwrap();
+        assert!(random_ten(&goals, &[kept], aim, 5).contains(&kept));
     }
 }

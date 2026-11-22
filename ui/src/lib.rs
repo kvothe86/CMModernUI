@@ -45,6 +45,8 @@ mod form;
 mod card;
 mod season;
 mod finreport;
+mod diary;
+mod teletext;
 mod natpool;
 mod lineups;
 mod export;
@@ -988,15 +990,29 @@ extern "C" fn news_input(widget: i32) -> i32 {
             return -4;
         }
         // a client's story link (its cell on this display): opened as the game opens a link
-        if let Some((_, cell)) = news::PENDING_CELL.take_if(|p| p.0 == serving) {
+        if let Some((_, cell, object)) = news::PENDING_CELL.take_if(|p| p.0 == serving) {
             // (only a cell of this display's item list that holds a link: else the original input)
             let display = rd::<usize>(CHANNEL_DISPLAY + 0x300 * serving.max(0) as usize);
-            let valid = mapped(display + 0x12e9a0, 2) && cell >= 0 && {
-                let count = rd::<i16>(display + 0x12e9a0).clamp(0, 1200);
-                let item = display + 0xba95e + cell as usize * 0x18c;
-                cell < count && mapped(item, 0x18c) && (0x7d0..=0x7e7).contains(&rd::<i16>(item + 8))
+            let count = if mapped(display + 0x12e9a0, 2) { rd::<i16>(display + 0x12e9a0).clamp(0, 1200) } else { 0 };
+            let item = |c: i16| display + 0xba95e + c as usize * 0x18c;
+            let link = |c: i16| c >= 0 && c < count && mapped(item(c), 0x18c) && (0x7d0..=0x7e7).contains(&rd::<i16>(item(c) + 8));
+            // (the cell is the one the screen had when it was sent: since then the list can be
+            // built again, and a player's name opened the menu bar's World Competition Qualifying,
+            // user 2026-11-22. So the cell only while it still links the client's object, else the
+            // story's own item for it now: no text of its own, as `news::screen_block` sends them.
+            // An older client sends no object: its cell as before)
+            let story_item = |c: i16| link(c) && rd::<usize>(item(c) + 0x48) == object && rd::<u8>(item(c) + 0x80) == 0;
+            let cell = if object == 0 {
+                Some(cell).filter(|&c| link(c))
+            } else if link(cell) && rd::<usize>(item(cell) + 0x48) == object {
+                Some(cell)
+            } else {
+                (0..count).find(|&c| story_item(c))
             };
-            if valid {
+            if trace() && cell.is_none() {
+                log(&format!("news: channel {serving}: no link item for object {object:#x} any more"));
+            }
+            if let Some(cell) = cell {
                 if trace() {
                     log(&format!("news: channel {serving} opens link cell {cell}"));
                 }
@@ -1638,7 +1654,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             }
             // (an item of an earlier year is dated "31.12.28", no weekday or time: only on the news
             // screen, where Players Out's "1.7.28" never is; user's shot 2026-11-07)
-            if on(NEWS) && (is_news_date(t) || (dotted_date(t) && comp::screen_ends_with(b" News"))) {
+            if on(NEWS) && (is_news_date(t) || (dotted_date(t) && news::list_shown())) {
                 let small = smaller(font, 2); // (also on a first draw, before any stats table)
                 NEWS_DATE = Some((x1, y1, x2, y2, t.to_vec(), small));
                 fill(x1, y1, x2 + 1, y2, AREA);
@@ -2088,7 +2104,11 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
             // a font from Game Settings): the largest font that fits
             let (sw, sh) = screen();
             // the menu bar's buttons: an icon over the label, no box
-            if on(MENU_FIXES) && on(THEME_ON) && x1 <= sx(12).max(16) && x2 <= bar_end(sw) && y1 > sh * 15 / 100 && y2 - y1 > sh * 5 / 100 && !t.is_empty() && !t.iter().any(|c| c.is_ascii_digit()) {
+            // (not the date "12.7.26 PM" nor "1/3 Players Waiting": a word of digits with a dot or a
+            // slash. Any digit was too much: a manager named "test2" lost his button, drawn in the
+            // game's pink, user 2026-11-22)
+            let dated = t.split(|&c| c == b' ' || c == b'\n').any(|w| w.iter().any(u8::is_ascii_digit) && w.iter().any(|&c| c == b'.' || c == b'/'));
+            if on(MENU_FIXES) && on(THEME_ON) && x1 <= sx(12).max(16) && x2 <= bar_end(sw) && y1 > sh * 15 / 100 && y2 - y1 > sh * 5 / 100 && !t.is_empty() && !dated {
                 // (flags bit 0x20: a button the game has disabled here, "Add Manager" on the start
                 // screen: dim)
                 let colour = if flags & 0x20 != 0 { rgb([0x5a, 0x60, 0x68]) as u32 } else { colour };
@@ -3130,6 +3150,11 @@ pub(crate) fn BUTTON_DOWN_NOW() -> bool {
 extern "thiscall" fn poll_input(display: usize) -> i16 {
     unsafe {
         OWN_DISPLAY = display;
+        // (the month-end balances for the P&L report's chart and the players' attributes for the
+        // profile's Growth: the host's or a single player's)
+        if !remote::CLIENT && (on(PL_REPORT) || on(PROFILE)) {
+            diary::tick();
+        }
         static GUARDED: std::sync::Once = std::sync::Once::new();
         GUARDED.call_once(|| {
             squad_buffer_guard();
@@ -3161,6 +3186,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // the season review card (over everything while it is open, on 1 July)
         if on(SEASON_REVIEW) {
             if let Some(redraw) = season::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
+        // Teletext (the news screen's button, then the set over everything but the menu bar)
+        if on(NEWS) {
+            if let Some(redraw) = teletext::input(mx, my, released) {
                 if redraw {
                     game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
                 }
@@ -3225,8 +3260,11 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             return -1;
         }
         if released && RADAR_BUTTON.is_some_and(over) {
-            PROFILE_RADAR = !PROFILE_RADAR;
-            set_setting("profile_radar", if PROFILE_RADAR { "1" } else { "0" });
+            #[allow(static_mut_refs)]
+            if let Some(k) = RADAR_PILLS.iter().position(|p| (p.0..=p.1).contains(&mx)) {
+                PROFILE_VIEW = k as u8;
+            }
+            set_setting("profile_radar", &PROFILE_VIEW.to_string());
             game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
             return -1;
         }
@@ -3254,7 +3292,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         news::menu_check();
         if let (true, true, true, Some(click)) = (released, remote::CLIENT, !news::MENU_OPEN, news::clicked(mx, my)) {
             remote::send_now(&match click {
-                news::Click::Cell(cell) => key(b'X', &[cell as u16 as u32]),
+                news::Click::Cell(cell, object) => key(b'X', &[cell as u16 as u32, object as u32]),
                 news::Click::Club(club) => key(b'K', &[club as u32]),
             });
             let net = *((SCREEN_MANAGER + 0x3840) as *const usize);
@@ -3713,7 +3751,15 @@ fn note_grid_label(x1: i32, y2: i32, font: u32, height: i32) {
 /// The profiled person's staff record: screen parameter 0.
 unsafe fn profiled_staff() -> Option<usize> {
     let staff = screen_param(0);
-    readable(staff, 0x6e).then_some(staff)
+    // (`readable`, not `valid_staff`: on a network client that reads the client's own staff table,
+    // at other addresses than the host's, and every client profile lost its panels, 2c32fd)
+    if readable(staff, 0x6e) {
+        return Some(staff);
+    }
+    // the profile opened from Latest Scores (a scorer) may have its person in another parameter:
+    // the game's plain profile showed there (user 2026-11-22; not traced): the first with a
+    // player record
+    (1..8).map(|k| screen_param(k)).find(|&s| readable(s, 0x6e) && readable(rd::<usize>(s + 0x61), 27))
 }
 
 /// The profiled person's player record: staff +0x61 (null for non-players).
@@ -4005,21 +4051,75 @@ unsafe fn positions(player: usize, x: i32, y: i32, w: i32, h: i32, font: u32, ro
         ("Side /20", if SPOTS[best].0 == GK { "-".to_string() } else { rating(SPOTS[best].1).to_string() }, light),
     ];
     let (label_w, value_w) = (w * 24 / 100, w * 19 / 100);
-    // the switch Positions | Radar at the header's right (user, 2026-11-07); kept in cmui.ini
+    // the switch Positions | Radar | Growth at the header's right (user, 2026-11-07; Growth
+    // 2026-11-22); kept in cmui.ini (profile_radar 0 / 1 / 2)
     let small = smaller(font, 1);
-    let tw = text_width(small, b"Positions") + 16;
-    let (s2, s1) = (x + label_w + value_w - 6, x + label_w + value_w - 6 - 2 * tw - 4);
-    for (k, label) in [&b"Positions"[..], b"Radar"].into_iter().enumerate() {
-        let (b1, b2) = (s1 + k as i32 * (tw + 4), s1 + k as i32 * (tw + 4) + tw);
-        let on_now = (k == 1) == PROFILE_RADAR;
+    let s2 = x + label_w + value_w - 6;
+    let width = |labels: &[&[u8]]| labels.iter().map(|l| text_width(small, l) + 14).sum::<i32>() + 4 * (labels.len() as i32 - 1);
+    let mut labels: [&[u8]; 3] = [b"Positions", b"Radar", b"Growth"];
+    if s2 - width(&labels) < x + text_width(font, b"  POSITIONS") + 6 {
+        labels[0] = b"Pos";
+    }
+    let s1 = s2 - width(&labels);
+    let mut b1 = s1;
+    for (k, label) in labels.into_iter().enumerate() {
+        let b2 = b1 + text_width(small, label) + 14;
+        let on_now = k as u8 == PROFILE_VIEW;
         pill(b1, y + 3, b2, y + row - 3, if on_now { GOLD } else { [0x2b, 0x30, 0x38] });
         text_at((b1 + b2) / 2, y, y + row, small, if on_now { [0x2b, 0x21, 0x05] } else { LIGHT }, label, 1);
+        RADAR_PILLS[k] = (b1, b2);
+        b1 = b2 + 4;
     }
     RADAR_BUTTON = Some((s1, y + 3, s2, y + row - 3));
     let staff = profiled_staff().unwrap_or(0);
     let (px1, py1) = (x + label_w + value_w + 8, y + 4);
     let py2 = (y + h).min(py1 + ((x + w - 8 - px1) * 64 / 100));
-    if PROFILE_RADAR && valid_staff(staff) {
+    // the key attributes month by month (`diary`): four lines, each with its change
+    if PROFILE_VIEW == 2 && readable(staff, 0x6e) {
+        let (line_name, _, keys) = diary::KEY_ATTRIBUTES[diary::key_line(player)];
+        let months = if remote::CLIENT {
+            ask_host(&key(b'(', &[staff as u32])).map_or_else(Vec::new, |t| diary::parse_growth(&latin1(&t)))
+        } else {
+            diary::growth(rd::<i32>(staff))
+        };
+        const COLOURS: [[u8; 3]; 4] = [GOLD, [0x5a, 0xc8, 0x8c], [0x5a, 0x9c, 0xe8], [0xe8, 0x7a, 0x5a]];
+        let now = attributes(staff);
+        for (i, &a) in keys.iter().enumerate() {
+            let ry = y + (i as i32 + 1) * row;
+            let first = months.first().map_or(now[a], |m| m.2[a]) as i32;
+            let change = now[a] as i32 - first;
+            let value = if months.len() >= 2 { format!("{} ({change:+})", now[a]) } else { now[a].to_string() };
+            draw(x, ry, x + label_w, ry + row, 0x1, font, grey, text(format!("  {}", ATTRIBUTE_NAMES[a])).as_ptr(), -1);
+            draw(x + label_w, ry, x + label_w + value_w + 40, ry + row, 0x1, font, rgb(COLOURS[i]) as u32, text(value).as_ptr(), -1);
+        }
+        let (gx1, gy1, gx2, gy2) = (px1, py1, x + w - 8, (y + h).max(py2) - 4);
+        fill(gx1, gy1, gx2, gy2, [0x16, 0x1a, 0x20]);
+        text_at(gx1 + 6, gy1, gy1 + row, small, GREY, line_name.as_bytes(), 0);
+        if months.len() < 2 {
+            text_at((gx1 + gx2) / 2, gy1, gy2, small, GREY, b"Recorded month by month from now on", 1);
+            return;
+        }
+        let (cx1, cy1, cx2, cy2) = (gx1 + 8, gy1 + row, gx2 - 8, gy2 - row);
+        let at = |k: usize, v: u8| (cx1 + (cx2 - cx1) * k as i32 / (months.len() as i32 - 1), cy2 - (cy2 - cy1) * (v.clamp(1, 20) as i32 - 1) / 19);
+        for v in [5u8, 10, 15, 20] {
+            let gy = at(0, v).1;
+            fill(cx1, gy, cx2, gy + 1, [0x2b, 0x30, 0x38]);
+        }
+        let line = game::<extern "C" fn(i32, i32, i32, i32, u32, u32)>(DRAW_LINE);
+        for (i, &a) in keys.iter().enumerate() {
+            for k in 1..months.len() {
+                let (p, q) = (at(k - 1, months[k - 1].2[a]), at(k, months[k].2[a]));
+                line(p.0, p.1, q.0, q.1, 2, rgb(COLOURS[i]) as u32);
+            }
+        }
+        let label = |m: &(i32, i32, [u8; 31])| format!("{} {}", MONTHS[(m.1 as usize).clamp(1, 12) - 1], m.0 % 100);
+        text_at(cx1, cy2, gy2, small, GREY, label(&months[0]).as_bytes(), 0);
+        text_at(cx2, cy2, gy2, small, GREY, label(&months[months.len() - 1]).as_bytes(), 2);
+        return;
+    }
+    // (`readable`: `valid_staff` reads a network client's own staff table and failed there, so a
+    // client's radar never drew, user 2026-11-22)
+    if PROFILE_VIEW == 1 && readable(staff, 0x6e) {
         // the groups' averages: the strongest, the weakest and the mean beside the radar
         let vals: Vec<i32> = attributes(staff).iter().map(|&v| v as i32).collect();
         let group = |g: &[usize]| g.iter().map(|&i| vals[i].clamp(0, 20) as f32).sum::<f32>() / g.len() as f32;
@@ -4046,12 +4146,17 @@ unsafe fn positions(player: usize, x: i32, y: i32, w: i32, h: i32, font: u32, ro
         draw(x, ry, x + label_w, ry + row, 0x1, font, grey, text(format!("  {label}")).as_ptr(), -1);
         draw(x + label_w, ry, x + label_w + value_w, ry + row, 0x1, font, colour, text(value).as_ptr(), -1);
     }
-    fit_pitch(player, px1, py1, x + w - 8, py2);
+    // (a pitch's own shape, 100 by 64: where the panel is too low for the width, narrower and at
+    // the right; it stretched flat on a short panel, user 2026-11-22)
+    let px2 = x + w - 8;
+    let px1 = px1.max(px2 - (py2 - py1) * 100 / 64);
+    fit_pitch(player, px1, py1, px2, py2);
 }
 
-/// The profile's radar: Positions or Radar in the positions panel, and the switch's box.
-static mut PROFILE_RADAR: bool = false;
+/// The positions panel's view: 0 Positions, 1 Radar, 2 Growth; the switch's box and its pills.
+static mut PROFILE_VIEW: u8 = 0;
 static mut RADAR_BUTTON: Option<(i32, i32, i32, i32)> = None;
+static mut RADAR_PILLS: [(i32, i32); 3] = [(0, 0); 3];
 
 /// One player's radar in a box: the Compare screen's eight groups (`RADAR`), rings at 10, 15 and
 /// 20, the group's name and value at each corner.
@@ -4268,8 +4373,14 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         if !std::mem::take(&mut STATS_SEEN) {
             STATS_COLS.clear();
         }
-        HIDE_BUTTON = None; // set again below when the ability block is drawn
-        RADAR_BUTTON = None; // (and the positions panel's switch)
+        // set again below when the ability block is drawn (and the positions panel's switch); only
+        // on a whole frame: a part of the screen drawn again without the grid left the buttons on
+        // screen with no click area, and a network client gets such parts all the time (the
+        // Radar switch did nothing there, user 2026-11-22)
+        if FULL_FRAME {
+            HIDE_BUTTON = None;
+            RADAR_BUTTON = None;
+        }
         let darkened = std::mem::take(&mut DARKENED);
         let strip = STRIP.take();
         // (kept for the next time: only a change of view draws the list twice. Another screen's
@@ -4401,6 +4512,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         }
         if on(PL_REPORT) {
             finreport::flip(full_frame);
+        }
+        if on(NEWS) {
+            teletext::flip();
         }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
@@ -7265,7 +7379,7 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'L' => Some(news::link_list(channel as usize)),
         // a client's story link clicked: opened by the click that follows (news_input)
         b'X' => {
-            news::PENDING_CELL = Some((channel, arg(0) as u16 as i16));
+            news::PENDING_CELL = Some((channel, arg(0) as u16 as i16, arg(1)));
             Some(Vec::new())
         }
         // a client's story link found by its words: its name and crest key
@@ -7299,6 +7413,15 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         // a player's injuries, bans and moves; what the staff say on a compare pair; the scout's
         // report on a club (a number, the club)
         b'I' => valid_staff(staff).then(|| history::rows(staff)),
+        // a client's P&L report: the club's figures as text (`finreport::remote`), its months (`diary`)
+        b'$' => finreport::remote(arg(0)),
+        b'%' => diary::remote(arg(0)),
+        b'&' => finreport::plan_remote(arg(0)),
+        b'(' => diary::growth_remote(staff),
+        b')' => finreport::medical_remote(arg(0)),
+        b'+' => finreport::youth_remote(arg(0)),
+        b'-' => finreport::scouting_remote(arg(0)),
+        b'*' => Some(teletext::page_text(channel.max(0) as usize, arg(0) as u16, arg(1))),
         b'D' => {
             let player = |s: usize| valid_staff(s) && mapped(rd::<usize>(s + 0x61), 70);
             (player(staff) && player(arg(1))).then(|| assistant::staff_views(channel, staff, arg(1)))
@@ -7905,7 +8028,7 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             // mov eax, [0xaebe0c]
             PANEL_ORIG = hook_entry(DRAW_PANEL, &[0xa1, 0x0c, 0xbe, 0xae, 0x00], panel as usize);
             HIDE_CA_PA = setting("hide_ca_pa").as_deref() == Some("1");
-            PROFILE_RADAR = setting("profile_radar").as_deref() == Some("1");
+            PROFILE_VIEW = setting("profile_radar").and_then(|v| v.trim().parse::<u8>().ok()).unwrap_or(0).min(2);
             SHOW_DETAILS = setting("profile_details").as_deref() == Some("1");
             if setting("background_opacity").is_none() {
                 set_setting("background_opacity", "30");
