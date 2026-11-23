@@ -30,6 +30,7 @@ pub struct Result_ {
     pub home: bool,
     pub day: i32, // year * 366 + day of the year
     pub friendly: bool, // a friendly (not a league or cup match): the season card's biggest win leaves it out
+    pub comp: i32,      // the competition's id (fixture +0): league or cup
 }
 
 const COMPS: usize = 0xae23d0; // the competition table (as challenge/mod.rs reads it): 0x6b a row, +4 the name
@@ -119,6 +120,7 @@ pub unsafe fn played(club: i32, (start_day, start_year): (i32, i32), (day, year)
                 home,
                 day: rd::<i16>(f + 0x28) as i32 * 366 + rd::<i16>(f + 0x2a) as i32,
                 friendly: is_friendly(rd::<i32>(f)),
+                comp: rd::<i32>(f),
             });
             if out.len() >= max {
                 break;

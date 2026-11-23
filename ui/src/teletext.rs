@@ -113,46 +113,7 @@ fn cut(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
-// ---- the press (user 2026-11-22, "in ceefax stijl"): atmosphere only, nothing in the game changes ----
-
-/// The press conference's three answers so far, by channel (0 calm, 1 defiant, 2 evasive).
-static mut CONFERENCE: Vec<(usize, Vec<u8>)> = Vec::new();
-
-const TONES: [&str; 3] = ["Calm", "Defiant", "Evasive"];
-
-/// A question's three answers in the manager's words.
-fn answers(q: usize) -> [&'static str; 3] {
-    match q {
-        0 => ["We take it game by game.", "Pressure? We thrive on it.", "I won't talk about that."],
-        1 => ["We'll see where we are in May.", "Of course we can. Write it down.", "Ask me after the next match."],
-        _ => ["Every player gets his chance.", "I pick the team, not the fans.", "No comment."],
-    }
-}
-
-/// The headline three answers make (a tabloid's, capitals).
-pub fn headline(surname: &str, said: &[u8]) -> String {
-    let s = surname.to_uppercase();
-    let count = |t: u8| said.iter().filter(|&&a| a == t).count();
-    match (count(0), count(1), count(2)) {
-        (_, d, _) if d >= 2 && said.get(2) == Some(&1) => format!("{s} HITS BACK AT FANS"),
-        (_, d, _) if d >= 2 => format!("{s}: WE FEAR NOBODY"),
-        (c, _, _) if c >= 2 => format!("COOL {s} KEEPS FEET ON GROUND"),
-        (_, _, e) if e >= 2 => format!("{s} DODGES THE QUESTIONS"),
-        _ => format!("MIXED SIGNALS FROM {s}"),
-    }
-}
-
-fn ordinal(n: usize) -> String {
-    let suffix = match (n % 10, n % 100) {
-        (1, 11) | (2, 12) | (3, 13) => "th",
-        (1, _) => "st",
-        (2, _) => "nd",
-        (3, _) => "rd",
-        _ => "th",
-    };
-    format!("{n}{suffix}")
-}
-
+// ---- the front page (user 2026-11-22, "in ceefax stijl"): nothing in the game changes ----
 /// A channel's manager: his staff record, his name, his club.
 unsafe fn manager_of(channel: usize) -> (usize, String, usize) {
     let staff = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel);
@@ -169,80 +130,6 @@ unsafe fn last_results(club: usize, most: usize) -> Vec<form::Result_> {
     let (day, year) = (rd::<i16>(0xae2c90) as i32, rd::<i16>(0xae2c92) as i32);
     let start = if day >= 60 { (day - 60, year) } else { (day + 305, year - 1) };
     form::played(index, start, (day, year), most + 4).into_iter().filter(|r| !r.friendly).take(most).collect()
-}
-
-/// The press conference: the question for the next answer, or the headline when all three are in.
-unsafe fn conference(channel: usize, number: u16, rows: &mut Vec<Vec<u8>>) {
-    let (_, name, club) = manager_of(channel);
-    let surname = name.split_whitespace().last().unwrap_or("").to_string();
-    #[allow(static_mut_refs)]
-    let said = match CONFERENCE.iter_mut().find(|c| c.0 == channel) {
-        Some(c) => &mut c.1,
-        None => {
-            CONFERENCE.push((channel, Vec::new()));
-            &mut CONFERENCE.last_mut().unwrap().1
-        }
-    };
-    match number {
-        331..=333 if said.len() < 3 => {
-            said.push((number - 331) as u8);
-            if said.len() == 3 {
-                diary::press_add(&name, &headline(&surname, said));
-            }
-        }
-        339 => said.clear(),
-        _ => {}
-    }
-    rows.push(title(MAGENTA, "PRESS CONFERENCE"));
-    rows.push(Vec::new());
-    if said.len() == 3 {
-        rows.push(row(&[(WHITE, " Tomorrow's papers:")]));
-        rows.push(Vec::new());
-        let mut big = vec![YELLOW, DOUBLE];
-        big.extend(to_latin1(&format!(" {}", cut(&headline(&surname, said), 37))));
-        rows.push(big);
-        rows.push(Vec::new());
-        for (q, &a) in said.iter().enumerate() {
-            rows.push(row(&[(CYAN, &format!(" \"{}\"", cut(answers(q)[a as usize], 36)))]));
-        }
-        rows.push(Vec::new());
-        rows.push(row(&[(GREEN, &format!("{:<32}", " The press room")), (WHITE, "305")]));
-        rows.push(row(&[(GREEN, &format!("{:<32}", " A new press conference")), (WHITE, "339")]));
-        return;
-    }
-    // the questions: his form, his place, his best player
-    let form: String = last_results(club, 5).iter().rev().map(|r| r.letter() as char).collect();
-    let table = challenge::league_table(club).map_or(Vec::new(), |t| t.1);
-    let place = table.iter().position(|t| t.0 == club).map_or(0, |p| p + 1);
-    let star = scout::best_three(club).first().map_or("your captain".to_string(), |&s| latin1(&staff_name(s)).into_owned());
-    let aim = if place == 0 { "What is the aim this season".to_string() } else if place <= 3 { "Can you win the league".to_string() } else if place + 3 > table.len() { "Will you stay up".to_string() } else { "Is Europe a realistic target".to_string() };
-    let q = said.len();
-    let question = match q {
-        0 => format!("Your last results: {}. Is the pressure getting to you?", if form.is_empty() { "none yet".to_string() } else { form }),
-        1 if place > 0 => format!("You are {} of {}. {aim}?", ordinal(place), table.len()),
-        1 => format!("{aim}?"),
-        _ => format!("The fans want to see more of {star}. Will he play?"),
-    };
-    rows.push(row(&[(WHITE, &format!(" Question {} of 3", q + 1))]));
-    rows.push(Vec::new());
-    let mut line = String::new();
-    for w in question.split_whitespace() {
-        if line.len() + w.len() + 1 > 37 {
-            rows.push(row(&[(YELLOW, &format!(" {line}"))]));
-            line.clear();
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(w);
-    }
-    rows.push(row(&[(YELLOW, &format!(" {line}"))]));
-    rows.push(Vec::new());
-    for (k, a) in answers(q).iter().enumerate() {
-        rows.push(row(&[(WHITE, &format!(" {}", 331 + k)), (CYAN, &format!("{:<8}", TONES[k])), (WHITE, &cut(a, 27))]));
-    }
-    rows.push(Vec::new());
-    rows.push(row(&[(GREEN, " Click your answer")]));
 }
 
 /// The front page: the tabloid's headline on the manager's last match, then the other managers'.
@@ -288,28 +175,6 @@ unsafe fn front_page(channel: usize, rows: &mut Vec<Vec<u8>>) {
             rows.push(row(&[(WHITE, &format!(" {}", cut(&line_of(other, r), 38)))]));
         }
     }
-    // the latest from the press room
-    if let Some(p) = diary::press().first() {
-        rows.push(Vec::new());
-        rows.push(row(&[(MAGENTA, " PRESS ROOM")]));
-        rows.push(row(&[(WHITE, &format!(" {}", cut(&p.3, 38)))]));
-    }
-}
-
-/// The press room: the managers' latest headlines.
-unsafe fn press_room(rows: &mut Vec<Vec<u8>>) {
-    rows.push(title(MAGENTA, "PRESS ROOM"));
-    rows.push(Vec::new());
-    let all = diary::press();
-    if all.is_empty() {
-        rows.push(row(&[(WHITE, " Nobody has faced the press yet.")]));
-    }
-    for p in all.iter().take(8) {
-        rows.push(row(&[(CYAN, &format!(" {} - {}", cut(&p.0, 22), finreport::date_text(p.2, p.1).split(' ').take(2).collect::<Vec<_>>().join(" ")))]));
-        rows.push(row(&[(YELLOW, &format!(" {}", cut(&p.3, 38)))]));
-    }
-    rows.push(Vec::new());
-    rows.push(row(&[(GREEN, &format!("{:<32}", " Face the press yourself")), (WHITE, "330")]));
 }
 
 /// Host: a page for a channel's manager: its subpages on the first line, then the rows.
@@ -319,8 +184,6 @@ pub unsafe fn page_text(channel: usize, number: u16, sub: usize) -> Vec<u8> {
     let mut subs = 1;
     match number {
         301 => front_page(channel, &mut rows),
-        305 => press_room(&mut rows),
-        330..=333 | 339 => conference(channel, number, &mut rows),
         302 => {
             rows.push(title(RED, "FOOTBALL NEWS"));
             rows.push(Vec::new());
@@ -415,8 +278,6 @@ pub unsafe fn page_text(channel: usize, number: u16, sub: usize) -> Vec<u8> {
             }
             rows.push(row(&[(YELLOW, &format!("{:<32}", " Front page")), (WHITE, "301")]));
             rows.push(row(&[(YELLOW, &format!("{:<32}", " Latest news")), (WHITE, "302")]));
-            rows.push(row(&[(YELLOW, &format!("{:<32}", " Press room")), (WHITE, "305")]));
-            rows.push(row(&[(YELLOW, &format!("{:<32}", " Press conference")), (WHITE, "330")]));
             rows.push(Vec::new());
             for (k, (_, name, _)) in leagues.iter().enumerate() {
                 rows.push(row(&[(CYAN, &format!(" {}", cut(name, 36)))]));
@@ -587,7 +448,9 @@ pub unsafe fn flip() {
 pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     let inside = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
     if !OPEN {
-        if released && news::TELETEXT_BUTTON.is_some_and(inside) && !news::MENU_OPEN {
+        // (not under one of our pages: the news screen's button area outlives it there, user
+        // 2026-11-23: the Rad's Spin on CM Challenge opened Teletext)
+        if released && news::TELETEXT_BUTTON.is_some_and(inside) && !news::MENU_OPEN && !crate::finreport::covered() {
             *(LEFT_CLICK as *mut u32) = 0;
             open();
             return Some(true);
@@ -630,15 +493,5 @@ mod tests {
         assert_eq!((t.len(), t[0], t[1], t[2], t[3]), (40, CYAN, NEW_BG, BLUE, DOUBLE));
         let t = title(RED, "NEWS");
         assert_eq!((t[0], t[1], t[2], t[3]), (RED, NEW_BG, WHITE, DOUBLE));
-    }
-
-    #[test]
-    fn the_papers_write_it_up() {
-        assert_eq!(headline("Smith", &[1, 1, 0]), "SMITH: WE FEAR NOBODY");
-        assert_eq!(headline("Smith", &[0, 1, 1]), "SMITH HITS BACK AT FANS");
-        assert_eq!(headline("Smith", &[0, 0, 2]), "COOL SMITH KEEPS FEET ON GROUND");
-        assert_eq!(headline("Smith", &[2, 2, 0]), "SMITH DODGES THE QUESTIONS");
-        assert_eq!(headline("Smith", &[0, 1, 2]), "MIXED SIGNALS FROM SMITH");
-        assert_eq!((ordinal(1), ordinal(2), ordinal(3), ordinal(11), ordinal(12), ordinal(22)), ("1st".into(), "2nd".into(), "3rd".into(), "11th".into(), "12th".into(), "22nd".into()));
     }
 }

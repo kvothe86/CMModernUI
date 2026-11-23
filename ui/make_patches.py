@@ -58,6 +58,7 @@ FEATURES = [
     ('saved_lineups', 'Saved Line-ups', "Needs Assistant Pick. Three line-up slots and Fill subs on the squad screen: save your eleven and bench, load them back with the assistant standing in for whoever cannot play, and let him fill only the empty bench places."),
     ('flat_buttons', 'Flat Buttons', 'Needs Modern Buttons. The buttons flat with soft corners and small gaps, no bevel; the tabs one dark bar with the open tab in gold; the clickable cells of a list (positions, dates) without a box, their text light blue.'),
     ('pl_report', 'Profit and Loss Report',"A P&L report button on a club's Finances & Info tab: a full profit and loss account on a page signed by the made-up firm Accountants & Co, with notes written from how the club is doing. Needs Crests and Profile."),
+    ('stadium', 'Stadium Builder',"A Stadium button beside P&L report: the ground drawn, and works the manager orders himself (seats, standing places, a roof, under-soil heating) at the game's own prices, paid at once and built in weeks. Changes the game. Needs P&L Report."),
 ]
 
 

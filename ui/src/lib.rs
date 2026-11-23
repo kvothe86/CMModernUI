@@ -47,6 +47,8 @@ mod season;
 mod finreport;
 mod diary;
 mod teletext;
+mod stadium;
+mod cheesecorner;
 mod natpool;
 mod lineups;
 mod export;
@@ -376,8 +378,13 @@ extern "C" fn panel(x1: i32, y1: i32, x2: i32, y2: i32, mut flags: u32, mut colo
         if flags == 0x2 {
             LAST_DARK = (x1, y1, x2, y2);
             #[allow(static_mut_refs)]
-            if STORY.as_ref().is_some_and(|s| y1 >= s.0 .3 - 2) {
+            // (not a long story's scrollbar track, a narrow dark panel too: the body became it and
+            // the text one word wide at the right edge, Cheesecorner's September report, night 11)
+            if STORY.as_ref().is_some_and(|s| y1 >= s.0 .3 - 2) && x2 - x1 > sw / 4 {
                 STORY_BODY = Some((x1, y1, x2, y2));
+            } else if STORY.as_ref().is_some_and(|s| y1 >= s.0 .3 - 2) && x2 - x1 < sw / 20 {
+                // (the track itself: the text stops short of it)
+                STORY_SCROLL = Some(x1);
             }
         }
         if theme {
@@ -942,6 +949,12 @@ unsafe fn story_header(rect: (i32, i32, i32, i32), head: &[u8], date: &[u8], fon
     let panel = PANEL;
     fill(x1, y1, x2, y2, panel);
     let mut tx = x1 + 16;
+    // (the monthly Pete Cheesecorner report: its writer's portrait in the crest's place)
+    if cheesecorner::is_his(head) {
+        let tile = h - 22;
+        cheesecorner::photo(tx, y1 + 10, tile);
+        tx += tile + 16;
+    }
     let key = story_crest(head, body);
     if let Some(key) = &key {
         let tile = h - 22;
@@ -963,6 +976,10 @@ unsafe fn story_header(rect: (i32, i32, i32, i32), head: &[u8], date: &[u8], fon
     // the text across the panel, a transfer's card, the chips of the club and the links
     #[allow(static_mut_refs)]
     if let Some(b) = STORY_BODY.take() {
+        let b = match STORY_SCROLL.take() {
+            Some(sx) if sx > b.0 && sx < b.2 => (b.0, b.1, sx - 8, b.3),
+            _ => b,
+        };
         news::story(head, rect, b, story_shift(rect), h * 45 / 100, font, key);
     }
 }
@@ -1036,6 +1053,8 @@ fn story_shift(header: (i32, i32, i32, i32)) -> i32 {
 
 /// The story's text panel (darkened, under the header) this frame.
 static mut STORY_BODY: Option<(i32, i32, i32, i32)> = None;
+/// The left edge of a long story's scrollbar track (night 11: the text ran up to it).
+static mut STORY_SCROLL: Option<i32> = None;
 
 /// A w x h block of the back buffer, row by row (one lock); 16-bit screens, all inside it.
 unsafe fn region(x: i32, y: i32, w: i32, h: i32) -> Option<Vec<[u8; 3]>> {
@@ -1258,7 +1277,8 @@ unsafe fn keep_picture() {
 unsafe fn let_picture_through(left: i32, top: i32, right: i32, bottom: i32) {
     // (the CM Challenge pages keep a plain dark background: their small text over a picture was
     // hard to read, user 2026-11-16)
-    if BEHIND.0.is_empty() || (on(CHALLENGE) && challenge::page_open()) {
+    // (the stadium page too: its dark tiles came out as the picture, night 11)
+    if BEHIND.0.is_empty() || (on(CHALLENGE) && challenge::page_open()) || stadium::page_open() {
         return;
     }
     let area = rgb(AREA);
@@ -2157,7 +2177,12 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
                 log(&format!("text {x1},{y1}-{x2},{y2} flags {flags:#x} font {font:#x} colour {colour:#06x} width {width} {:?} attr {}", latin1(s), LAST_TEXT.1));
             }
         }
-        note_title(x1, y1, x2, y2);
+        // (a text inside the known bar is not the bar: Offer Contract's centred name box is over
+        // half the screen wide, and the crest went into the name, user 2026-11-23)
+        let t = TITLE;
+        if !(t.2 > t.0 && x1 > t.0 && y1 >= t.1 && y2 <= t.3) {
+            note_title(x1, y1, x2, y2);
+        }
         let t = TITLE;
         // the title text itself, not the rows of a dropdown list that opens over the bar
         let big = y2 - y1 >= (t.3 - t.1) * 4 / 10 && x2 - x1 >= (t.2 - t.0) / 5;
@@ -2973,14 +2998,14 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 40] = [
+const FEATURES: [&str; 41] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
     "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
-    "saved_lineups", "flat_buttons", "pl_report",
+    "saved_lineups", "flat_buttons", "pl_report", "stadium",
 ];
 /// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
 /// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
@@ -3008,6 +3033,7 @@ const NATIONAL_POOL: usize = 36; // a national team's every player of the countr
 const SAVED_LINEUPS: usize = 37; // line-ups 1 / 2 / 3 saved and loaded, Fill subs (`lineups.rs`)
 const FLAT_BUTTONS: usize = 38; // the buttons flat and rounded, the tabs a gold bar, list cells without a box (user 2026-11-09, styles B + D; needs modern_buttons)
 const PL_REPORT: usize = 39; // a signed profit and loss report on the Finances & Info tab (`finreport.rs`, the wording in accountants_notes.tsv)
+const STADIUM: usize = 40; // the stadium builder: the manager orders works on his ground at the game's prices (`stadium.rs`; needs pl_report, its button sits beside P&L)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -3194,6 +3220,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             }
         }
         // Teletext (the news screen's button, then the set over everything but the menu bar)
+        // the stadium page (the Finances tab's Stadium button)
+        if on(STADIUM) {
+            if let Some(redraw) = stadium::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
         if on(NEWS) {
             if let Some(redraw) = teletext::input(mx, my, released) {
                 if redraw {
@@ -3275,7 +3311,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             return -1;
         }
         if let (true, Some(r)) = (released, news::MARK_BUTTON) {
-            if over(r) {
+            if over(r) && !finreport::covered() {
                 if remote::CLIENT {
                     // the host marks them: the request first, then a click its news input takes
                     remote::send_now(&key(b'Q', &[]));
@@ -4099,11 +4135,21 @@ unsafe fn positions(player: usize, x: i32, y: i32, w: i32, h: i32, font: u32, ro
             text_at((gx1 + gx2) / 2, gy1, gy2, small, GREY, b"Recorded month by month from now on", 1);
             return;
         }
-        let (cx1, cy1, cx2, cy2) = (gx1 + 8, gy1 + row, gx2 - 8, gy2 - row);
-        let at = |k: usize, v: u8| (cx1 + (cx2 - cx1) * k as i32 / (months.len() as i32 - 1), cy2 - (cy2 - cy1) * (v.clamp(1, 20) as i32 - 1) / 19);
-        for v in [5u8, 10, 15, 20] {
-            let gy = at(0, v).1;
+        // (zoomed to his own values, 2 either side and 6 at least: on 1..20 a +1 was a hair and
+        // the four lines lay on one another, user 2026-11-23)
+        let all: Vec<i32> = months.iter().flat_map(|m| keys.iter().map(move |&a| m.2[a] as i32)).collect();
+        let (mut lo, mut hi) = (all.iter().min().copied().unwrap_or(1) - 2, all.iter().max().copied().unwrap_or(20) + 2);
+        while hi - lo < 6 {
+            (lo, hi) = (lo - 1, hi + 1);
+        }
+        let (lo, hi) = (lo.max(1), hi.min(20));
+        let (cx1, cy1, cx2, cy2) = (gx1 + 8 + text_width(small, b"20") + 6, gy1 + row, gx2 - 8, gy2 - row);
+        let at = |k: usize, v: u8| (cx1 + (cx2 - cx1) * k as i32 / (months.len() as i32 - 1), cy2 - (cy2 - cy1) * ((v as i32).clamp(lo, hi) - lo) / (hi - lo).max(1));
+        let step = if hi - lo > 10 { 2 } else { 1 };
+        for v in (lo..=hi).filter(|v| (v - lo) % step == 0) {
+            let gy = at(0, v as u8).1;
             fill(cx1, gy, cx2, gy + 1, [0x2b, 0x30, 0x38]);
+            text_at(cx1 - 4, gy - row / 2, gy + row / 2, small, GREY, v.to_string().as_bytes(), 2);
         }
         let line = game::<extern "C" fn(i32, i32, i32, i32, u32, u32)>(DRAW_LINE);
         for (i, &a) in keys.iter().enumerate() {
@@ -4515,6 +4561,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         }
         if on(NEWS) {
             teletext::flip();
+        }
+        if on(STADIUM) {
+            stadium::flip();
         }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
@@ -7422,6 +7471,12 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'+' => finreport::youth_remote(arg(0)),
         b'-' => finreport::scouting_remote(arg(0)),
         b'*' => Some(teletext::page_text(channel.max(0) as usize, arg(0) as u16, arg(1))),
+        // a client's stadium: its page, after an order of its own manager's club only
+        b'!' => {
+            let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
+            let own = readable(manager, 0x3d) && rd::<usize>(manager + 0x39) == arg(0);
+            stadium::remote(arg(0), arg(1) as u8, arg(2) as i32, own)
+        }
         b'D' => {
             let player = |s: usize| valid_staff(s) && mapped(rd::<usize>(s + 0x61), 70);
             (player(staff) && player(arg(1))).then(|| assistant::staff_views(channel, staff, arg(1)))
@@ -8009,6 +8064,9 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             patch_calls(GUIO_DRAW, 1680, DRAW_GLYPH, glyph as usize, 5);
             #[cfg(cmui_local)]
             local::install();
+            if on(NEWS) {
+                cheesecorner::install();
+            }
             patch_call(OTHER_ITEM_CALL, 5, ADD_ITEM, other_item as usize);
             patch_call(RESULTS_CALL, 5, GET_RESULTS, get_results as usize);
             patch_call(SELECTION_ITEM_CALL, 5, ADD_ITEM, selection_item as usize);

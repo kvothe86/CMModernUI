@@ -22,6 +22,7 @@ Grep `fn <name>` in `ui\src`. The code map with every file is in [ARCHITECTURE.m
 | Assistant pick, team report | [screens.md](screens.md#assistant) , `..\assistant_pick.md` | `assistant.rs`: `pick_for`, `flip`, `input`, `run_pending`; `report_for`, `report` |
 | Player profile | [screens.md](screens.md#player-profile) | `text_box_hooked` (bars), `info_strip`, `ca_pa`, `reputation`, `player_status`, `positions`, `ability` |
 | Compare players | [screens.md](screens.md#compare) | `compare_players`, `compare_overlay`, `compare_text` |
+| Stadium page (Finances > Stadium), rendered grounds | [stadium.md](stadium.md) | `stadium.rs`: `flip`, `rendered`, `compose`, `roof_words`, `input`; `ui\stadium3d\build_stadium.py` |
 | Player search, Ability view, scout stars | [screens.md](screens.md#search-and-scout-stars) , `..\scout_stars.md` | `other_item`, `get_results`, `search_input`, `ability_text`; `scout.rs` |
 | News | [screens.md](screens.md#news) | `news.rs`: `story`, `row`, `word_links`, `mark_button`; `lib.rs`: `story_header`, `story_crest`, `news_input` |
 | Competition table / stats / history | [screens.md](screens.md#competition-screens) | `comp.rs`: `text`, `panel`, `flip`, `titles`, `add_history`, `history_winners` |
@@ -33,6 +34,7 @@ Grep `fn <name>` in `ui\src`. The code map with every file is in [ARCHITECTURE.m
 | Network (host builds client screens, packets, block) | [network.md](network.md) | `remote.rs`, `host_answer`, `screen_sent`, `news::screen_block`, `comp::history_block`, `client_loop` |
 | Test scripts, saves, driving the game, logs | [testing.md](testing.md) | `poll_input`, `script`, `find_label` |
 | Feature switches, exe patches, dsound stand-in | [switches.md](switches.md) | `FEATURES`, `load_features`, `exe_switches`; `make_patches.py`, `set_switch.py` |
+| Paper skin + skin switcher (plan, not built) | [paper_skin_plan.md](paper_skin_plan.md) | `THEME`, `apply_palette`, `rgb`, `background`, `keep_picture`; `cmui_config.ps1` |
 | Crests, logos, flags, badge packs | `..\README.md` sections "Crests", "Flags...", "Badge packs" | `logos.py`; `crest_pixels`, `draw_crest`, `club_named` |
 
 ## Finding a fix

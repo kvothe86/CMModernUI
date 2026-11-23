@@ -342,7 +342,11 @@ pub unsafe fn row(x1: i32, y1: i32, _x2: i32, y2: i32, font: u32, colour: u32, t
         dot(x + 3, cy, 4, GOLD);
     }
     x += 14;
-    icon(kind(t), x + h / 2, cy, h * 30 / 100);
+    if crate::cheesecorner::is_his(t) {
+        crate::cheesecorner::photo(x + h / 2 - h * 30 / 100, cy - h * 30 / 100, h * 60 / 100);
+    } else {
+        icon(kind(t), x + h / 2, cy, h * 30 / 100);
+    }
     x += h + 4;
     if let Some(key) = row_crest(t) {
         draw_crest(&key, x, y1 + 2, h - 4);

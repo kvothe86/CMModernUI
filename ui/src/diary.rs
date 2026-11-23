@@ -180,11 +180,15 @@ pub unsafe fn tick() {
         BALANCES = parse(&text);
         ATTRS = parse_attrs(&text);
         SCOUTED = parse_scouted(&text);
-        PRESS = parse_press(&text);
+        WORKS = parse_works(&text);
         FILE = file;
     }
     let (year, month) = (today.1 as i32, month_of(today.0 as i32, today.1 as i32));
-    let mut changed = false;
+    if on(NEWS) {
+        crate::cheesecorner::tick(year, month);
+    }
+    // the stadium works finished by today (`stadium.rs`)
+    let mut changed = on(STADIUM) && stadium::complete();
     for (staff, _) in challenge::human_list() {
         let club = rd::<usize>(staff + 0x39);
         let (Some(seed), Some((balance, this_month, last_month))) = (finreport::seed_of(club), finreport::balance_now(club)) else { continue };
@@ -223,6 +227,24 @@ pub unsafe fn tick() {
     }
 }
 
+/// The stadium works under way (`stadium.rs`): club seed, kind, amount, the day they are done
+/// (year x 366 + day of the year) (`G` lines).
+pub static mut WORKS: Vec<(usize, u8, i32, i32)> = Vec::new();
+
+fn parse_works(text: &str) -> Vec<(usize, u8, i32, i32)> {
+    text.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() == 5 && f[0] == "G").then(|| Some((f[1].parse().ok()?, f[2].parse().ok()?, f[3].parse().ok()?, f[4].parse().ok()?)))?
+        })
+        .collect()
+}
+
+/// Written now (a stadium order).
+pub unsafe fn save_now() {
+    save();
+}
+
 #[allow(static_mut_refs)]
 unsafe fn save() {
     if FILE.is_empty() {
@@ -233,7 +255,7 @@ unsafe fn save() {
         .map(|r| format!("B\t{}\t{}\t{}\t{}\n", r.0, r.1, r.2, r.3))
         .chain(ATTRS.iter().map(attrs_line))
         .chain(SCOUTED.iter().map(scouted_line))
-        .chain(PRESS.iter().map(|p| format!("P\t{}\t{}\t{}\t{}\n", p.0, p.1, p.2, p.3)))
+        .chain(WORKS.iter().map(|w| format!("G\t{}\t{}\t{}\t{}\n", w.0, w.1, w.2, w.3)))
         .collect();
     let temp = format!("{FILE}.tmp");
     if std::fs::write(&temp, text).is_ok() {
@@ -241,34 +263,6 @@ unsafe fn save() {
     }
 }
 
-/// The press conferences' headlines (Teletext's press room, user 2026-11-22): manager, year, day
-/// of the year, the headline (`P` lines). One a manager a day: a new one replaces it.
-static mut PRESS: Vec<(String, i32, i32, String)> = Vec::new();
-
-#[allow(static_mut_refs)]
-pub unsafe fn press_add(manager: &str, headline: &str) {
-    let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);
-    PRESS.retain(|p| !(p.0 == manager && p.1 == year && p.2 == day));
-    PRESS.push((manager.replace('\t', " "), year, day, headline.replace('\t', " ")));
-    save();
-}
-
-/// The headlines, newest first: (manager, year, day, headline).
-#[allow(static_mut_refs)]
-pub unsafe fn press() -> Vec<(String, i32, i32, String)> {
-    let mut out = PRESS.clone();
-    out.sort_by_key(|p| std::cmp::Reverse((p.1, p.2)));
-    out
-}
-
-fn parse_press(text: &str) -> Vec<(String, i32, i32, String)> {
-    text.lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split('\t').collect();
-            (f.len() == 5 && f[0] == "P").then(|| Some((f[1].to_string(), f[2].parse().ok()?, f[3].parse().ok()?, f[4].to_string())))?
-        })
-        .collect()
-}
 
 /// A club's month-end balances, oldest first: (year, month, balance).
 #[allow(static_mut_refs)]

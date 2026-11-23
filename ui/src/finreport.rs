@@ -572,8 +572,10 @@ impl MedRow {
         if self.condition < 80 {
             return format!("Rest him, {}% fit", self.condition);
         }
+        // (jadedness is the tiredness of many matches, not today's condition: at 100% "needs a
+        // breather" read as a mistake, user 2026-11-23)
         if self.jaded >= 65 {
-            return "Needs a breather".into();
+            return if self.condition >= 95 { "Fit today, but jaded: rotate".into() } else { "Needs a breather".into() };
         }
         if self.prone >= 15 {
             return "Fragile: manage his minutes".into();
@@ -1048,6 +1050,33 @@ unsafe fn paint_youth(yr: &Youth, dry: bool, x0: i32, top: i32, pw: i32, fb: u32
     y + 4
 }
 
+/// Pays a sum from a club's bank as the game pays its ground works (`pay_out(f, sum, 0x8c,
+/// 0x12c)`: this month's and this year's ground costs, off the balance); false without the money
+/// (the stadium builder, user 2026-11-23).
+pub unsafe fn pay_ground(club: usize, sum: i64) -> bool {
+    let Some(club) = club_ptr(club) else { return false };
+    let table = rd::<usize>(FINANCE_TABLE);
+    let record = if table == 0 { 0 } else { game::<extern "thiscall" fn(usize, usize) -> usize>(FINANCE_FOR_CLUB)(table, club) };
+    if !readable(record, RECORD) || sum < 0 || sum > i32::MAX as i64 {
+        return false;
+    }
+    let balance = (record as *const i64).read_unaligned();
+    if balance < sum {
+        return false;
+    }
+    for at in [0x8c, 0x12c] {
+        let p = (record + at) as *mut i32;
+        p.write_unaligned(p.read_unaligned().wrapping_add(sum as i32));
+    }
+    (record as *mut i64).write_unaligned(balance - sum);
+    true
+}
+
+/// How the game shows money now (its currency and rate).
+pub unsafe fn money_now() -> Money {
+    game_money()
+}
+
 /// A club's index in the club table (the report's seed, the diary's key).
 pub unsafe fn seed_of(club: usize) -> Option<usize> {
     let club = club_ptr(club)?;
@@ -1138,8 +1167,8 @@ unsafe fn button_rect() -> Option<(i32, i32, i32, i32, u32)> {
 
 /// One of cmui's own pages is over the screen: the Finances tab is still the game's under it, and
 /// the button stood on CM Challenge's page (user 2026-11-22).
-fn covered() -> bool {
-    challenge::page_open() || coach::page_open() || season::page_open() || natpool::page_open() || teletext::page_open()
+pub(crate) fn covered() -> bool {
+    challenge::page_open() || coach::page_open() || season::page_open() || natpool::page_open() || teletext::page_open() || stadium::page_open()
 }
 
 /// The flip pass: the button while the money views show, the report while it is open.
@@ -1169,12 +1198,24 @@ pub unsafe fn flip(full_frame: bool) {
     }
     let Some(b) = button_rect() else { return };
     let (blue, hover) = ([0x2c, 0x46, 0x6a], [0x3a, 0x5a, 0x86]);
-    for (b, lit, label) in [(b, BTN_HOVER, "P&L report"), (plan_rect(b), PLAN_HOVER, "Contracts")] {
+    let mut buttons = vec![(b, BTN_HOVER, "P&L report"), (plan_rect(b), PLAN_HOVER, "Contracts")];
+    if on(STADIUM) {
+        buttons.push((stadium_rect(b), STADIUM_HOVER, "Stadium"));
+    }
+    for (b, lit, label) in buttons {
         fill(b.0, b.1, b.2, b.3, if lit { hover } else { blue });
         fill(b.0, b.1, b.2, b.1 + 1, [0x4a, 0x6a, 0x96]);
         put(b.0, b.1, b.2, b.3, 0xc, b.4, WHITE, label);
     }
 }
+
+/// The Stadium button (switch `stadium`), right of Contracts.
+unsafe fn stadium_rect(b: (i32, i32, i32, i32, u32)) -> (i32, i32, i32, i32, u32) {
+    let p = plan_rect(b);
+    let w = text_width(b.4, b"Stadium") + 56;
+    (p.2 + 10, b.1, p.2 + 10 + w, b.3, b.4)
+}
+static mut STADIUM_HOVER: bool = false;
 
 /// The Contracts button, right of the P&L report's.
 unsafe fn plan_rect(b: (i32, i32, i32, i32, u32)) -> (i32, i32, i32, i32, u32) {
@@ -1184,6 +1225,8 @@ unsafe fn plan_rect(b: (i32, i32, i32, i32, u32)) -> (i32, i32, i32, i32, u32) {
 
 /// Which page is open: the P&L report (false) or the planner; the planner's figures.
 static mut PAGE: u8 = PAGE_PL;
+/// The balance chart's height in lines of text (the page's fit picks it, `draw`).
+static mut CHART_ROWS: i32 = 5;
 const PAGE_PL: u8 = 0;
 const PAGE_PLAN: u8 = 1;
 const PAGE_MEDICAL: u8 = 2;
@@ -1204,7 +1247,17 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         let b = button_rect()?;
         let p = plan_rect(b);
         let (over, over_plan) = (inside((b.0, b.1, b.2, b.3)), inside((p.0, p.1, p.2, p.3)));
-        let changed = (std::mem::replace(&mut BTN_HOVER, over) != over) | (std::mem::replace(&mut PLAN_HOVER, over_plan) != over_plan);
+        let st = stadium_rect(b);
+        let over_stadium = on(STADIUM) && inside((st.0, st.1, st.2, st.3));
+        let changed = (std::mem::replace(&mut BTN_HOVER, over) != over) | (std::mem::replace(&mut PLAN_HOVER, over_plan) != over_plan) | (std::mem::replace(&mut STADIUM_HOVER, over_stadium) != over_stadium);
+        // the ground, its own page (`stadium.rs`), of the club the screen shows
+        if released && over_stadium {
+            *(LEFT_CLICK as *mut u32) = 0;
+            if let Some(club) = [screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().find_map(|p| club_ptr(p)) {
+                stadium::open(club);
+            }
+            return Some(true);
+        }
         if released && (over || over_plan) {
             *(LEFT_CLICK as *mut u32) = 0;
             PAGE = if over_plan { PAGE_PLAN } else { PAGE_PL };
@@ -1356,8 +1409,17 @@ unsafe fn draw() {
     let x0 = (sw - pw) / 2;
     let bottom = top + ph;
     // (title, table, text, fine print): the table in the small body font so the columns clear the labels
-    let tiers = [(f5, f2, f2, f1), (f3, f2, f1, f1)];
-    let tier = *tiers.iter().find(|t| paint(&r, true, x0, top, pw, t.0, t.1, t.2, t.3) <= bottom - 8).unwrap_or(&tiers[1]);
+    // (the balance chart made the report a few lines longer than the smallest tier: its signature
+    // and fine print hung under the paper, user 2026-11-23. A smaller tier, then a lower chart)
+    let tiers = [(f5, f2, f2, f1, 5), (f3, f2, f1, f1, 5), (f3, f1, f1, f1, 4), (f2, f1, f1, f1, 3)];
+    let tier = *tiers
+        .iter()
+        .find(|t| {
+            CHART_ROWS = t.4;
+            paint(&r, true, x0, top, pw, t.0, t.1, t.2, t.3) <= bottom - 8
+        })
+        .unwrap_or(&tiers[3]);
+    CHART_ROWS = tier.4;
     if staff_page.is_some() {
         rounded(x0, top, x0 + pw, bottom, AREA, 6);
     } else {
@@ -1616,7 +1678,7 @@ unsafe fn paint(r: &Report, dry: bool, x0: i32, top: i32, pw: i32, fb: u32, fm: 
             text(rt, y, fs, MUTED, to_latin1(&format!("Forecast {end}: {}", r.money.full(*value))).as_slice(), 2);
         }
         y += tall(fs) + 4;
-        let ch = tall(fs) * 5;
+        let ch = tall(fs) * CHART_ROWS;
         let vals: Vec<i64> = r.history.iter().map(|h| h.2).collect();
         let fc = r.forecast.as_ref().map(|f| f.1);
         let (lo, hi) = vals.iter().copied().chain(fc).chain([0]).fold((i64::MAX, i64::MIN), |a, v| (a.0.min(v), a.1.max(v)));
@@ -1818,7 +1880,8 @@ mod tests {
         // against normal: jadedness 50 is nearly everyone's, an average body (proneness 8) is Normal
         assert_eq!((row(50, 8, 100, 0).risk_word(), row(50, 3, 100, 0).risk_word(), row(50, 13, 100, 0).risk_word(), row(70, 14, 100, 0).risk_word(), row(70, 14, 100, 5).risk_word()), ("Normal", "Low", "High", "Very high", "-"));
         assert!(!row(50, 8, 100, 0).to_watch() && row(66, 8, 100, 0).to_watch() && row(50, 8, 82, 0).to_watch());
-        assert_eq!((row(50, 8, 75, 0).advice(), row(66, 8, 100, 0).advice(), row(50, 16, 100, 0).advice(), row(50, 8, 100, 0).advice()), ("Rest him, 75% fit".to_string(), "Needs a breather".to_string(), "Fragile: manage his minutes".to_string(), "Fit".to_string()));
+        assert_eq!((row(50, 8, 75, 0).advice(), row(66, 8, 100, 0).advice(), row(50, 16, 100, 0).advice(), row(50, 8, 100, 0).advice()), ("Rest him, 75% fit".to_string(), "Fit today, but jaded: rotate".to_string(), "Fragile: manage his minutes".to_string(), "Fit".to_string()));
+        assert_eq!(row(66, 8, 90, 0).advice(), "Needs a breather");
         assert_eq!(row(30, 3, 100, 12).advice(), "Out 12 days, training in 3");
         // a skill shown 1..20 from the stored value: never 125
         assert!((1..=20).contains(&shown_skill(125, 150)) && (1..=20).contains(&shown_skill(-40, 20)));
