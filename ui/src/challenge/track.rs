@@ -222,8 +222,13 @@ pub(super) fn xi_marks(xi: &[XiMan], own: &str) -> [bool; XI_CHALLENGES.len()] {
 
 /// A starting player's facts (as `read_squad` reads them); None for an empty or unreadable place.
 unsafe fn xi_man(s: usize, label: &[u8]) -> Option<XiMan> {
+    // (the person first: an empty place in the selection is 0, and 0 + 0x61 crashed the game on
+    // holiday, 2026-11-23)
+    if !valid_staff(s) {
+        return None;
+    }
     let player = rd::<usize>(s + 0x61);
-    if !valid_staff(s) || !readable(player, 70) {
+    if !readable(player, 70) {
         return None;
     }
     let (day, year) = (rd::<i16>(TODAY) as i32, rd::<i16>(TODAY + 2) as i32);

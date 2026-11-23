@@ -13,6 +13,7 @@ extern "system" {
     fn SuspendThread(thread: usize) -> u32;
     fn ResumeThread(thread: usize) -> u32;
     fn GetThreadContext(thread: usize, context: *mut [u32; 180]) -> i32;
+    fn AddVectoredExceptionHandler(first: u32, handler: unsafe extern "system" fn(*const *const u32) -> i32) -> usize;
 }
 
 #[link(name = "user32")]
@@ -7981,6 +7982,34 @@ unsafe fn log_game_thread(thread: usize, cmui: usize) {
     ));
 }
 
+static mut CMUI_BASE: usize = 0;
+static mut FAULTS_LOGGED: u32 = 0;
+
+/// An access violation inside cmui: the faulting code, the address read and the code addresses
+/// on the stack go to cmui.log before the game dies (2026-11-23: a crash in `rd` on holiday left
+/// no trace). The game's own faults pass untouched.
+/// ponytail: a stack scan as log_game_thread's, old return addresses show too.
+unsafe extern "system" fn on_fault(info: *const *const u32) -> i32 {
+    let (rec, ctx) = (*info, *info.add(1));
+    let at = *rec.add(3) as usize;
+    let base = CMUI_BASE;
+    if *rec == 0xc000_0005 && (base..base + 0x400000).contains(&at) && FAULTS_LOGGED < 3 {
+        FAULTS_LOGGED += 1;
+        let esp = *ctx.add(49) as usize;
+        let mut region = [0usize; 7];
+        let words = if VirtualQuery(esp, &mut region, 28) != 0 { ((region[0] + region[3] - esp) / 4).min(4096) } else { 0 };
+        let code: Vec<String> = std::slice::from_raw_parts(esp as *const u32, words)
+            .iter()
+            .map(|&v| v as usize)
+            .filter(|v| (0x401000..0x980000).contains(v) || (base..base + 0x400000).contains(v))
+            .take(40)
+            .map(|v| if v < 0x980000 { format!("{v:x}") } else { format!("cmui+{:x}", v - base) })
+            .collect();
+        log(&format!("FAULT at cmui+{:x}, reading {:x}; on the stack: {}", at - base, *rec.add(6), code.join(" ")));
+    }
+    0 // EXCEPTION_CONTINUE_SEARCH: the game dies as before
+}
+
 #[no_mangle]
 extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 {
     if reason == 1 {
@@ -7989,6 +8018,10 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
         let thread = unsafe { OpenThread(0x4a, 0, GetCurrentThreadId()) };
         // a panic ends the game (panic = abort): where it happened goes to cmui.log first
         std::panic::set_hook(Box::new(|info| log(&format!("cmui panic: {info}"))));
+        unsafe {
+            CMUI_BASE = module;
+            AddVectoredExceptionHandler(1, on_fault);
+        }
         // ponytail: test switch, the game ignores WM_CLOSE and cannot be ended from outside here
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(500));

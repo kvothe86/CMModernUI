@@ -56,11 +56,18 @@ mock picture (generated, not in the repository; its left menu ignored).
 
 | Picture | Engine | What |
 |---|---|---|
-| `base_<size>` | Eevee | stands (seats white), pitch, corners, plaza, roads, car park, trees, floodlights |
+| `base_<size>` | Eevee | stands (seats white, vomitories, entrance with club-colour canopy), striped pitch, corners, a dark paved octagonal plinth with kerb and trees, lattice floodlights |
 | `id_<size>` | Workbench, flat, no smoothing | per pixel: R class (0 as drawn, 1/2 seat colour A/B, 3 club-colour trim) x80, G stand (N S W E) x80, B segment 0..15 x16 |
 | `roof_<size>` | Eevee, the rest held out | the roofs (drawn over when the ground has one; faint while one is built) |
 | `works_<size>` | Eevee, the rest held out | crane and scaffolding (while places or a roof are built) |
 | `top_<size>` | Eevee, straight down | the clean top-down view of the brief (not in the pack, not used by the page) |
+| `shop_` / `mega_<size>` + `idshop_` / `idmega_` | Eevee held out + Workbench ids | club shop / megastore beside the south stand's west end (after `ref\megastore.webp`): pillars, sign band, roof panel in club colour A (class 3), the name in colour B (class 2) |
+
+The look follows `stadium3d\ref\stadium.webp` (user 2026-11-23: cleaner, modern, darker set, lit
+pitch); the camera and frame are unchanged. `build_merch.py` (same Blender call, `-- <out>`, env
+`MERCH_ONLY`) renders the shop's item icons after `ref\merch.webp` / `ref\lock.png` into
+`stadium3d\merch\`: shirt, scarf, mug, jacket (green and white, 512x512, see-through) and lock
+(white glyph). Not used by the DLL yet.
 
 Materials: plain Principled BSDF; all but the seats, the club-colour trim and the lines get a
 noise on colour and roughness (not plastic). Light: one sun, a spot light from each floodlight.
@@ -78,5 +85,6 @@ second), by the light they were rendered in; standing segments grey by the groun
 (`standing`: the ends' middles first, then the long sides'); the land fades into the page (the
 mock's island).
 
-`preview.py <out> <size> [roof] [works] [seated]`: the same look without the game.
+`preview.py <out> <size> [roof] [works] [shop|mega] [red] [seated]`: the same look without the
+game (`red`: red and white, the reference's club).
 `rle_measure.py`: what the runs save.

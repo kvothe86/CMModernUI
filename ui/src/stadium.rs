@@ -880,6 +880,11 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
                 let acc = [0, 1, 2].map(|i| acc[i] / alpha * (1.0 - fade) + PAGE[i] as f32 * fade);
                 let c = acc.map(|v| v.clamp(0.0, 255.0) as u8);
                 px[(dy * w + dx) as usize] = rgb565(c) as u32 | ((alpha * 255.0) as u32) << 16;
+            } else {
+                // (the page's dark where the pack has nothing: the 2026-11-23 grounds stand on a
+                // plinth, see-through round it, and roof_words' scratch text at the top left
+                // showed through)
+                px[(dy * w + dx) as usize] = rgb565(PAGE) as u32 | 255 << 16;
             }
         }
     }
@@ -1808,6 +1813,52 @@ unsafe fn thumb(kind: &str, g: &Ground, r: (i32, i32, i32, i32), faint: bool) ->
     true
 }
 
+/// The shop's item pictures (stadium3d\build_merch.py `pack`, after the user's Grok merchandise):
+/// shirt, scarf, name and number, kit, lock; 96x96 pixels of (light, alpha, class: 1 the club's
+/// first colour, 2 its second, 0 grey as drawn), rows top down.
+const MERCH: &[u8; 5 * 96 * 96 * 3] = include_bytes!("merch.bin");
+
+/// Item picture `k` centred in r, in the colours `cols` (or all in `tint`: the lock), faded to
+/// `fade` (0..255).
+unsafe fn merch_icon(k: usize, r: (i32, i32, i32, i32), cols: [[u8; 3]; 2], tint: Option<[u8; 3]>, fade: u32) {
+    const N: i32 = 96;
+    let size = (r.2 - r.0).min(r.3 - r.1);
+    if size < 4 || k > 4 {
+        return;
+    }
+    let (x, y) = (r.0 + (r.2 - r.0 - size) / 2, r.1 + (r.3 - r.1 - size) / 2);
+    let px = &MERCH[k * (N * N * 3) as usize..][..(N * N * 3) as usize];
+    blend(x, y, size, size, |col, row| {
+        // (the source pixels under this one, averaged by their alpha: a 96 picture drawn at 50)
+        let (x0, x1) = (col * N / size, ((col + 1) * N + size - 1) / size);
+        let (y0, y1) = (row * N / size, ((row + 1) * N + size - 1) / size);
+        let (mut acc, mut a, mut n) = ([0u32; 3], 0u32, 0u32);
+        for sy in y0..y1.min(N) {
+            for sx in x0..x1.min(N) {
+                let p = &px[((sy * N + sx) * 3) as usize..][..3];
+                n += 1;
+                if p[1] == 0 {
+                    continue;
+                }
+                let light = p[0] as u32;
+                let c = match (tint, p[2]) {
+                    (Some(t), _) => t.map(|v| (v as u32 * light / 255).min(255)),
+                    (None, 1 | 2) => cols[p[2] as usize - 1].map(|v| ((v as u32).max(30) * light / 205).min(255)),
+                    _ => [light; 3],
+                };
+                for i in 0..3 {
+                    acc[i] += c[i] * p[1] as u32;
+                }
+                a += p[1] as u32;
+            }
+        }
+        if a == 0 {
+            return (0, 0);
+        }
+        (rgb565(acc.map(|v| (v / a) as u8)), a / n.max(1) * fade / 255)
+    });
+}
+
 /// The order card as the club shop (the user's and Grok's notes, 2026-11-23, in the page's own
 /// style): one card for the shop (its building from the pack, its level and status, the weekly
 /// boost split into the shop's and the results' part, the next upgrade), then the items with a
@@ -1926,8 +1977,15 @@ unsafe fn shop_view(g: &Ground, o: (i32, i32, i32, i32), (ty, _th, _tw, gap, pad
         let ib = (r.0 + m / 2, r.1 + m / 2, r.0 + m / 2 + rh - m, r.3 - m / 2);
         gradient(ib, [0x0c, 0x10, 0x16], [0x0a, 0x0d, 0x12], [0x22, 0x28, 0x32], 5);
         let ink = if locked { [0x6a, 0x72, 0x7c] } else { WHITE };
-        let pic = if locked { 12 } else if k == 1 { 13 } else { 10 };
-        icon(pic, (ib.0 + ib.2) / 2, (ib.1 + ib.3) / 2, (ib.3 - ib.1) * 6 / 10, if owned { GREEN } else { ink });
+        // the item in the club's colours (the away shirt the other way round); a locked one faint
+        // under a lock
+        let cols = mosaic(g.colours);
+        let inner = (ib.0 + 2, ib.1 + 2, ib.2 - 2, ib.3 - 2);
+        merch_icon(k.min(3), inner, if k == 0 { [cols[1], cols[0]] } else { cols }, None, if locked { 70 } else { 255 });
+        if locked {
+            let (cx, cy, s) = ((ib.0 + ib.2) / 2, (ib.1 + ib.3) / 2, (ib.3 - ib.1) * 55 / 100);
+            merch_icon(4, (cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), cols, Some([0xc8, 0xcc, 0xd4]), 255);
+        }
         let tx = ib.2 + m;
         // the state, a tag at the top right
         let (tag, tag_bg, tag_ink): (&[u8], [u8; 3], [u8; 3]) = if owned {
