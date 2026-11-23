@@ -21,7 +21,9 @@ import numpy as np
 from mathutils import Vector, Matrix
 
 OUT = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-W, H = 780, 1080  # portrait: the page's left column (the mock's picture)
+W, H = 1560, 1080  # twice the page's portrait column (780): the same scale, the town either side
+# for the page's FULL SCREEN (2026-11-23); the column cuts the middle as before
+COLUMN_W = 780
 # tiers per size: (rows, row depth m, row rise m)
 SIZES = {
     "s": [(12, 0.85, 0.42)],
@@ -306,6 +308,8 @@ def build(size, colls):
             add_box(bm, w(-length / 2, depth + 1.6, z), w(length / 2, depth + 1.95, z + 0.3))
             z += 3.0
         obj(f"scaffold{side}", bm, mat("Scaffold", (0.9, 0.45, 0.05), 0.5), works)
+    if size == "x":
+        corners(rows, depth, top, seat, facade, metal, base, roof_c)
     # the crane at the north-east corner
     cx, cy = PL / 2 + GAP + depth * 0.6, PW / 2 + GAP + depth + 8
     tall = top + 34
@@ -320,6 +324,37 @@ def build(size, colls):
     add_box(bm, (cx - 31.5, cy - 1.5, tall - 21.5), (cx - 28.2, cy + 1.5, tall - 20))
     obj("hook", bm, mat("Hook", (0.1, 0.1, 0.1)), works)
     return depth, top
+
+
+def corners(rows, depth, top, seat, facade, metal, base, roof_c):
+    """A world-class ground closed all round (a friend's idea, 2026-11-23): each corner filled with the same
+    rows as the stands, an L of treads between the long stand's and the end stand's rows, seats in
+    the mosaic, a back wall and a roof over the outer rows."""
+    sx0, sy0 = (PL + 8) / 2, (PW + 4) / 2  # the stands' ends
+    fx, fy = PL / 2 + GAP, PW / 2 + GAP  # the end stands' and the long stands' front rows
+    front = depth * ROOF_FRONT
+    for qx in (-1, 1):
+        for qy in (-1, 1):
+            P = lambda x, y, z: (qx * x, qy * y, z)
+            for k, (u0, u1, z, t) in enumerate(rows):
+                bm = bmesh.new()
+                floor = 0.0 if t == 0 else z - 2.5
+                # (along the long stand's row, then down the end stand's)
+                add_box(bm, P(sx0, fy + u0, floor), P(fx + u1, fy + u1, z))
+                add_box(bm, P(fx + u0, sy0, floor), P(fx + u1, fy + u0, z))
+                add_box(bm, P(sx0, fy + u1 - 0.32, z), P(fx + u1 - 0.32, fy + u1 - 0.12, z + 0.42))
+                add_box(bm, P(fx + u1 - 0.32, sy0, z), P(fx + u1 - 0.12, fy + u1 - 0.32, z + 0.42))
+                band = k * BANDS // len(rows)
+                obj(f"corner{qx}{qy}_{k}", bm, seat, base, id_colour(1 + band % 2, 0 if qy > 0 else 1, 0))
+            bm = bmesh.new()  # the back wall
+            add_box(bm, P(sx0 - 1, fy + depth, 0), P(fx + depth + 1.4, fy + depth + 1.4, top + 2.2))
+            add_box(bm, P(fx + depth, sy0 - 1, 0), P(fx + depth + 1.4, fy + depth, top + 2.2))
+            obj(f"cornerback{qx}{qy}", bm, facade, base)
+            bm = bmesh.new()  # the roof, level with the stands' at its middle
+            z = top + 5.0 + 4 * 0.35
+            add_box(bm, P(sx0 - 1, fy + front, z), P(fx + depth + 1.6, fy + depth + 1.6, z + 0.5))
+            add_box(bm, P(fx + front, sy0 - 1, z), P(fx + depth + 1.6, fy + front, z + 0.5))
+            obj(f"cornerroof{qx}{qy}", bm, metal, roof_c)
 
 
 def pitch(coll):
@@ -438,7 +473,7 @@ def surroundings(coll, ex, ey, top, reach):
         for sy in (-1, 1):
             xa, xb = sorted((sx * cxa, sx * (ex - 1.0)))
             ya, yb = sorted((sy * cya, sy * (ey - 1.0)))
-            if xb - xa > 2 and yb - ya > 2:
+            if xb - xa > 2 and yb - ya > 2 and LEVEL < 3:  # (a huge ground's corners are seated, `corners`)
                 add_box(bm, (xa, ya, 0), (xb, yb, top * 0.62 - 0.4))
                 add_box(tops, (xa, ya, top * 0.62 - 0.4), (xb, yb, top * 0.62))
     obj("buildings", bm, walls, coll)
@@ -450,11 +485,14 @@ def surroundings(coll, ex, ey, top, reach):
             # (in the corners between the stands, as the reference's: at the ground's outer corners
             # the page's crop cut the left and right ones off, a friend's "no floodlights")
             x, y = sx * (cxa + 4), sy * (cya + 4)
-            hgt = top + 26
+            hgt, z0 = top + 26, 0.0
+            if LEVEL == 3:  # (seated corners: the mast stands on the corner roof's inner edge)
+                f = (ex - 2.5 - PL / 2 - GAP) * ROOF_FRONT
+                x, y, z0, hgt = sx * (PL / 2 + GAP + f), sy * (PW / 2 + GAP + f), top + 6.9, top + 18
             legs = lambda z: [(x + dx * (1.3 - 0.8 * z / hgt), y + dy * (1.3 - 0.8 * z / hgt), z) for dx, dy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
             for k in range(4):
-                strut(pole, legs(0)[k], legs(hgt)[k], 0.32)
-            z, step = 0.0, 3.2
+                strut(pole, legs(z0)[k], legs(hgt)[k], 0.32)
+            z, step = z0, 3.2
             while z < hgt - 0.1:
                 z1 = min(z + step, hgt)
                 lo, hi = legs(z), legs(z1)
@@ -476,7 +514,7 @@ def surroundings(coll, ex, ey, top, reach):
                     bmesh.ops.create_cube(lamp, size=1.0, matrix=head @ off @ Matrix.Diagonal((0.9, 1.25, 1.05, 1.0)))
             spot_data = bpy.data.lights.new(f"flood{sx}{sy}", "SPOT")
             # (closer since they stand in the corners: weaker, a wide soft cone, no bright patches)
-            spot_data.energy = 200000
+            spot_data.energy = 200000 if LEVEL < 3 else 90000  # (on the roof: closer, it glared)
             spot_data.spot_size = math.radians(120)
             spot_data.spot_blend = 1.0
             spot_data.use_shadow = False  # (the stands' shadows from the corners cut the pitch into triangles)
@@ -510,6 +548,298 @@ def surroundings(coll, ex, ey, top, reach):
     obj("posts", posts, mat("Pole", (0.16, 0.165, 0.175), 0.5, 0.6), coll)
     for k, c in enumerate([(0.03, 0.11, 0.025), (0.045, 0.14, 0.03)]):
         obj(f"trees{k}", crowns[k], mat(f"Leaves{k}", c, 0.8), coll)
+    town(coll, box, ex, ey, reach)
+
+
+def town(coll, box, ex, ey, reach):
+    """The ground in its town again (the user's friend, 2026-11-23: the old pictures' car parks,
+    roads, grass and kiosks): grass to the picture's edges, a ring road round the plinth, the main
+    road in front, car parks east and west, kiosks on the plinth, trees, low buildings and a pub."""
+    rnd = random.Random(23)
+    g = -1.62  # (the grass' top: below the plinth and its dark path)
+    bm = bmesh.new()
+    add_box(bm, (-reach * 3, -reach * 3, g - 0.3), (reach * 3, reach * 3, g))
+    obj("grass", bm, mat("Grass2", (0.035, 0.085, 0.028), 0.95), coll)
+    # the ring road: a rounded rectangle round the plinth's path, a dashed middle line
+    x0, x1, y0, y1 = box[0] - 7, box[1] + 7, box[2] - 7, box[3] + 7
+    cy, hx, hy, rad = (y0 + y1) / 2, (x1 - x0) / 2 + 11, (y1 - y0) / 2 + 11, 26.0
+    road, dashes = bmesh.new(), bmesh.new()
+    def ring_point(t):
+        sx, sy = hx - rad, hy - rad
+        legs = [2 * sx, 2 * sy, 2 * sx, 2 * sy]
+        arc = math.pi * rad / 2
+        d = t * (sum(legs) + 4 * arc)
+        corners = [(sx, -sy, -math.pi / 2), (sx, sy, 0.0), (-sx, sy, math.pi / 2), (-sx, -sy, math.pi)]
+        starts = [(-sx, -(sy + rad), 1, 0), (sx + rad, -sy, 0, 1), (sx, sy + rad, -1, 0), (-(sx + rad), sy, 0, -1)]
+        for k in range(4):
+            px, py, dx, dy = starts[k]
+            if d <= legs[k]:
+                return px + dx * d, cy + py + dy * d
+            d -= legs[k]
+            if d <= arc:
+                ccx, ccy, a0 = corners[k]
+                return ccx + rad * math.cos(a0 + d / rad), cy + ccy + rad * math.sin(a0 + d / rad)
+            d -= arc
+        return starts[0][0], cy + starts[0][1]
+    steps = 240
+    for k in range(steps):
+        (ax, ay), (bx, by) = ring_point(k / steps), ring_point((k + 1) / steps)
+        ang, seg = math.atan2(by - ay, bx - ax), math.hypot(bx - ax, by - ay) + 0.6
+        at = Matrix.Translation(((ax + bx) / 2, (ay + by) / 2, g + 0.05)) @ Matrix.Rotation(ang, 4, "Z")
+        bmesh.ops.create_cube(road, size=1.0, matrix=at @ Matrix.Diagonal((seg, 9.0, 0.14, 1.0)))
+        if k % 3 == 0:
+            bmesh.ops.create_cube(dashes, size=1.0, matrix=Matrix.Translation((0, 0, 0.08)) @ at @ Matrix.Diagonal((seg * 1.4, 0.3, 0.02, 1.0)))
+    ring_s, ring_n, ring_w, ring_e = cy - hy, cy + hy, -hx, hx
+    main = ring_s - 26  # the main road in front, its middle
+    add_box(road, (-reach * 3, main - 6, g), (reach * 3, main + 6, g + 0.12))
+    x = -reach * 3
+    while x < reach * 3:
+        add_box(dashes, (x, main - 0.15, g + 0.12), (x + 3.0, main + 0.15, g + 0.14))
+        x += 7.0
+    for rx in (-30.0, 34.0):  # two roads in from the main road
+        add_box(road, (rx - 4.5, main, g), (rx + 4.5, ring_s + 2, g + 0.12))
+    # car parks east and west of the ring road, a lane into each
+    # (the town grows with the ground, a friend's idea 2026-11-23: an amateur ground one small car park,
+    # two kiosks, no fan zone; a huge one big car parks, every stall, a crowd)
+    lv = LEVEL
+    parks = [
+        [(ring_e + 8, ring_e + 48, cy - 22, cy + 18)],
+        [(ring_e + 8, ring_e + 64, cy - 36, cy + 30), (ring_w - 44, ring_w - 8, cy - 22, cy + 26)],
+        [(ring_e + 8, ring_e + 74, cy - 46, cy + 40), (ring_w - 60, ring_w - 8, cy - 30, cy + 36)],
+        [(ring_e + 8, ring_e + 116, cy - 60, cy + 52), (ring_w - 96, ring_w - 8, cy - 46, cy + 50)],
+    ][lv]
+    cars = [bmesh.new() for _ in range(6)]
+    bays = bmesh.new()
+    for px0, px1, py0, py1 in parks:
+        add_box(road, (px0, py0, g), (px1, py1, g + 0.12))
+        lane = (ring_e - 2, px0 + 1) if px0 > 0 else (px1 - 1, ring_w + 2)
+        add_box(road, (min(lane), cy - 5, g), (max(lane), cy + 5, g + 0.12))
+        x = px0 + 5
+        while x + 15 < px1:
+            y = py0 + 3
+            while y < py1 - 3:
+                add_box(bays, (x - 0.08, y, g + 0.12), (x + 5.2, y + 0.12, g + 0.14))
+                add_box(bays, (x + 9.8, y, g + 0.12), (x + 15, y + 0.12, g + 0.14))
+                for xx in (x + 0.4, x + 10.2):
+                    if rnd.random() < 0.72:
+                        c = cars[rnd.randrange(6)]
+                        add_box(c, (xx, y + 0.45, g + 0.12), (xx + 4.4, y + 2.25, g + 1.1))
+                        add_box(c, (xx + 1.1, y + 0.6, g + 1.1), (xx + 3.4, y + 2.1, g + 1.6))
+                y += 2.7
+            x += 21
+    obj("roads", road, mat("Asphalt", (0.028, 0.029, 0.033), 0.85), coll)
+    obj("roadlines", dashes, mat("Paint", (0.75, 0.75, 0.72), 0.7), coll)
+    obj("bays", bays, mat("Paint", (0.75, 0.75, 0.72), 0.7), coll)
+    for k, c in enumerate([(0.6, 0.6, 0.62), (0.06, 0.06, 0.07), (0.5, 0.05, 0.04), (0.05, 0.12, 0.4), (0.85, 0.85, 0.85), (0.6, 0.45, 0.08)]):
+        obj(f"cars{k}", cars[k], mat(f"Car{k}", c, 0.3, 0.4), coll)
+    # food and drink, big enough to read (the user: "food stalls etc. (properly shown)"): kiosks
+    # with striped awnings round the plinth; in front of the near stand, beside the megastore, a
+    # fan zone: food trucks, a beer tent, picnic tables under parasols, fans in the club's colours
+    body, lit, people, tables = bmesh.new(), bmesh.new(), bmesh.new(), bmesh.new()
+    stripes = [bmesh.new() for _ in range(5)]  # red, yellow, blue, green, white
+    def awning(x0, y0, x1, y1, z, a, b, along_x=True):
+        """A striped awning: stripes 0.8 m wide, colours a and b by turns."""
+        n = max(2, int(((x1 - x0) if along_x else (y1 - y0)) / 0.8))
+        for k in range(n):
+            if along_x:
+                xa = x0 + (x1 - x0) * k / n
+                add_box(stripes[a if k % 2 == 0 else b], (xa, y0, z), (xa + (x1 - x0) / n, y1, z + 0.35))
+            else:
+                ya = y0 + (y1 - y0) * k / n
+                add_box(stripes[a if k % 2 == 0 else b], (x0, ya, z), (x1, ya + (y1 - y0) / n, z + 0.35))
+    spots = [(x, ey + 4.0, True) for x in range(-56, 57, 16)] + [(-ex - 4.5, y, False) for y in (-26, -9, 9, 26)] + [(ex + 4.5, y, False) for y in (-26, -9, 9, 26)]
+    spots = [[(-8, ey + 4.0, True), (8, ey + 4.0, True)], spots[:8] + [spots[9], spots[10], spots[13], spots[14]], spots, spots][lv]
+    for k, (x, y, along_x) in enumerate(spots):
+        w, d = (4.6, 3.2) if along_x else (3.2, 4.6)
+        add_box(body, (x - w / 2, y - d / 2, 0), (x + w / 2, y + d / 2, 2.8))
+        add_box(lit, (x - w / 2 + 0.4, y - d / 2 - 0.06, 1.0), (x + w / 2 - 0.4, y - d / 2 + 0.1, 2.2)) if along_x else add_box(lit, (x - w / 2 - 0.06, y - d / 2 + 0.4, 1.0), (x - w / 2 + 0.1, y + d / 2 - 0.4, 2.2))
+        awning(x - w / 2 - 0.5, y - d / 2 - 1.0, x + w / 2 + 0.5, y + d / 2 + 0.3, 2.8, k % 4, 4, along_x)
+    # the fan zone: from the megastore's east side to near the east end, the near stand's back to
+    # the plinth's edge
+    fx0, fx1, fy0, fy1 = -PL / 2 + 21, PL / 2 + 2, -ey - 33, -ey - 6
+    trucks = [(), (fx0 + 2, fx0 + 14), (fx0 + 2, fx0 + 14, fx0 + 26, fx0 + 38), (fx0 + 2, fx0 + 14, fx0 + 26, fx0 + 38, fx0 + 50)][lv]
+    for k, x in enumerate(trucks):  # food trucks, hatches south
+        y = fy1 - 4
+        add_box(body, (x, y - 1.3, 0.4), (x + 6.5, y + 1.3, 3.2))
+        add_box(body, (x + 6.5, y - 1.3, 0.4), (x + 8.6, y + 1.3, 2.5))  # the cab
+        add_box(lit, (x + 0.8, y - 1.36, 1.5), (x + 5.7, y - 1.2, 2.7))
+        awning(x + 0.4, y - 2.6, x + 6.1, y - 1.3, 2.8, k % 4, 4)
+        add_box(tables, (x + 1, y - 1.3, 0), (x + 7.6, y + 1.3, 0.4))  # the wheels' shadow line
+    tx0 = fx1 - 18  # the beer tent: white, a pitched roof (large grounds and up)
+    if lv >= 2:
+        add_box(body, (tx0, fy0 + 8, 0), (tx0 + 14, fy0 + 18, 2.6))
+        tent = bmesh.new()
+        v = [tent.verts.new(p) for p in [(tx0 - 0.3, fy0 + 7.7, 2.6), (tx0 + 14.3, fy0 + 7.7, 2.6), (tx0 + 14.3, fy0 + 18.3, 2.6), (tx0 - 0.3, fy0 + 18.3, 2.6), (tx0 - 0.3, fy0 + 13, 4.6), (tx0 + 14.3, fy0 + 13, 4.6)]]
+        for f in ((0, 1, 5, 4), (3, 4, 5, 2), (0, 4, 3), (1, 2, 5)):
+            tent.faces.new([v[i] for i in f])
+        obj("beertent", tent, mat("Tent", (0.85, 0.85, 0.83), 0.6), coll)
+        add_box(lit, (tx0 + 2, fy0 + 7.94, 0.6), (tx0 + 12, fy0 + 8.05, 2.2))
+    # picnic tables under parasols
+    paras = [bmesh.new() for _ in range(3)]
+    for i in range([0, 3, 5, 5][lv]):
+        for j in range(2):
+            x, y = fx0 + 4 + i * 7.5, fy0 + 6 + j * 8
+            add_box(tables, (x - 1.2, y - 0.45, 0.7), (x + 1.2, y + 0.45, 0.8))
+            add_box(tables, (x - 1.2, y - 1.1, 0.4), (x + 1.2, y - 0.8, 0.5))
+            add_box(tables, (x - 1.2, y + 0.8, 0.4), (x + 1.2, y + 1.1, 0.5))
+            add_box(tables, (x - 0.06, y - 0.06, 0.8), (x + 0.06, y + 0.06, 2.4))
+            bmesh.ops.create_cone(paras[(i + j) % 3], cap_ends=True, segments=12, radius1=1.7, radius2=0.05, depth=0.7, matrix=Matrix.Translation((x, y, 2.6)))
+    for k, c in enumerate([(0.7, 0.08, 0.05), (0.9, 0.75, 0.1), (0.1, 0.3, 0.65)]):
+        obj(f"parasols{k}", paras[k], mat(f"Parasol{k}", c, 0.6), coll)
+    # fans: in the club's colours (most) or dark coats, in the fan zone and on the way in
+    fans = bmesh.new()
+    def person(bm, x, y):
+        add_box(bm, (x - 0.25, y - 0.2, 0), (x + 0.25, y + 0.2, 1.4))
+        add_box(bm, (x - 0.14, y - 0.14, 1.4), (x + 0.14, y + 0.14, 1.75))
+    for k in range([0, 90, 260, 420][lv]):
+        x, y = rnd.uniform(fx0, fx1 if lv > 1 else fx0 + 34), rnd.uniform(fy0 + 1, fy1 - 1)
+        person(fans if rnd.random() < 0.65 else people, x, y)
+    for k in range([20, 50, 90, 160][lv]):  # (on the plinth round the stands: west and north)
+        x, y = (rnd.uniform(-ex - 8, -ex - 1), rnd.uniform(-35, 35)) if k % 2 else (rnd.uniform(-60, 60), rnd.uniform(ey + 1, ey + 8))
+        person(fans if rnd.random() < 0.6 else people, x, y)
+    obj("stalls", body, mat("Stall", (0.75, 0.75, 0.73), 0.6), coll)
+    obj("hatches", lit, mat("Hatch", (1.0, 0.82, 0.55), 0.2, 0.0, 1.6), coll)
+    obj("tables", tables, mat("Wood", (0.2, 0.12, 0.06), 0.8), coll)
+    obj("people", people, mat("Coats", (0.05, 0.055, 0.07), 0.8), coll)
+    obj("fans", fans, mat("Trim", (0.85, 0.85, 0.85), 0.4), coll, id_colour(3))
+    for k, c in enumerate([(0.7, 0.06, 0.04), (0.9, 0.7, 0.05), (0.06, 0.2, 0.6), (0.06, 0.4, 0.12), (0.9, 0.9, 0.88)]):
+        obj(f"stripes{k}", stripes[k], mat(f"Stripe{k}", c, 0.6), coll)
+    # two training pitches in the fields, either side (the full screen view)
+    # (placed by the camera: left and right in the part of the picture the page's FULL SCREEN
+    # shows; at the frame's corners the page cut them off, the user 2026-11-23)
+    cam = bpy.context.scene.camera
+    def ground_at(u, v):
+        s = cam.data.ortho_scale
+        o = cam.matrix_world @ Vector(((u - 0.5) * s, (0.5 - v) * s * H / W, 0))
+        d = cam.matrix_world.to_3x3() @ Vector((0, 0, -1))
+        t = (g - o.z) / d.z
+        return o.x + d.x * t, o.y + d.y * t
+    def clear_of_parks(px, py, away):
+        # (pushed away from the ground until it is off the car parks and the ring road)
+        for _ in range(40):
+            x0, x1, y0, y1 = px - 35, px + 35, py - 22, py + 22
+            hit = any(p[0] - 6 < x1 and x0 < p[1] + 6 and p[2] - 6 < y1 and y0 < p[3] + 6 for p in parks)
+            ring = abs(px) - 35 < hx + 8 and abs(py - cy) - 22 < hy + 8
+            if not hit and not ring:
+                return (x0, x1, y0, y1)
+            px, py = px + away[0] * 4, py + away[1] * 4
+        return (x0, x1, y0, y1)
+    spots_t = [ground_at(0.16, 0.6), ground_at(0.84, 0.4)]
+    tpitches = [clear_of_parks(x, y, (math.copysign(1, x), 0)) for x, y in spots_t]
+    tpitches = [[], tpitches[1:], tpitches, tpitches][lv]
+    turf, lines = bmesh.new(), bmesh.new()
+    for x0, x1, y0, y1 in tpitches:
+        add_box(turf, (x0 - 3, y0 - 3, g), (x1 + 3, y1 + 3, g + 0.06))
+        for a, b in [((x0, y0), (x1, y0 + 0.3)), ((x0, y1 - 0.3), (x1, y1)), ((x0, y0), (x0 + 0.3, y1)), ((x1 - 0.3, y0), (x1, y1)), (((x0 + x1) / 2 - 0.15, y0), ((x0 + x1) / 2 + 0.15, y1))]:
+            add_box(lines, (*a, g + 0.06), (*b, g + 0.09))
+        for s in (x0, x1 - 0.4):  # the goals
+            add_box(lines, (s, (y0 + y1) / 2 - 3.6, g), (s + 0.4, (y0 + y1) / 2 + 3.6, g + 2.4))
+        n = 32
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        for k in range(n):
+            a0 = 2 * math.pi * k / n
+            add_box(lines, (mx + 7 * math.cos(a0) - 0.2, my + 7 * math.sin(a0) - 0.2, g + 0.06), (mx + 7 * math.cos(a0) + 0.2, my + 7 * math.sin(a0) + 0.2, g + 0.09))
+    # (the user: "the high fence and some more details"): a 5 m ball-stop fence of posts, rails
+    # and see-through green netting, a gate; four light masts; a shelter with benches, a
+    # changing hut and a path to it; mini goals, poles and a line of cones
+    posts, net, kit, hut, path, cones = (bmesh.new() for _ in range(6))
+    for x0, x1, y0, y1 in tpitches:
+        fx0, fx1, fy0, fy1, fh = x0 - 4, x1 + 4, y0 - 4, y1 + 4, 5.0
+        for (ax, ay), (bx, by) in (((fx0, fy0), (fx1, fy0)), ((fx1, fy0), (fx1, fy1)), ((fx1, fy1), (fx0, fy1)), ((fx0, fy1), (fx0, fy0))):
+            n = max(1, int(math.hypot(bx - ax, by - ay) / 4))
+            for k in range(n + 1):
+                px, py = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+                add_box(posts, (px - 0.12, py - 0.12, g), (px + 0.12, py + 0.12, g + fh))
+            for z in (1.2, fh - 0.1):
+                strut(posts, (ax, ay, g + z), (bx, by, g + z), 0.1)
+            gate = (ax == fx0 and ay == fy0)  # (a gap on the near side: the way in)
+            mx = (ax + bx) / 2
+            if gate:
+                add_box(net, (ax, ay - 0.03, g + 0.05), (mx - 2, ay + 0.03, g + fh))
+                add_box(net, (mx + 2, ay - 0.03, g + 0.05), (bx, ay + 0.03, g + fh))
+            else:
+                lo, hi = (min(ax, bx), min(ay, by)), (max(ax, bx), max(ay, by))
+                add_box(net, (lo[0] - 0.03, lo[1] - 0.03, g + 0.05), (hi[0] + 0.03, hi[1] + 0.03, g + fh))
+        for cx_, cy_ in ((fx0, fy0), (fx1, fy0), (fx1, fy1), (fx0, fy1)):  # light masts
+            add_box(posts, (cx_ - 0.25, cy_ - 0.25, g), (cx_ + 0.25, cy_ + 0.25, g + 12))
+            add_box(kit, (cx_ - 1.0, cy_ - 1.0, g + 12), (cx_ + 1.0, cy_ + 1.0, g + 13.2))
+        sy = y1 + 1.2  # the shelter on the far long side, benches under it
+        add_box(hut, ((x0 + x1) / 2 - 6, sy, g), ((x0 + x1) / 2 + 6, sy + 1.8, g + 2.4))
+        add_box(kit, ((x0 + x1) / 2 - 5.5, sy + 0.2, g + 0.4), ((x0 + x1) / 2 + 5.5, sy + 1.0, g + 0.9))
+        hx_ = x1 + 10 if x0 > 0 else x0 - 22  # the changing hut beside the pitch, a path to the gate
+        add_box(hut, (hx_, y0 + 2, g), (hx_ + 12, y0 + 12, g + 3.6))
+        add_box(kit, (hx_ - 0.4, y0 + 1.6, g + 3.6), (hx_ + 12.4, y0 + 12.4, g + 4.1))
+        add_box(path, (min(hx_ + 6, (fx0 + fx1) / 2), fy0 - 3, g), (max(hx_ + 6, (fx0 + fx1) / 2), fy0 - 1, g + 0.07))
+        add_box(path, (hx_ + 5, fy0 - 3, g), (hx_ + 7, y0 + 2, g + 0.07))
+        for gx in (x0 + 18, x1 - 18):  # mini goals across the pitch
+            add_box(lines, (gx - 0.1, (y0 + y1) / 2 - 12, g), (gx + 0.1, (y0 + y1) / 2 - 10, g + 1.2))
+            add_box(lines, (gx - 0.1, (y0 + y1) / 2 + 10, g), (gx + 0.1, (y0 + y1) / 2 + 12, g + 1.2))
+        for k in range(8):  # a line of cones and two rows of poles for the drills
+            cx_ = x0 + 8 + k * 2.5
+            bmesh.ops.create_cone(cones, cap_ends=True, segments=8, radius1=0.35, radius2=0.05, depth=0.6, matrix=Matrix.Translation((cx_, y0 + 6, g + 0.36)))
+            add_box(cones, (x1 - 8 - k * 2.5 - 0.06, y1 - 6 - 0.06, g), (x1 - 8 - k * 2.5 + 0.06, y1 - 6 + 0.06, g + 1.6))
+    tm = grass_mat()  # (mown stripes, as the main pitch)
+    obj("trainingturf", turf, tm, coll)
+    obj("traininglines", lines, mat("Lines", (0.95, 0.95, 0.95), 0.6), coll)
+    obj("fenceposts", posts, mat("FencePost", (0.12, 0.13, 0.12), 0.5, 0.5), coll)
+    netting = mat("Netting", (0.05, 0.12, 0.06), 0.8)
+    netting.node_tree.nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.4
+    obj("netting", net, netting, coll)
+    obj("trainingkit", kit, mat("Kit", (0.15, 0.16, 0.18), 0.5), coll)
+    obj("traininghut", hut, mat("Hut", (0.55, 0.52, 0.47), 0.8), coll)
+    obj("trainingpath", path, mat("Path2", (0.22, 0.2, 0.17), 0.9), coll)
+    obj("cones", cones, mat("Cone", (0.95, 0.45, 0.05), 0.6), coll)
+    # low buildings beyond the main road and north of the ring road; a pub by the east car park
+    walls = [mat(f"House{k}", c, 0.8) for k, c in enumerate([(0.22, 0.12, 0.08), (0.3, 0.28, 0.25), (0.16, 0.17, 0.19)])]
+    houses, roofs, lit = [bmesh.new() for _ in range(3)], bmesh.new(), bmesh.new()
+    rows = [(main - 22, -1), (ring_n + 22, 1)]
+    for y, s in rows:
+        x = -reach * 1.2
+        while x < reach * 1.2:
+            w, d, hgt = rnd.uniform(9, 16), rnd.uniform(8, 12), rnd.uniform(5, 11)
+            yy = y + s * d / 2
+            if not any(p[0] - 6 < x + w and x < p[1] + 6 and p[2] - 6 < yy < p[3] + 6 for p in parks + tpitches):
+                add_box(houses[rnd.randrange(3)], (x, yy - d / 2, g), (x + w, yy + d / 2, g + hgt))
+                add_box(roofs, (x - 0.4, yy - d / 2 - 0.4, g + hgt), (x + w + 0.4, yy + d / 2 + 0.4, g + hgt + 0.6))
+                for fl in range(int(hgt // 3)):
+                    if rnd.random() < 0.5:
+                        add_box(lit, (x + 1, yy - s * (d / 2 + 0.05), g + 1.2 + fl * 3), (x + w - 1, yy - s * (d / 2 - 0.1), g + 2.2 + fl * 3))
+            x += w + rnd.uniform(3, 9)
+    px0, _, py0, _ = parks[0]
+    add_box(houses[0], (px0 + 4, py0 - 20, g), (px0 + 24, py0 - 6, g + 6))  # the pub
+    add_box(roofs, (px0 + 3.5, py0 - 20.5, g + 6), (px0 + 24.5, py0 - 5.5, g + 6.8))
+    add_box(lit, (px0 + 6, py0 - 6.05, g + 1), (px0 + 22, py0 - 5.9, g + 3.5))
+    for k in range(3):
+        obj(f"houses{k}", houses[k], walls[k], coll)
+    obj("houseroofs", roofs, mat("HouseRoof", (0.07, 0.07, 0.08), 0.7), coll)
+    obj("windows", lit, mat("Windows", (1.0, 0.8, 0.5), 0.2, 0.0, 1.0), coll)
+    # trees in the grass: rows along the ring road, many more in the fields; never on a road,
+    # a car park, a building or the plinth
+    crowns, trunks = [bmesh.new() for _ in range(3)], bmesh.new()
+    def free(x, y):
+        if box[0] - 9 < x < box[1] + 9 and box[2] - 9 < y < box[3] + 9:
+            return False
+        if abs(y - main) < 10 or any(p[0] - 3 < x < p[1] + 3 and p[2] - 3 < y < p[3] + 3 for p in parks):
+            return False
+        if abs(y - (main - 22)) < 16 or abs(y - (ring_n + 22)) < 16:
+            return False
+        if abs(x) < hx + 7 and abs(y - cy) < hy + 7 and not (abs(x) < hx - 7 and abs(y - cy) < hy - 7):
+            return False  # (the ring road)
+        if any(p[0] - 8 < x < p[1] + 8 and p[2] - 8 < y < p[3] + 8 for p in tpitches):
+            return False
+        return not any(abs(x - rx) < 7 and main < y < ring_s + 3 for rx in (-30.0, 34.0))
+    placed = []
+    for k in range(2800):
+        x, y = rnd.uniform(-reach * 1.4, reach * 1.4), rnd.uniform(-reach * 1.4, reach * 1.4)
+        if not free(x, y) or any((x - a) ** 2 + (y - b) ** 2 < 20 for a, b in placed[-60:]):
+            continue
+        placed.append((x, y))
+        r, h = rnd.uniform(2.2, 3.8), rnd.uniform(2.5, 4.5)
+        add_box(trunks, (x - 0.3, y - 0.3, g), (x + 0.3, y + 0.3, g + h))
+        bmesh.ops.create_icosphere(crowns[rnd.randrange(3)], subdivisions=2, radius=r, matrix=Matrix.Translation((x, y, g + h + r * 0.8)))
+    obj("fieldtrunks", trunks, mat("Bark", (0.1, 0.07, 0.045), 0.9), coll)
+    for k, c in enumerate([(0.025, 0.08, 0.022), (0.04, 0.11, 0.03), (0.022, 0.065, 0.03)]):
+        obj(f"fieldtrees{k}", crowns[k], mat(f"FieldLeaves{k}", c, 0.85), coll)
 
 
 # ---------------------------------------------------------------- scene, camera, renders
@@ -522,6 +852,8 @@ def scene_for(size):
         c = bpy.data.collections.new(name)
         sc.collection.children.link(c)
         colls.append(c)
+    global LEVEL
+    LEVEL = "smlx".index(size)  # (the town's size, `town`)
     depth, top = build(size, colls)
     pitch(colls[0])
     ex, ey = PL / 2 + GAP + depth + 2.5, PW / 2 + GAP + depth + 2.5
@@ -544,7 +876,7 @@ def scene_for(size):
     # (ortho_scale is the picture's width: a portrait picture's would be its height, and the
     # ground came out cut at the sides, night 11)
     cam_data.sensor_fit = "HORIZONTAL"
-    cam_data.ortho_scale = max(2 * half_w, 2 * half_h * W / H) * 1.06
+    cam_data.ortho_scale = max(2 * half_w, 2 * half_h * COLUMN_W / H) * 1.06 * W / COLUMN_W
     reach = cam_data.ortho_scale
     surroundings(colls[0], ex, ey, top, reach)
     sun_data = bpy.data.lights.new("sun", "SUN")
@@ -674,7 +1006,7 @@ def club_shop(coll, ey, mega=False):
     text.location = (x0 - 0.45, ym, (band[0] + band[1]) / 2)
     text.rotation_euler = (math.radians(90), 0, math.radians(-90))
     text.data.materials.append(mat("Seat", (0.82, 0.82, 0.82), 0.45))
-    text.color = id_colour(2)
+    text.color = id_colour(1)  # (the club's text colour on its main one, the band: class 3)
     coll.objects.link(text)
     # (the band's length: the name no wider than it)
     bpy.context.view_layer.update()

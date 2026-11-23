@@ -6,7 +6,7 @@ from PIL import Image
 
 N = 96
 data = np.frombuffer(open("../src/merch.bin", "rb").read(), np.uint8).reshape(5, N, N, 3)
-clubs = {"Accrington": [(255, 255, 255), (196, 0, 0)], "Dortmund": [(0, 0, 0), (255, 255, 0)], "Greenwood": [(20, 80, 45), (255, 255, 255)]}
+clubs = {"Accrington": [(255, 255, 255), (196, 0, 0)], "Chelsea": [(255, 255, 0), (0, 0, 200)], "Dortmund": [(0, 0, 0), (255, 255, 0)]}
 
 
 def mosaic(c):
@@ -35,7 +35,8 @@ def paint(icon, cols, tint=None):
 rows = []
 for name, cols in clubs.items():
     c = mosaic(cols)
-    row = [paint(data[0], [c[1], c[0]]), paint(data[1], c), paint(data[2], c), paint(data[3], c), paint(data[4], c, (0xd0, 0xd4, 0xda))]
+    s = [c[1], c[0]]  # (home items in the main colour, the game's second; stadium.rs)
+    row = [paint(data[0], c), paint(data[1], s), paint(data[2], s), paint(data[3], s), paint(data[4], c, (0xd0, 0xd4, 0xda))]
     rows.append(row)
 sheet = Image.new("RGB", (5 * 200, len(rows) * 200), (0x0c, 0x10, 0x16))
 for r, row in enumerate(rows):

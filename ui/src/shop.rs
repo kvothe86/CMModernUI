@@ -54,6 +54,7 @@ pub unsafe fn kit(club: usize) -> (u8, u8) {
         return diary::MERCH.iter().find(|m| m.0 == seed).map_or((0, 0), |m| (m.1, m.2));
     }
     match rd::<i16>(club + 0x80) as i32 {
+        8500.. => (3, 0b1111),
         6000.. => (1, 0),
         3000.. => (0, 0b0011),
         _ => (0, 0),

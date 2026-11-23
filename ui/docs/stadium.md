@@ -63,6 +63,17 @@ mock picture (generated, not in the repository; its left menu ignored).
 | `top_<size>` | Eevee, straight down | the clean top-down view of the brief (not in the pack, not used by the page) |
 | `shop_` / `mega_<size>` + `idshop_` / `idmega_` | Eevee held out + Workbench ids | club shop / megastore beside the south stand's west end (after `ref\megastore.webp`): pillars, sign band, roof panel in club colour A (class 3), the name in colour B (class 2) |
 
+Pictures are 1560x1080 since 2026-11-23: the page's column cuts the middle 780 as before, FULL
+SCREEN (`WIDE`, a pill at the picture's top left) hides the cards and shows the whole frame. The
+town round the plinth (`town`: grass, ring road, car parks, kiosks, fan zone with food trucks,
+beer tent, parasols and fans, houses, training pitches) grows with the size (`LEVEL`: s one car
+park and two kiosks, x the biggest; a friend's idea), and size x has seated, roofed corners
+(`corners`) with the floodlights on the corner roofs. Club colours: class 3 (trim, fans, the
+shop's band) takes the game's second colour (the club's main one, Chelsea blue), the shop's name
+class 1; the item pictures likewise. Test setting `stadium_test_club=<name>` in cmui.ini: the
+Stadium button opens that club's ground (computer clubs have no Finances screen); big computer
+clubs (reputation 8,500+) have the full store.
+
 The look follows `stadium3d\ref\stadium.webp` (user 2026-11-23: cleaner, modern, darker set, lit
 pitch); the camera and frame are unchanged. `build_merch.py` (same Blender call, `-- <out>`, env
 `MERCH_ONLY`) renders the shop's item icons after `ref\merch.webp` / `ref\lock.png` into

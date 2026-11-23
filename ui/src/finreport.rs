@@ -1298,7 +1298,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         // the ground, its own page (`stadium.rs`), of the club the screen shows
         if released && over_stadium {
             *(LEFT_CLICK as *mut u32) = 0;
-            if let Some(club) = [screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().find_map(|p| club_ptr(p)) {
+            // (a test setting: `stadium_test_club=<name>` opens that club's ground instead, for
+            // pictures of a big club's; computer clubs have no Finances screen of their own)
+            let test = setting("stadium_test_club").and_then(|n| club_named(n.trim().as_bytes()));
+            if let Some(club) = test.into_iter().chain([screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().filter_map(|p| club_ptr(p))).next() {
                 stadium::open(club);
             }
             return Some(true);

@@ -453,6 +453,10 @@ static mut HOVER: Option<(i32, i32, i32, i32)> = None;
 /// for, all seated, roofed (the user's brief: a render with the stands at their room to grow);
 /// the two pills.
 static mut FULL_VIEW: bool = false;
+// the picture over the whole page, the cards hidden (the user, 2026-11-23: "a function that hides
+// / shows the right part so you can fully see the stadium and surroundings"); its pill
+static mut WIDE: bool = false;
+static mut WIDE_PILL: Option<(i32, i32, i32, i32)> = None;
 static mut VIEW_PILLS: Vec<((i32, i32, i32, i32), bool)> = Vec::new();
 
 pub fn page_open() -> bool {
@@ -787,8 +791,10 @@ fn paint(p: &[u8], cols: [[u8; 3]; 2], seated: f32) -> [u32; 3] {
         return rgb;
     }
     let lum = (rgb[0] * 3 + rgb[1] * 6 + rgb[2]) / 10;
+    // (class 3, trim, fans, the shop's band: the club's main colour, the game's second one: its
+    // first is the text on it, Chelsea yellow on blue, 2026-11-23)
     let base = if class == 3 {
-        cols[0]
+        cols[1]
     } else if standing(id >> 2 & 3, id >> 4, seated) {
         [0x70, 0x73, 0x78]
     } else {
@@ -875,8 +881,10 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
                 // dark (the mock's look)
                 let (ex, ey) = ((dx as f32 - cx) / (w as f32 * 0.6), (dy as f32 - cy) / (h as f32 * 0.44));
                 let d = (ex * ex + ey * ey).sqrt();
-                let fade = ((d - 0.82) / 0.34).clamp(0.0, 1.0);
-                let fade = fade * fade * (3.0 - 2.0 * fade);
+                // (weaker since the town is back round the ground, 2026-11-23: from further out,
+                // more gently, and never quite the page's dark)
+                let fade = ((d - 1.0) / 0.5).clamp(0.0, 1.0);
+                let fade = fade * fade * (3.0 - 2.0 * fade) * 0.8;
                 let acc = [0, 1, 2].map(|i| acc[i] / alpha * (1.0 - fade) + PAGE[i] as f32 * fade);
                 let c = acc.map(|v| v.clamp(0.0, 255.0) as u8);
                 px[(dy * w + dx) as usize] = rgb565(c) as u32 | ((alpha * 255.0) as u32) << 16;
@@ -1266,7 +1274,7 @@ pub unsafe fn flip() {
     text_at((b.0 + b.2) / 2, b.1, b.3, f3, WHITE, b"Back", 1);
     BACK = Some(b);
     // the ground, left: the rendered picture (the drawing without the pack)
-    let pic = (left, bar + 1, left + (sw - left) * 46 / 100, sh);
+    let pic = (left, bar + 1, if WIDE { sw } else { left + (sw - left) * 46 / 100 }, sh);
     // (a new stadium being built: "Fully built" is that one)
     let new_size = g.works.iter().find(|w| w.0 == NEW).map(|w| w.1);
     let most = new_size.unwrap_or(g.room.min(MOST)).max(g.capacity);
@@ -1300,8 +1308,26 @@ pub unsafe fn flip() {
                 Some(n) => format!("{} PLACES, ALL SEATED, ROOFED  -  ROOM TO GROW TO {}", sep(n), sep((n * 5 / 4).min(MOST).max(n))),
                 None => format!("{} PLACES, ALL SEATED, ROOFED", sep(most)),
             };
-            text_at(pic.2 - m * 2, pic.1 + m * 3 + ph, pic.1 + m * 3 + ph * 2, f1, GOLD, note.as_bytes(), 2);
+            // (on a dark band: the town under it made the gold hard to read)
+            let (ny0, ny1) = (pic.1 + m * 3 + ph, pic.1 + m * 3 + ph * 2);
+            let nx0 = pic.2 - m * 3 - text_width(f1, note.as_bytes());
+            blend(nx0, ny0, pic.2 - m - nx0, ny1 - ny0, |_, _| (rgb565([0x0c, 0x0f, 0x14]), 200));
+            text_at(pic.2 - m * 2, ny0, ny1, f1, GOLD, note.as_bytes(), 2);
         }
+    }
+    // FULL SCREEN / SHOW CARDS at the picture's top left
+    {
+        let ph = (sh / 30).max(18);
+        let label: &[u8] = if WIDE { b"SHOW CARDS" } else { b"FULL SCREEN" };
+        let r = (pic.0 + m * 2, pic.1 + m * 2, pic.0 + m * 2 + text_width(f1, label) + m * 3, pic.1 + m * 2 + ph);
+        gradient(r, [0x14, 0x19, 0x21], [0x10, 0x14, 0x1a], EDGE, ph / 2 - 1);
+        text_at((r.0 + r.2) / 2, r.1, r.3, f1, LIGHT, label, 1);
+        WIDE_PILL = Some(r);
+    }
+    if WIDE {
+        // (no cards: none of their buttons may take a click)
+        (BUTTONS, STEPS, CARD_PILLS) = (Vec::new(), Vec::new(), Vec::new());
+        return;
     }
     // the cards, right
     let (rx1, rx2) = (pic.2 + m * 2, sw - m * 2);
@@ -1747,6 +1773,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         FULL_VIEW = full;
         return Some(true);
     }
+    if WIDE_PILL.is_some_and(inside) {
+        (WIDE, ARMED, NAMING) = (!WIDE, None, false);
+        return Some(true);
+    }
     if BACK.is_some_and(inside) {
         (OPEN, NAMING) = (false, false);
         return Some(true);
@@ -1981,7 +2011,9 @@ unsafe fn shop_view(g: &Ground, o: (i32, i32, i32, i32), (ty, _th, _tw, gap, pad
         // under a lock
         let cols = mosaic(g.colours);
         let inner = (ib.0 + 2, ib.1 + 2, ib.2 - 2, ib.3 - 2);
-        merch_icon(k.min(3), inner, if k == 0 { [cols[1], cols[0]] } else { cols }, None, if locked { 70 } else { 255 });
+        // (the main colour is the game's second, the text colour its first: home items blue for
+        // Chelsea, the away shirt the other way round)
+        merch_icon(k.min(3), inner, if k == 0 { cols } else { [cols[1], cols[0]] }, None, if locked { 70 } else { 255 });
         if locked {
             let (cx, cy, s) = ((ib.0 + ib.2) / 2, (ib.1 + ib.3) / 2, (ib.3 - ib.1) * 55 / 100);
             merch_icon(4, (cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), cols, Some([0xc8, 0xcc, 0xd4]), 255);

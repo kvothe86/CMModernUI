@@ -10,7 +10,7 @@ from PIL import Image
 folder, size = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 seated = next((float(f) for f in flags if f.replace(".", "").isdigit()), 0.8)
-cols = np.array([[200, 30, 35], [255, 255, 255]] if "red" in flags else [[255, 255, 255], [20, 20, 20]], dtype=np.float32)
+cols = np.array([[255, 255, 255], [196, 0, 0]] if "red" in flags else [[255, 255, 255], [20, 20, 20]], dtype=np.float32)
 
 
 def paint(rgba, ids):
@@ -25,7 +25,7 @@ def paint(rgba, ids):
     lum = (rgba[:, :, 0] * 3 + rgba[:, :, 1] * 6 + rgba[:, :, 2]) / 10
     out = rgba.copy()
     for c in (1, 2, 3):
-        colour = cols[0] if c in (1, 3) else cols[1]
+        colour = cols[0] if c == 1 else cols[1]  # (stadium.rs paint: trim in the game's second colour)
         for i in range(3):
             v = np.maximum(colour[i], 30) * lum / 205
             if c != 3:
