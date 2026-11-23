@@ -3592,6 +3592,8 @@ unsafe fn script() {
             },
         },
         ("wait", _, Ok(ms)) => pause = ms as u64,
+        // (a test's money: the human club's bank balance up by n game units, a new stadium's order)
+        ("money", _, Ok(n)) => log(&format!("money: {}", human_club_ptr().is_some_and(|c| finreport::add_money(c, n as i64)))),
         ("pause", _, Ok(ms)) => SCRIPT_PAUSE = ms as u64,
         ("shot", ..) => save_back_buffer(b),
         _ => log(&format!("script: {line}? (x y, type text, key vk, wait ms, pause ms, shot file.bmp)")),
@@ -7475,7 +7477,8 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'!' => {
             let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
             let own = readable(manager, 0x3d) && rd::<usize>(manager + 0x39) == arg(0);
-            stadium::remote(arg(0), arg(1) as u8, arg(2) as i32, own)
+            // (a new stadium's name after the three numbers)
+            stadium::remote(arg(0), arg(1) as u8, arg(2) as i32, own, key.get(13..).unwrap_or(&[]))
         }
         b'D' => {
             let player = |s: usize| valid_staff(s) && mapped(rd::<usize>(s + 0x61), 70);

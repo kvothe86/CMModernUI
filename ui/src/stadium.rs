@@ -20,6 +20,25 @@ pub const STANDING: u8 = 2;
 pub const CONVERT: u8 = 3;
 pub const ROOF: u8 = 4;
 pub const HEATING: u8 = 5;
+/// A new stadium (user 2026-11-23: "a project of millions, only for very rich clubs", once the
+/// ground is at the most it can hold): the size picked from `SIZES`, a name typed in.
+pub const NEW: u8 = 6;
+const SIZES: [i32; 6] = [15_000, 25_000, 40_000, 60_000, 90_000, 125_000];
+
+/// The new stadiums a ground of `capacity` can move up to.
+pub fn sizes_above(capacity: i32) -> Vec<i32> {
+    SIZES.into_iter().filter(|&s| s > capacity + 2000).collect()
+}
+
+/// What a new stadium asks at the order: 30% (the rest in monthly instalments, `instalments`).
+pub fn deposit(cost: i64) -> i64 {
+    cost * 3 / 10
+}
+
+/// Its months of instalments after the order's: one a month of its building time.
+fn instalment_months(days: i32) -> i32 {
+    ((days as f32 / 30.44).ceil() as i32 - 1).max(1)
+}
 /// The most a ground can hold (the game's own bound for its works).
 const MOST: i32 = 125_000;
 
@@ -35,6 +54,8 @@ pub fn price(kind: u8, amount: i32) -> (i64, i32) {
         STANDING => ((n + blocks * 1000) * 50, 28 + k * 14),
         CONVERT => (n * 75 + blocks * 50_000, 21 + k * 21 / 2),
         ROOF => (7_500_000, 182),
+        // (25 million and 2,500 a place: 30,000 places 100 million; a year and 10 days a thousand)
+        NEW => (25_000_000 + n * 2500, 365 + k * 10),
         _ => (1_500_000, 56),
     }
 }
@@ -57,6 +78,7 @@ pub struct Ground {
     pub said: String,               // the answer to the last order
     pub colours: [[u8; 3]; 2],      // the club's first two kit colours: the seats
     pub last: Option<i64>,          // the balance at the last month's end (the diary): the trend arrow
+    pub next_name: String,          // a new stadium's name, typed at its order ("Fully built" shows it)
 }
 
 /// A club's first two kit colours (club +0x83: six colour records, each red / green / blue at +55);
@@ -81,7 +103,12 @@ impl Ground {
     pub fn refusal(&self, kind: u8, amount: i32) -> Option<String> {
         let (cost, _) = price(kind, amount);
         let busy = |k: u8| self.works.iter().any(|w| w.0 == k);
+        if busy(NEW) {
+            return Some(if kind == NEW { "Being built" } else { "New stadium being built" }.to_string());
+        }
         let reason = match kind {
+            NEW if self.capacity + self.pending(&[SEATS, STANDING]) < self.room.min(MOST) => Some("Room left to grow first"),
+            NEW if amount <= self.capacity => Some("Not bigger than now"),
             SEATS | STANDING if self.capacity + self.pending(&[SEATS, STANDING]) + amount > self.room.min(MOST) => Some("No room left to build"),
             CONVERT if self.capacity - self.seats - self.pending(&[CONVERT]) < amount => Some("Not enough standing places"),
             ROOF if self.roof => Some("Already covered"),
@@ -90,7 +117,8 @@ impl Ground {
             ROOF | HEATING if busy(kind) => Some("Being built"),
             _ => None,
         };
-        reason.map(String::from).or_else(|| (self.balance < cost).then(|| "Not enough money in the bank".to_string()))
+        let now = if kind == NEW { deposit(cost) } else { cost };
+        reason.map(String::from).or_else(|| (self.balance < now).then(|| "Not enough money in the bank".to_string()))
     }
     fn money(&self, v: i64) -> String {
         finreport::Money { symbol: self.symbol.clone(), rate: self.rate }.full(v)
@@ -100,9 +128,10 @@ impl Ground {
 fn encode(g: &Ground) -> String {
     let c = g.colours;
     let mut out = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\t{}\n",
         g.club, g.name, g.capacity, g.seats, g.room, g.roof as i32, g.heating as i32, g.average, g.balance, g.symbol, g.rate, g.said, c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2],
-        g.last.map_or(String::new(), |v| v.to_string())
+        g.last.map_or(String::new(), |v| v.to_string()),
+        g.next_name
     );
     for w in &g.works {
         out += &format!("{}\t{}\t{}\n", w.0, w.1, w.2);
@@ -114,7 +143,7 @@ fn decode(text: &str) -> Option<Ground> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     // (13 fields before the trend arrow, night 11)
-    if h.len() != 13 && h.len() != 14 {
+    if !(13..=15).contains(&h.len()) {
         return None;
     }
     let v: Vec<u8> = h[12].split(',').filter_map(|x| x.parse().ok()).collect();
@@ -135,6 +164,7 @@ fn decode(text: &str) -> Option<Ground> {
         works: Vec::new(),
         colours,
         last: h.get(13).and_then(|v| v.parse().ok()),
+        next_name: h.get(14).map_or(String::new(), |v| v.to_string()),
     };
     for l in lines {
         let f: Vec<&str> = l.split('\t').collect();
@@ -157,7 +187,7 @@ unsafe fn stadium_of(club: usize) -> Option<usize> {
 }
 
 /// Host: a club's ground as text, after the order (kind 0: none) of the manager whose club it is.
-pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool) -> Option<Vec<u8>> {
+pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8]) -> Option<Vec<u8>> {
     let seed = finreport::seed_of(club)?;
     let s = stadium_of(club)?;
     let mut said = String::new();
@@ -167,11 +197,29 @@ pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool) -> Option<Ve
             Some(why) => why,
             None => {
                 let (cost, days) = price(kind, amount);
-                if finreport::pay_ground(club, cost) {
+                let now = if kind == NEW { deposit(cost) } else { cost };
+                if finreport::pay_ground(club, now, false) {
                     #[allow(static_mut_refs)]
-                    diary::WORKS.push((seed, kind, amount, today() + days.max(1)));
+                    {
+                        diary::WORKS.push((seed, kind, amount, today() + days.max(1)));
+                        if kind == NEW {
+                            // (the order's month is the deposit's; a tab or line break would break the diary)
+                            let (y, m) = (rd::<i16>(0xae2c92) as i32, diary::month_of(rd::<i16>(0xae2c90) as i32, rd::<i16>(0xae2c92) as i32));
+                            diary::PAID.retain(|p| p.0 != seed);
+                            diary::PAID.push((seed, y, m));
+                            let name: String = latin1(name).chars().filter(|c| !c.is_control()).take(40).collect();
+                            diary::NAMES.retain(|n| n.0 != seed);
+                            if !name.trim().is_empty() {
+                                diary::NAMES.push((seed, name.trim().to_string()));
+                            }
+                        }
+                    }
                     diary::save_now();
-                    format!("Ordered: ready in {} weeks", (days + 6) / 7)
+                    if kind == NEW {
+                        format!("Ordered: ready in {} weeks; the rest in {} monthly payments", (days + 6) / 7, instalment_months(days))
+                    } else {
+                        format!("Ordered: ready in {} weeks", (days + 6) / 7)
+                    }
                 } else {
                     "Not enough money in the bank".into()
                 }
@@ -201,6 +249,7 @@ unsafe fn ground(club: usize, seed: usize, s: usize, said: String) -> Option<Gro
         said,
         colours: club_colours(club),
         last: diary::balances(seed).last().map(|b| b.2),
+        next_name: diary::NAMES.iter().find(|n| n.0 == seed).map_or(String::new(), |n| n.1.clone()),
     })
 }
 
@@ -225,11 +274,50 @@ pub unsafe fn complete() -> bool {
             STANDING => *at(0x3c) += amount,
             CONVERT => *at(0x40) = (*at(0x40) + amount).min(*at(0x3c)),
             ROOF => *((s + 0x4c) as *mut u8) = 1,
+            NEW => {
+                // all seated, roofed, heated, room to grow a quarter more; the name typed at the order
+                *at(0x3c) = amount;
+                *at(0x40) = amount;
+                *at(0x44) = (amount * 5 / 4).min(MOST).max(amount);
+                *((s + 0x4c) as *mut u8) = 1;
+                *((s + 0x4d) as *mut u8) = 1;
+                if let Some(n) = diary::NAMES.iter().find(|n| n.0 == seed) {
+                    let mut bytes = to_latin1(&n.1);
+                    bytes.truncate(50);
+                    bytes.push(0);
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), (s + 4) as *mut u8, bytes.len());
+                }
+                diary::NAMES.retain(|n| n.0 != seed);
+                diary::PAID.retain(|p| p.0 != seed);
+            }
             _ => *((s + 0x4d) as *mut u8) = 1,
         }
         log(&format!("stadium: work {kind} of {amount} done at club {seed}"));
     }
     true
+}
+
+/// The diary's daily tick (host): a new stadium's instalment once a month while it is built,
+/// paid also into debt (the club signed for it). True: one was paid.
+#[allow(static_mut_refs)]
+pub unsafe fn instalments(year: i32, month: i32) -> bool {
+    let base = rd::<usize>(CLUB_TABLE);
+    let mut paid = false;
+    for &(seed, kind, amount, _) in diary::WORKS.clone().iter().filter(|w| w.1 == NEW) {
+        let (cost, days) = price(kind, amount);
+        let months = instalment_months(days);
+        let done = diary::PAID.iter().filter(|p| p.0 == seed).count() as i32 - 1; // (the deposit's month)
+        if done >= months || diary::PAID.contains(&(seed, year, month)) {
+            continue;
+        }
+        let sum = (cost - deposit(cost)) / months as i64;
+        if finreport::pay_ground(base + seed * CLUB_SIZE, sum, true) {
+            diary::PAID.push((seed, year, month));
+            log(&format!("stadium: instalment {} of {months} ({sum}) paid by club {seed}", done + 1));
+            paid = true;
+        }
+    }
+    paid
 }
 
 // ---- the page (every machine) ----
@@ -245,6 +333,59 @@ static mut ARMED: Option<u8> = None;
 static mut AMOUNTS: [i32; 3] = [1000; 3];
 static mut STEPS: Vec<((i32, i32, i32, i32), u8, i32)> = Vec::new();
 static mut OPENED_AT: Option<std::time::Instant> = None;
+/// The new stadium: the size picked (of `sizes_above`), its name being typed, Enter pressed, a
+/// key since the last frame.
+static mut NEW_PICK: usize = 0;
+static mut NAMING: bool = false;
+static mut TYPED: Vec<u8> = Vec::new();
+static mut ORDER_NOW: bool = false;
+static mut KEYED: bool = false;
+static mut OLD_PROC: isize = 0;
+
+#[link(name = "user32")]
+extern "system" {
+    fn SetWindowLongA(hwnd: usize, index: i32, value: isize) -> isize;
+    fn CallWindowProcA(proc_: isize, hwnd: usize, msg: u32, w: usize, l: isize) -> isize;
+}
+
+/// The game window's messages: while a name is typed, the keys are its (as the coach's question).
+#[allow(static_mut_refs)]
+extern "system" fn window_proc(hwnd: usize, msg: u32, w: usize, l: isize) -> isize {
+    unsafe {
+        if OPEN && NAMING {
+            match msg {
+                0x100 => {
+                    match w {
+                        8 => _ = TYPED.pop(),
+                        13 => ORDER_NOW = true,
+                        27 => (NAMING, ARMED) = (false, None),
+                        _ => {}
+                    }
+                    KEYED = true;
+                    return 0;
+                }
+                0x101 => return 0,
+                0x102 => {
+                    if (0x20..0x100).contains(&w) && TYPED.len() < 40 {
+                        TYPED.push(w as u8);
+                        KEYED = true;
+                    }
+                    return 0;
+                }
+                _ => {}
+            }
+        }
+        CallWindowProcA(OLD_PROC, hwnd, msg, w, l)
+    }
+}
+
+unsafe fn hook_keys() {
+    let hwnd = *(GAME_WINDOW as *const usize);
+    if OLD_PROC == 0 && hwnd != 0 {
+        OLD_PROC = SetWindowLongA(hwnd, -4, window_proc as extern "system" fn(usize, u32, usize, isize) -> isize as usize as isize);
+    }
+}
+
 /// The tile or step under the mouse (lit a little, as cmui's other buttons).
 static mut HOVER: Option<(i32, i32, i32, i32)> = None;
 /// "Now | Fully built" over the picture: the ground as it would be with every place it has room
@@ -258,11 +399,13 @@ pub fn page_open() -> bool {
 }
 
 #[allow(static_mut_refs)]
-unsafe fn fetch(kind: u8, amount: i32) {
+unsafe fn fetch(kind: u8, amount: i32, name: &[u8]) {
     let text = if remote::CLIENT {
-        ask_host(&key(b'!', &[CLUB as u32, kind as u32, amount as u32]))
+        let mut k = key(b'!', &[CLUB as u32, kind as u32, amount as u32]);
+        k.extend_from_slice(name);
+        ask_host(&k)
     } else {
-        remote(CLUB, kind, amount, Some(CLUB) == human_club_ptr())
+        remote(CLUB, kind, amount, Some(CLUB) == human_club_ptr(), name)
     };
     if let Some(g) = text.and_then(|t| decode(&String::from_utf8_lossy(&t))) {
         GROUND = Some(g);
@@ -274,7 +417,9 @@ unsafe fn fetch(kind: u8, amount: i32) {
 #[allow(static_mut_refs)]
 pub unsafe fn open(club: usize) {
     (CLUB, ARMED, GROUND, OPENED_AT) = (club, None, None, Some(std::time::Instant::now()));
-    fetch(0, 0);
+    (NAMING, NEW_PICK) = (false, 0);
+    TYPED.clear();
+    fetch(0, 0, &[]);
     OPEN = GROUND.is_some();
 }
 
@@ -630,7 +775,7 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
     let layer = |kind: &str| pack.iter().find(|p| p.name == format!("{kind}_{size}"));
     let roofing = g.works.iter().any(|w| w.0 == ROOF);
     let roof = if g.roof || roofing { layer("roof") } else { None };
-    let works = if g.works.iter().any(|w| matches!(w.0, SEATS | STANDING | CONVERT | ROOF)) { layer("works") } else { None };
+    let works = if g.works.iter().any(|w| matches!(w.0, SEATS | STANDING | CONVERT | ROOF | NEW)) { layer("works") } else { None };
     // (a little closer than the whole frame, round the pitch: the mock's ground fills its column)
     let sc = (w as f32 / base.fw as f32).max(h as f32 / base.fh as f32) * 1.15;
     let centre = |p: i32, size: f32, full: i32| (size / 2.0 - p as f32 * sc).clamp(size - full as f32 * sc, 0.0);
@@ -1033,12 +1178,15 @@ pub unsafe fn flip() {
     BACK = Some(b);
     // the ground, left: the rendered picture (the drawing without the pack)
     let pic = (left, bar + 1, left + (sw - left) * 46 / 100, sh);
-    let most = g.room.min(MOST).max(g.capacity);
+    // (a new stadium being built: "Fully built" is that one)
+    let new_size = g.works.iter().find(|w| w.0 == NEW).map(|w| w.1);
+    let most = new_size.unwrap_or(g.room.min(MOST)).max(g.capacity);
     let can_grow = most > g.capacity || !g.roof;
     if !can_grow {
         FULL_VIEW = false;
     }
-    let shown = if FULL_VIEW { Ground { capacity: most, seats: most, roof: true, works: Vec::new(), ..g.clone() } } else { g.clone() };
+    let next = if new_size.is_some() && !g.next_name.is_empty() { g.next_name.clone() } else { g.name.clone() };
+    let shown = if FULL_VIEW { Ground { capacity: most, seats: most, roof: true, heating: true, works: Vec::new(), name: next, ..g.clone() } } else { g.clone() };
     if !rendered(pic, &shown, f2) {
         flat(pic.0 + m, pic.1 + m, pic.2 - m, pic.3 - m, m, &g, f2);
     }
@@ -1058,7 +1206,11 @@ pub unsafe fn flip() {
             px = r.0 - m / 2;
         }
         if FULL_VIEW {
-            let note = format!("{} PLACES, ALL SEATED, ROOFED", sep(most));
+            // (a new stadium: its own room to grow, a quarter more, as `complete` sets it)
+            let note = match new_size {
+                Some(n) => format!("{} PLACES, ALL SEATED, ROOFED  -  ROOM TO GROW TO {}", sep(n), sep((n * 5 / 4).min(MOST).max(n))),
+                None => format!("{} PLACES, ALL SEATED, ROOFED", sep(most)),
+            };
             text_at(pic.2 - m * 2, pic.1 + m * 3 + ph, pic.1 + m * 3 + ph * 2, f1, GOLD, note.as_bytes(), 2);
         }
     }
@@ -1136,7 +1288,73 @@ pub unsafe fn flip() {
     let gold = ([0x8a, 0x66, 0x14], [0x52, 0x3a, 0x0a], [0xe0, 0xb8, 0x50]);
     let off = ([0x22, 0x27, 0x2f], [0x1a, 0x1e, 0x25], [0x30, 0x36, 0x40]);
     let lit = ([0x3a, 0x6c, 0xb4], [0x22, 0x44, 0x7e], [0x6a, 0x98, 0xe0]);
+    let sizes = sizes_above(g.capacity.max(new_size.unwrap_or(0) - 1));
+    let show_new = (grow_left == 0 && g.pending(&[SEATS, STANDING]) == 0 && !sizes.is_empty()) || new_size.is_some();
+    if show_new {
+        NEW_PICK = NEW_PICK.min(sizes.len().saturating_sub(1));
+        let size = new_size.or_else(|| sizes.get(NEW_PICK).copied()).unwrap_or(0);
+        let (cost, days) = price(NEW, size);
+        let refused = g.refusal(NEW, size);
+        let armed = ARMED == Some(NEW);
+        if refused.is_some() {
+            NAMING = false;
+        }
+        let r = (o.0 + pad, ty, o.0 + pad + tw * 2 + gap, ty + th);
+        let (top, bottom, edge) = if armed { gold } else if refused.is_some() { off } else if HOVER == Some(r) { lit } else { blue };
+        gradient(r, top, bottom, edge, 6);
+        let ink = if refused.is_some() { [0x6a, 0x72, 0x7c] } else { WHITE };
+        let cx = (r.0 + r.2) / 2;
+        let room = r.2 - r.0 - 16;
+        icon(9, cx, ty + th * 19 / 100, th * 28 / 100, ink);
+        let (line1, line2) = if NAMING {
+            let typed = latin1(&TYPED).into_owned();
+            ("NAME YOUR STADIUM".to_string(), if typed.is_empty() { "type a name (empty: keep the old one)_".to_string() } else { format!("{typed}_") })
+        } else if new_size.is_some() {
+            ("NEW STADIUM".to_string(), format!("{} SEATS, BEING BUILT", sep(size)))
+        } else {
+            ("NEW STADIUM".to_string(), format!("{} SEATS, ALL COVERED", sep(size)))
+        };
+        let (l1, l2) = (to_latin1(&line1), to_latin1(&line2));
+        text_at(cx, ty + th * 36 / 100, ty + th * 52 / 100, fit(&[f3, f2, f1], &l1, room), ink, &l1, 1);
+        text_at(cx, ty + th * 51 / 100, ty + th * 66 / 100, fit(&[f2, f1], &l2, room), if NAMING { GOLD } else { ink }, &l2, 1);
+        // (the cost alone on its line, the deposit under it: one line ran past the tile, 2026-11-23)
+        let cost_line = to_latin1(&format!("COST: {}", g.money(cost)));
+        text_at(cx, ty + th * 68 / 100, ty + th * 83 / 100, fit(&[f2, f1], &cost_line, room), ink, &cost_line, 1);
+        let (under, under_ink) = match (&refused, armed, NAMING) {
+            (_, _, true) => ("CLICK AGAIN OR PRESS ENTER TO ORDER (ESC: CANCEL)".to_string(), GOLD),
+            (Some(why), _, _) => (short(why), [0x8a, 0x92, 0x9c]),
+            _ => (format!("{} NOW, THE REST MONTHLY  -  {} WEEKS", g.money(deposit(cost)), (days + 6) / 7), [0xb8, 0xc8, 0xe0]),
+        };
+        let under = to_latin1(&under);
+        // (the smallest font, and the words up to what fits)
+        let mut under = under;
+        while text_width(f1, &under) > room && under.contains(&b' ') {
+            let cut = under.iter().rposition(|&c| c == b' ').unwrap();
+            under.truncate(cut);
+        }
+        text_at(cx, ty + th * 83 / 100, ty + th * 97 / 100, f1, under_ink, &under, 1);
+        if refused.is_none() {
+            BUTTONS.push((r, NEW, size));
+        }
+        // - and + under it: the next size down or up
+        if new_size.is_none() {
+            let (sy, half) = (ty + th + m / 2, (r.2 - r.0 - m) / 2);
+            for (j, (sign, d)) in [("-", -1), ("+", 1)].into_iter().enumerate() {
+                let s = (r.0 + j as i32 * (half + m), sy, r.0 + j as i32 * (half + m) + half, sy + l);
+                let can = (0..sizes.len() as i32).contains(&(NEW_PICK as i32 + d));
+                let on = can && HOVER == Some(s);
+                gradient(s, if on { [0x3a, 0x44, 0x52] } else if can { [0x2a, 0x31, 0x3c] } else { [0x18, 0x1c, 0x22] }, if on { [0x30, 0x38, 0x44] } else if can { [0x22, 0x28, 0x31] } else { [0x18, 0x1c, 0x22] }, EDGE, 4);
+                text_at(s.0 + half / 2, s.1, s.3, f3, if can { WHITE } else { [0x4a, 0x50, 0x58] }, sign.as_bytes(), 1);
+                if can {
+                    STEPS.push((s, NEW, d));
+                }
+            }
+        }
+    }
     for (k, kind) in [SEATS, STANDING, CONVERT].into_iter().enumerate() {
+        if show_new && kind != CONVERT {
+            continue;
+        }
         let amount = amounts[k];
         let (cost, days) = price(kind, amount);
         let refused = g.refusal(kind, amount);
@@ -1249,6 +1467,7 @@ pub unsafe fn flip() {
                 STANDING => format!("{} standing places", sep(w.1)),
                 CONVERT => format!("{} places to seats", sep(w.1)),
                 ROOF => "The roof".into(),
+                NEW => format!("New stadium, {} seats", sep(w.1)),
                 _ => "Under-soil heating".into(),
             };
             let left_days = format!("{} days", w.2);
@@ -1384,8 +1603,17 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         return None;
     }
     let inside = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
+    // (the name's keys: Enter orders, Escape cancels; a key typed draws the page again)
+    if std::mem::take(&mut ORDER_NOW) && NAMING {
+        order_new();
+        return Some(true);
+    }
+    if std::mem::take(&mut KEYED) {
+        return Some(true);
+    }
     if mx < bar_end(screen().0) {
         if released {
+            NAMING = false;
             OPEN = false;
             REDRAW = true;
         }
@@ -1405,27 +1633,55 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         return Some(true);
     }
     if BACK.is_some_and(inside) {
-        OPEN = false;
+        (OPEN, NAMING) = (false, false);
         return Some(true);
     }
     if let Some(&(_, kind, d)) = STEPS.iter().find(|s| inside(s.0)) {
+        if kind == NEW {
+            NEW_PICK = (NEW_PICK as i32 + d).max(0) as usize;
+            (ARMED, NAMING) = (None, false);
+            return Some(true);
+        }
         let k = (kind - 1) as usize;
         AMOUNTS[k] = (AMOUNTS[k] + d).clamp(1000, 10_000);
         ARMED = None;
         return Some(true);
     }
     if let Some(&(_, kind, amount)) = BUTTONS.iter().find(|b| inside(b.0)) {
+        // (a new stadium: the first click asks its name, the second (or Enter) orders)
+        if kind == NEW {
+            if NAMING {
+                order_new();
+            } else {
+                (ARMED, NAMING) = (Some(NEW), true);
+                TYPED.clear();
+                hook_keys();
+            }
+            return Some(true);
+        }
+        NAMING = false;
         // (real money: the first click asks, the second orders)
         if ARMED == Some(kind) {
             ARMED = None;
-            fetch(kind, amount);
+            fetch(kind, amount, &[]);
         } else {
             ARMED = Some(kind);
         }
         return Some(true);
     }
-    ARMED = None;
+    (ARMED, NAMING) = (None, false);
     Some(true)
+}
+
+/// Orders the new stadium of the size picked, with the name typed.
+#[allow(static_mut_refs)]
+unsafe fn order_new() {
+    let Some(g) = GROUND.clone() else { return };
+    let sizes = sizes_above(g.capacity);
+    let Some(&size) = sizes.get(NEW_PICK.min(sizes.len().saturating_sub(1))) else { return };
+    let name = std::mem::take(&mut TYPED);
+    (ARMED, NAMING) = (None, false);
+    fetch(NEW, size, &name);
 }
 
 #[cfg(test)]
@@ -1461,5 +1717,17 @@ mod tests {
         // the pack's runs: two of one pixel, one of another; a short pack is no picture
         assert_eq!(unruns(&[2, 1, 2, 3, 4, 1, 9, 9, 9, 9], 12), Some(vec![1, 2, 3, 4, 1, 2, 3, 4, 9, 9, 9, 9]));
         assert_eq!(unruns(&[2, 1, 2, 3, 4], 12), None);
+        // the new stadium: only once the ground is full, sizes above it, 30% now, the rest monthly
+        assert_eq!(sizes_above(7_500), vec![15_000, 25_000, 40_000, 60_000, 90_000, 125_000]);
+        assert_eq!(sizes_above(14_000), vec![25_000, 40_000, 60_000, 90_000, 125_000]);
+        assert_eq!(price(NEW, 30_000), (100_000_000, 665));
+        assert_eq!((deposit(100_000_000), instalment_months(665)), (30_000_000, 21));
+        let full = Ground { capacity: 7_500, seats: 5_000, room: 7_500, balance: 40_000_000, symbol: "E".into(), rate: 1.0, ..Default::default() };
+        assert_eq!(full.refusal(NEW, 30_000), None);
+        assert_eq!(full.refusal(NEW, 60_000).as_deref(), Some("Not enough money in the bank"));
+        assert_eq!(Ground { room: 9_000, ..full.clone() }.refusal(NEW, 30_000).as_deref(), Some("Room left to grow first"));
+        let building = Ground { works: vec![(NEW, 30_000, 600)], ..full.clone() };
+        assert_eq!(building.refusal(ROOF, 0).as_deref(), Some("New stadium being built"));
+        assert_eq!(building.refusal(NEW, 30_000).as_deref(), Some("Being built"));
     }
 }

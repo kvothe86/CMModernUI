@@ -14,6 +14,16 @@ mock picture (generated, not in the repository; its left menu ignored).
   (seats / standing / convert tiles with - and +, 1,000..10,000, or what room is left; roof and
   heating; first click arms (gold), second orders), the key.
 - "Now | Fully built" pills over the picture: the ground at its room to grow, all seated, roofed.
+- **New stadium** (job 6, `NEW`; user 2026-11-23): once the ground is at its room to grow, a wide
+  tile replaces seats / standing. Sizes 15,000 .. 125,000 above the ground (- / +); price 25 million
+  + 2,500 a place (game units), a year + 10 days a thousand. First click: type the name (Enter or a
+  second click orders, Escape cancels; the keys through our window proc). 30% at the order (must be
+  in the bank), the rest in monthly instalments into debt if need be (`instalments`, diary `Q`
+  lines; the name in `N` lines). Every other work waits. Done (`complete`): capacity = seats =
+  size, room to grow a quarter more, roof, heating, the name written into the game's stadium record
+  (+4): the game's own General Info shows it ("60000 all seater with retractable roof and
+  under-soil heating"). "Fully built" shows the new one with its name and room. Test command:
+  `money n` in cmui.click (the human club's balance).
 - The crest lies flat on the centre spot (`flat_crest`, the pack's pitch axes); the bank balance
   has a green / red arrow against the last month's end (the diary's `B` lines, `Ground.last`).
 - Tiles light up under the mouse; refusals short ("NOT ENOUGH MONEY").

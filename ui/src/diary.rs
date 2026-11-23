@@ -181,6 +181,7 @@ pub unsafe fn tick() {
         ATTRS = parse_attrs(&text);
         SCOUTED = parse_scouted(&text);
         WORKS = parse_works(&text);
+        (NAMES, PAID) = parse_new(&text);
         FILE = file;
     }
     let (year, month) = (today.1 as i32, month_of(today.0 as i32, today.1 as i32));
@@ -188,7 +189,8 @@ pub unsafe fn tick() {
         crate::cheesecorner::tick(year, month);
     }
     // the stadium works finished by today (`stadium.rs`)
-    let mut changed = on(STADIUM) && stadium::complete();
+    let mut changed = on(STADIUM) && stadium::instalments(year, month);
+    changed |= on(STADIUM) && stadium::complete();
     for (staff, _) in challenge::human_list() {
         let club = rd::<usize>(staff + 0x39);
         let (Some(seed), Some((balance, this_month, last_month))) = (finreport::seed_of(club), finreport::balance_now(club)) else { continue };
@@ -240,6 +242,32 @@ fn parse_works(text: &str) -> Vec<(usize, u8, i32, i32)> {
         .collect()
 }
 
+/// A new stadium's name, set when it is done (`N` lines: club seed, name), and the months its
+/// instalments were paid (`Q` lines: club seed, year, month; the order's own month is its deposit).
+pub static mut NAMES: Vec<(usize, String)> = Vec::new();
+pub static mut PAID: Vec<(usize, i32, i32)> = Vec::new();
+
+fn parse_new(text: &str) -> (Vec<(usize, String)>, Vec<(usize, i32, i32)>) {
+    let (mut names, mut paid) = (Vec::new(), Vec::new());
+    for l in text.lines() {
+        let f: Vec<&str> = l.split('\t').collect();
+        match (f.first(), f.len()) {
+            (Some(&"N"), 3) => {
+                if let Ok(seed) = f[1].parse() {
+                    names.push((seed, f[2].to_string()));
+                }
+            }
+            (Some(&"Q"), 4) => {
+                if let (Ok(a), Ok(b), Ok(c)) = (f[1].parse(), f[2].parse(), f[3].parse()) {
+                    paid.push((a, b, c));
+                }
+            }
+            _ => {}
+        }
+    }
+    (names, paid)
+}
+
 /// Written now (a stadium order).
 pub unsafe fn save_now() {
     save();
@@ -256,6 +284,8 @@ unsafe fn save() {
         .chain(ATTRS.iter().map(attrs_line))
         .chain(SCOUTED.iter().map(scouted_line))
         .chain(WORKS.iter().map(|w| format!("G\t{}\t{}\t{}\t{}\n", w.0, w.1, w.2, w.3)))
+        .chain(NAMES.iter().map(|n| format!("N\t{}\t{}\n", n.0, n.1)))
+        .chain(PAID.iter().map(|q| format!("Q\t{}\t{}\t{}\n", q.0, q.1, q.2)))
         .collect();
     let temp = format!("{FILE}.tmp");
     if std::fs::write(&temp, text).is_ok() {

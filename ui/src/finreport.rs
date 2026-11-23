@@ -1053,7 +1053,8 @@ unsafe fn paint_youth(yr: &Youth, dry: bool, x0: i32, top: i32, pw: i32, fb: u32
 /// Pays a sum from a club's bank as the game pays its ground works (`pay_out(f, sum, 0x8c,
 /// 0x12c)`: this month's and this year's ground costs, off the balance); false without the money
 /// (the stadium builder, user 2026-11-23).
-pub unsafe fn pay_ground(club: usize, sum: i64) -> bool {
+/// `debt`: paid also when the bank cannot (a new stadium's monthly instalment).
+pub unsafe fn pay_ground(club: usize, sum: i64, debt: bool) -> bool {
     let Some(club) = club_ptr(club) else { return false };
     let table = rd::<usize>(FINANCE_TABLE);
     let record = if table == 0 { 0 } else { game::<extern "thiscall" fn(usize, usize) -> usize>(FINANCE_FOR_CLUB)(table, club) };
@@ -1061,7 +1062,7 @@ pub unsafe fn pay_ground(club: usize, sum: i64) -> bool {
         return false;
     }
     let balance = (record as *const i64).read_unaligned();
-    if balance < sum {
+    if balance < sum && !debt {
         return false;
     }
     for at in [0x8c, 0x12c] {
@@ -1069,6 +1070,19 @@ pub unsafe fn pay_ground(club: usize, sum: i64) -> bool {
         p.write_unaligned(p.read_unaligned().wrapping_add(sum as i32));
     }
     (record as *mut i64).write_unaligned(balance - sum);
+    true
+}
+
+/// A test script's money (`money n` in cmui.click): the bank balance only, no income line.
+pub unsafe fn add_money(club: usize, sum: i64) -> bool {
+    let Some(club) = club_ptr(club) else { return false };
+    let table = rd::<usize>(FINANCE_TABLE);
+    let record = if table == 0 { 0 } else { game::<extern "thiscall" fn(usize, usize) -> usize>(FINANCE_FOR_CLUB)(table, club) };
+    if !readable(record, RECORD) {
+        return false;
+    }
+    let balance = (record as *const i64).read_unaligned();
+    (record as *mut i64).write_unaligned(balance + sum);
     true
 }
 
