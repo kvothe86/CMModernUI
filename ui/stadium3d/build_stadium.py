@@ -164,7 +164,7 @@ def build(size, colls):
     rows = profile(tiers)
     depth = max(r[1] for r in rows)
     top = max(r[2] for r in rows)
-    base, roof_c, works = colls
+    base, roof_c, works = colls[:3]
     seat = mat("Seat", (0.82, 0.82, 0.82), 0.45)
     concrete = mat("Concrete", (0.16, 0.165, 0.17), 0.9)
     facade = mat("Facade", (0.075, 0.08, 0.09), 0.6)
@@ -400,7 +400,6 @@ def surroundings(coll, ex, ey, top, reach):
         add_box(gm, (x0 + 0.6, y0 - 0.1, 0.5), (x1 - 0.6, y0 + 0.2, h - 0.8))
         add_box(tm if club else bm, (x0 - 0.5, y0 - 0.5, h), (x1 + 0.5, y1 + 0.5, h + 0.7))
     house(-38, -py + 1.5, -18, -py + 9, 4.5)
-    house(14, -py + 1.5, 34, -py + 9, 5.5, club=True)
     for x in (-8, -3, 2, 7):
         house(x, -py + 2.5, x + 3, -py + 5, 2.6, club=(x % 2 == 0))
     # the corners between the stands: low blocks with a band of glass, so the ground reads as one
@@ -481,12 +480,15 @@ def scene_for(size):
     MATS.clear()
     sc = bpy.context.scene
     colls = []
-    for name in ("Base", "Roof", "Works"):
+    for name in ("Base", "Roof", "Works", "Shop", "Mega"):
         c = bpy.data.collections.new(name)
         sc.collection.children.link(c)
         colls.append(c)
     depth, top = build(size, colls)
     pitch(colls[0])
+    shop_ex = PL / 2 + GAP + max(r[1] for r in profile(SIZES[size])) + 2.5
+    club_shop(colls[3], shop_ex)
+    club_shop(colls[4], shop_ex, mega=True)
     ex, ey = PL / 2 + GAP + depth + 2.5, PW / 2 + GAP + depth + 2.5
     # the camera: orthographic, from the south-south-west, the ground filling the picture
     cam_data = bpy.data.cameras.new("cam")
@@ -556,10 +558,59 @@ def scene_for(size):
     return sc, colls, points
 
 
-def show(sc, colls, base, roof, works):
+def club_shop(coll, ex, mega=False):
+    """The club shop (user 2026-11-23, after a picture of one): a big block on the plaza at the west
+    end, the end nearest the camera, its long glass front and CLUB SHOP towards it, fans at the
+    door. Its own layer: drawn once the club has a shop (every size: a new stadium keeps it)."""
+    # (the megastore: longer, two storeys, "MEGASTORE"; its own layer, drawn instead)
+    x0, x1 = (-(ex + 15.0), -(ex + 2.0)) if mega else (-(ex + 13.0), -(ex + 2.0))
+    y0, y1, h = (-30.0, 30.0, 16.0) if mega else (-18.0, 18.0, 12.0)
+    gtop, band = h * 0.63, (h * 0.68, h * 0.97)
+    bm, glass, rim, posts, sign_band, people = (bmesh.new() for _ in range(6))
+    add_box(bm, (x0, y0, 0), (x1, y1, h))
+    # a thin light rim round the dark roof
+    for a, b in [((x0 - 0.3, y0 - 0.3), (x1 + 0.3, y0 + 0.3)), ((x0 - 0.3, y1 - 0.3), (x1 + 0.3, y1 + 0.3)),
+                 ((x0 - 0.3, y0 - 0.3), (x0 + 0.3, y1 + 0.3)), ((x1 - 0.3, y0 - 0.3), (x1 + 0.3, y1 + 0.3))]:
+        add_box(rim, (*a, h), (*b, h + 0.5))
+    # the shop windows (west front, south end), lit warm from inside, posts every 3 m
+    add_box(glass, (x0 - 0.12, y0 + 0.8, 0.2), (x0 + 0.1, y1 - 0.8, gtop))
+    add_box(glass, (x0 + 0.8, y0 - 0.12, 0.2), (x1 - 0.8, y0 + 0.1, gtop))
+    y = y0 + 0.8
+    while y < y1 - 0.8:
+        add_box(posts, (x0 - 0.3, y - 0.15, 0), (x0 + 0.05, y + 0.15, gtop + 0.4))
+        y += 3.0
+    add_box(posts, (x0 - 0.3, y0 + 0.5, gtop), (x0 + 0.05, y1 - 0.5, gtop + 0.5))
+    # the dark band for the sign over the front
+    add_box(sign_band, (x0 - 0.3, y0 + 0.5, band[0]), (x0 + 0.05, y1 - 0.5, band[1]))
+    obj("shopblock", bm, mat("ShopWalls", (0.045, 0.048, 0.055), 0.7), coll)
+    obj("shoprim", rim, mat("ShopRim", (0.55, 0.57, 0.6), 0.4, 0.3), coll)
+    obj("shopposts", posts, mat("ShopPosts", (0.03, 0.03, 0.035), 0.5), coll)
+    obj("shopband", sign_band, mat("ShopBand", (0.015, 0.015, 0.02), 0.5), coll)
+    obj("shopglass", glass, mat("ShopGlass", (1.0, 0.72, 0.38), 0.1, 0.0, 0.9), coll)
+    # CLUB SHOP on the band, facing west (the camera's side)
+    cu = bpy.data.curves.new("shopsign", "FONT")
+    cu.body = "MEGASTORE" if mega else "CLUB SHOP"
+    cu.size = 2.6
+    cu.align_x = "CENTER"
+    cu.align_y = "CENTER"
+    cu.extrude = 0.05
+    text = bpy.data.objects.new("shopsign", cu)
+    text.location = (x0 - 0.4, 0.0, (band[0] + band[1]) / 2)
+    text.rotation_euler = (math.radians(90), 0, math.radians(-90))
+    text.data.materials.append(mat("ShopSign", (1.0, 1.0, 1.0), 0.3, 0.0, 4.0))
+    coll.objects.link(text)
+    # fans on the square in front of it
+    rnd = random.Random(11)
+    for k in range(34):
+        x, y = rnd.uniform(x0 - 8, x0 - 1.5), rnd.uniform(y0 - 2, y1 + 2)
+        add_box(people, (x - 0.25, y - 0.25, 0), (x + 0.25, y + 0.25, 1.75))
+    obj("shoppeople", people, mat("People", (0.07, 0.08, 0.12), 0.8), coll)
+
+
+def show(sc, colls, base, roof, works, shop="off", mega="off"):
     """Each collection: 'on', 'hold' (held out: cuts what is behind) or 'off'."""
     lc = bpy.context.view_layer.layer_collection.children
-    for c, how in zip(colls, (base, roof, works)):
+    for c, how in zip(colls, (base, roof, works, shop, mega)):
         lc[c.name].exclude = how == "off"
         if how != "off":
             lc[c.name].holdout = how == "hold"
@@ -655,6 +706,8 @@ def main():
         render(sc, f("id"), workbench=True)
         show(sc, colls, "hold", "on", "off"); render(sc, f("roof"))
         show(sc, colls, "hold", "off", "on"); render(sc, f("works"))
+        show(sc, colls, "hold", "off", "off", "on"); render(sc, f("shop"))
+        show(sc, colls, "hold", "off", "off", "off", "on"); render(sc, f("mega"))
         # the clean top-down view (the brief's second render; the page uses the 3/4 one), the
         # long side upright in the portrait picture
         ex, ey = EXTENT
@@ -665,6 +718,8 @@ def main():
         entries.append((f"base_{size}", points, packed(pixels(f("base")), pixels(f("id")))))
         entries.append((f"roof_{size}", ROOF_POINTS, packed(pixels(f("roof")), crop=True)))
         entries.append((f"works_{size}", points, packed(pixels(f("works")), crop=True)))
+        entries.append((f"shop_{size}", points, packed(pixels(f("shop")), crop=True)))
+        entries.append((f"mega_{size}", points, packed(pixels(f("mega")), crop=True)))
     # 'CMS2', count; entries of 64 bytes: name[16], full w, full h, x, y, w, h (u16), offset (u32),
     # eight points (i16 x, y: pitch centre, the N S W E stands' middles, centre circle radius, 0, 0;
     # a roof's: its two long tops' corners); each picture's pixels as runs (count 1..255, pixel)

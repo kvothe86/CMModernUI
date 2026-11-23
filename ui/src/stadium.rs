@@ -23,6 +23,9 @@ pub const HEATING: u8 = 5;
 /// A new stadium (user 2026-11-23: "a project of millions, only for very rich clubs", once the
 /// ground is at the most it can hold): the size picked from `SIZES`, a name typed in.
 pub const NEW: u8 = 6;
+/// The club shop's next level (amount: the level), an item put on sale (amount: its index): `shop.rs`.
+pub const SHOP: u8 = 7;
+pub const ITEM: u8 = 8;
 const SIZES: [i32; 6] = [15_000, 25_000, 40_000, 60_000, 90_000, 125_000];
 
 /// The new stadiums a ground of `capacity` can move up to.
@@ -56,6 +59,8 @@ pub fn price(kind: u8, amount: i32) -> (i64, i32) {
         ROOF => (7_500_000, 182),
         // (25 million and 2,500 a place: 30,000 places 100 million; a year and 10 days a thousand)
         NEW => (25_000_000 + n * 2500, 365 + k * 10),
+        SHOP => shop::LEVELS.get(amount as usize).map_or((0, 0), |l| (l.2, l.3)),
+        ITEM => shop::ITEMS.get(amount as usize).map_or((0, 0), |i| (i.2, 0)),
         _ => (1_500_000, 56),
     }
 }
@@ -79,6 +84,10 @@ pub struct Ground {
     pub colours: [[u8; 3]; 2],      // the club's first two kit colours: the seats
     pub last: Option<i64>,          // the balance at the last month's end (the diary): the trend arrow
     pub next_name: String,          // a new stadium's name, typed at its order ("Fully built" shows it)
+    pub shop: u8,                   // the club shop's level, the items on sale (bits), `shop.rs`
+    pub items: u8,
+    pub merch: i64,                 // merchandising this season
+    pub merch_pct: i32,             // the share more this week: shop, items, last week's results
 }
 
 /// A club's first two kit colours (club +0x83: six colour records, each red / green / blue at +55);
@@ -103,7 +112,16 @@ impl Ground {
     pub fn refusal(&self, kind: u8, amount: i32) -> Option<String> {
         let (cost, _) = price(kind, amount);
         let busy = |k: u8| self.works.iter().any(|w| w.0 == k);
-        if busy(NEW) {
+        match kind {
+            SHOP if busy(SHOP) => return Some("Being built".into()),
+            SHOP if amount as u8 != self.shop + 1 || amount > 3 => return Some("Fully built".into()),
+            ITEM if self.items & 1 << amount != 0 => return Some("On sale".into()),
+            // (name and number, kids' kits: sold in a club shop only)
+            ITEM if amount >= 2 && self.shop == 0 => return Some("Needs a club shop".into()),
+            _ => {}
+        }
+        // (the shop goes on while a new stadium is built: it is not the stadium's)
+        if busy(NEW) && !matches!(kind, SHOP | ITEM) {
             return Some(if kind == NEW { "Being built" } else { "New stadium being built" }.to_string());
         }
         let reason = match kind {
@@ -128,10 +146,14 @@ impl Ground {
 fn encode(g: &Ground) -> String {
     let c = g.colours;
     let mut out = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\t{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
         g.club, g.name, g.capacity, g.seats, g.room, g.roof as i32, g.heating as i32, g.average, g.balance, g.symbol, g.rate, g.said, c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2],
         g.last.map_or(String::new(), |v| v.to_string()),
-        g.next_name
+        g.next_name,
+        g.shop,
+        g.items,
+        g.merch,
+        g.merch_pct
     );
     for w in &g.works {
         out += &format!("{}\t{}\t{}\n", w.0, w.1, w.2);
@@ -143,7 +165,7 @@ fn decode(text: &str) -> Option<Ground> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     // (13 fields before the trend arrow, night 11)
-    if !(13..=15).contains(&h.len()) {
+    if !(13..=19).contains(&h.len()) {
         return None;
     }
     let v: Vec<u8> = h[12].split(',').filter_map(|x| x.parse().ok()).collect();
@@ -165,6 +187,10 @@ fn decode(text: &str) -> Option<Ground> {
         colours,
         last: h.get(13).and_then(|v| v.parse().ok()),
         next_name: h.get(14).map_or(String::new(), |v| v.to_string()),
+        shop: h.get(15).and_then(|v| v.parse().ok()).unwrap_or(0),
+        items: h.get(16).and_then(|v| v.parse().ok()).unwrap_or(0),
+        merch: h.get(17).and_then(|v| v.parse().ok()).unwrap_or(0),
+        merch_pct: h.get(18).and_then(|v| v.parse().ok()).unwrap_or(0),
     };
     for l in lines {
         let f: Vec<&str> = l.split('\t').collect();
@@ -198,10 +224,20 @@ pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8])
             None => {
                 let (cost, days) = price(kind, amount);
                 let now = if kind == NEW { deposit(cost) } else { cost };
+                // (cmui.ini stadium_test_days=1: every work done the next day, for a test)
+                let days = if setting("stadium_test_days").as_deref() == Some("1") { 1 } else { days };
                 if finreport::pay_ground(club, now, false) {
                     #[allow(static_mut_refs)]
                     {
-                        diary::WORKS.push((seed, kind, amount, today() + days.max(1)));
+                        if kind == ITEM {
+                            let at = diary::MERCH.iter().position(|m| m.0 == seed).unwrap_or_else(|| {
+                                diary::MERCH.push((seed, 0, 0));
+                                diary::MERCH.len() - 1
+                            });
+                            diary::MERCH[at].2 |= 1 << amount;
+                        } else {
+                            diary::WORKS.push((seed, kind, amount, today() + days.max(1)));
+                        }
                         if kind == NEW {
                             // (the order's month is the deposit's; a tab or line break would break the diary)
                             let (y, m) = (rd::<i16>(0xae2c92) as i32, diary::month_of(rd::<i16>(0xae2c90) as i32, rd::<i16>(0xae2c92) as i32));
@@ -215,10 +251,12 @@ pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8])
                         }
                     }
                     diary::save_now();
-                    if kind == NEW {
-                        format!("Ordered: ready in {} weeks; the rest in {} monthly payments", (days + 6) / 7, instalment_months(days))
+                    if kind == ITEM {
+                        format!("{} on sale from today", shop::ITEMS[amount as usize].0)
+                    } else if kind == NEW {
+                        format!("Ordered: ready in {}; the rest in {} monthly payment{}", span(days), instalment_months(days), if instalment_months(days) == 1 { "" } else { "s" })
                     } else {
-                        format!("Ordered: ready in {} weeks", (days + 6) / 7)
+                        format!("Ordered: ready in {}", span(days))
                     }
                 } else {
                     "Not enough money in the bank".into()
@@ -250,6 +288,10 @@ unsafe fn ground(club: usize, seed: usize, s: usize, said: String) -> Option<Gro
         colours: club_colours(club),
         last: diary::balances(seed).last().map(|b| b.2),
         next_name: diary::NAMES.iter().find(|n| n.0 == seed).map_or(String::new(), |n| n.1.clone()),
+        shop: shop::kit(club).0,
+        items: shop::kit(club).1,
+        merch: finreport::merch_year(club),
+        merch_pct: shop::pct(shop::kit(club).0, shop::kit(club).1) + shop::results_pct(club),
     })
 }
 
@@ -274,6 +316,13 @@ pub unsafe fn complete() -> bool {
             STANDING => *at(0x3c) += amount,
             CONVERT => *at(0x40) = (*at(0x40) + amount).min(*at(0x3c)),
             ROOF => *((s + 0x4c) as *mut u8) = 1,
+            SHOP => {
+                let at = diary::MERCH.iter().position(|m| m.0 == seed).unwrap_or_else(|| {
+                    diary::MERCH.push((seed, 0, 0));
+                    diary::MERCH.len() - 1
+                });
+                diary::MERCH[at].1 = amount as u8;
+            }
             NEW => {
                 // all seated, roofed, heated, room to grow a quarter more; the name typed at the order
                 *at(0x3c) = amount;
@@ -288,6 +337,15 @@ pub unsafe fn complete() -> bool {
                     std::ptr::copy_nonoverlapping(bytes.as_ptr(), (s + 4) as *mut u8, bytes.len());
                 }
                 diary::NAMES.retain(|n| n.0 != seed);
+                // (the instalments still owed, at once: built sooner than paid, a test's one day)
+                let (cost, days) = price(NEW, amount);
+                let months = instalment_months(days);
+                let done = diary::PAID.iter().filter(|p| p.0 == seed).count() as i32 - 1;
+                if done < months {
+                    let owed = (cost - deposit(cost)) / months as i64 * (months - done) as i64;
+                    finreport::pay_ground(base + seed * CLUB_SIZE, owed, true);
+                    log(&format!("stadium: the new stadium's last {} instalments ({owed}) paid at once by club {seed}", months - done));
+                }
                 diary::PAID.retain(|p| p.0 != seed);
             }
             _ => *((s + 0x4d) as *mut u8) = 1,
@@ -336,6 +394,9 @@ static mut OPENED_AT: Option<std::time::Instant> = None;
 /// The new stadium: the size picked (of `sizes_above`), its name being typed, Enter pressed, a
 /// key since the last frame.
 static mut NEW_PICK: usize = 0;
+/// The order card shows the club shop; its two pills.
+static mut SHOP_VIEW: bool = false;
+static mut CARD_PILLS: Vec<((i32, i32, i32, i32), bool)> = Vec::new();
 static mut NAMING: bool = false;
 static mut TYPED: Vec<u8> = Vec::new();
 static mut ORDER_NOW: bool = false;
@@ -782,7 +843,16 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
     let (ox, oy) = (centre(base.pts[0].0, w as f32, base.fw), centre(base.pts[0].1, h as f32, base.fh));
     let cols = mosaic(g.colours);
     let seated = if g.capacity > 0 { g.seats as f32 / g.capacity as f32 } else { 1.0 };
-    let layers = [(Some(base), 1.0f32), (roof, if g.roof { 1.0 } else { 0.45 }), (works, 1.0)];
+    let shop_built = g.works.iter().any(|w| w.0 == SHOP);
+    // (a megastore from level 2: the bigger building, its own layer; the club shop before)
+    let shop_level = g.shop.max(g.works.iter().filter(|w| w.0 == SHOP).map(|w| w.1 as u8).max().unwrap_or(0));
+    let shop = match shop_level {
+        0 => None,
+        1 => layer("shop"),
+        _ => layer("mega").or_else(|| layer("shop")),
+    };
+    let shop = if g.shop > 0 || shop_built { shop } else { None };
+    let layers = [(Some(base), 1.0f32), (roof, if g.roof { 1.0 } else { 0.45 }), (works, 1.0), (shop, if g.shop > 0 { 1.0 } else { 0.45 })];
     let (cx, cy) = (ox + base.pts[0].0 as f32 * sc, oy + base.pts[0].1 as f32 * sc);
     let mut px = vec![0u32; (w * h) as usize];
     for dy in 0..h {
@@ -828,7 +898,7 @@ unsafe fn rendered(r: (i32, i32, i32, i32), g: &Ground, f2: u32) -> bool {
         return false;
     }
     let works: Vec<u8> = g.works.iter().map(|w| w.0).collect();
-    let key = format!("{w}x{h} {} {} {} {:?} {:?}", g.capacity, g.seats, g.roof, g.colours, works);
+    let key = format!("{w}x{h} {} {} {} {:?} {:?} {}", g.capacity, g.seats, g.roof, g.colours, works, g.shop);
     if SHOT.as_ref().is_none_or(|s| s.key != key) {
         let started = std::time::Instant::now();
         SHOT = compose(pack, g, w, h).map(|s| Shot { key: key.clone(), ..s });
@@ -1093,6 +1163,11 @@ unsafe fn icon(kind: u8, cx: i32, cy: i32, s: i32, c: [u8; 3]) {
         ROOF => vec![T((0.02, 0.5), (0.98, 0.5), (0.5, 0.08)), B(0.14, 0.5, 0.26, 0.94, 0.02), B(0.74, 0.5, 0.86, 0.94, 0.02), B(0.26, 0.62, 0.74, 0.7, 0.02)],
         HEATING => vec![B(0.06, 0.86, 0.94, 0.94, 0.03)],
         8 => vec![B(0.08, 0.1, 0.62, 0.36, 0.05)],
+        10 => vec![B(0.28, 0.22, 0.72, 0.94, 0.05), T((0.3, 0.2), (0.02, 0.44), (0.16, 0.58)), T((0.7, 0.2), (0.98, 0.44), (0.84, 0.58)), B(0.4, 0.14, 0.6, 0.24, 0.04)],
+        11 => vec![B(0.14, 0.36, 0.86, 0.96, 0.06), Ring(0.5, 0.36, 0.22, 0.24, 0.13, 0.15)],
+        12 => vec![B(0.2, 0.46, 0.8, 0.95, 0.07), Ring(0.5, 0.44, 0.2, 0.28, 0.11, 0.19)],
+        13 => vec![B(0.12, 0.12, 0.88, 0.32, 0.06), B(0.22, 0.28, 0.42, 0.8, 0.05), B(0.58, 0.28, 0.78, 0.92, 0.05)],
+        14 => vec![B(0.06, 0.62, 0.26, 0.96, 0.03), B(0.4, 0.4, 0.6, 0.96, 0.03), B(0.74, 0.12, 0.94, 0.96, 0.03)],
         _ => vec![Ring(0.5, 0.52, 0.48, 0.32, 0.34, 0.19), B(0.34, 0.45, 0.66, 0.59, 0.02)],
     };
     if kind == HEATING {
@@ -1129,6 +1204,15 @@ fn short(why: &str) -> String {
         "No room left to build" => "NO ROOM LEFT".into(),
         "Not enough standing places" => "NO STANDING LEFT".into(),
         other => other.to_uppercase(),
+    }
+}
+
+/// A building time as words: "1 day", "6 days", "9 weeks".
+fn span(days: i32) -> String {
+    match days {
+        ..=1 => "1 day".into(),
+        2..=13 => format!("{days} days"),
+        _ => format!("{} weeks", (days + 6) / 7),
     }
 }
 
@@ -1271,8 +1355,23 @@ pub unsafe fn flip() {
     let o = (rx1, a.3 + m * 2, rx2, legend.1 - m * 2);
     card(o);
     icon(8, o.0 + pad + l / 2, o.1 + l, l * 8 / 10, [0x6c, 0xa8, 0xf0]);
-    text_at(o.0 + pad + l + m, o.1 + l / 3, o.1 + l * 5 / 3, head, WHITE, b"ORDER WORKS", 0);
-    text_at(o.0 + pad, o.1 + l * 5 / 3, o.1 + l * 5 / 2, f1, DIM, b"INVEST IN STADIUM IMPROVEMENTS", 0);
+    text_at(o.0 + pad + l + m, o.1 + l / 3, o.1 + l * 5 / 3, head, WHITE, if SHOP_VIEW { b"CLUB SHOP".as_slice() } else { b"ORDER WORKS".as_slice() }, 0);
+    // WORKS | CLUB SHOP, at the card's top right
+    CARD_PILLS.clear();
+    {
+        let ph = l * 9 / 10;
+        let mut px = o.2 - pad;
+        for (label, shop_view) in [(b"CLUB SHOP".as_slice(), true), (b"WORKS".as_slice(), false)] {
+            let w = text_width(f1, label) + m * 3;
+            let r = (px - w, o.1 + l / 2, px, o.1 + l / 2 + ph);
+            let on = SHOP_VIEW == shop_view;
+            gradient(r, if on { [0x2e, 0x58, 0x98] } else { [0x14, 0x19, 0x21] }, if on { [0x1a, 0x36, 0x66] } else { [0x10, 0x14, 0x1a] }, if on { [0x44, 0x72, 0xb8] } else { EDGE }, ph / 2 - 1);
+            text_at((r.0 + r.2) / 2, r.1, r.3, f1, if on { WHITE } else { DIM }, label, 1);
+            CARD_PILLS.push((r, shop_view));
+            px = r.0 - m / 2;
+        }
+    }
+    text_at(o.0 + pad, o.1 + l * 5 / 3, o.1 + l * 5 / 2, f1, DIM, if SHOP_VIEW { b"MERCHANDISE: SELL MORE TO YOUR FANS".as_slice() } else { b"INVEST IN STADIUM IMPROVEMENTS".as_slice() }, 0);
     BUTTONS.clear();
     STEPS.clear();
     // (less room left than chosen: the order is what is left, at its own price, user 2026-11-23:
@@ -1288,6 +1387,9 @@ pub unsafe fn flip() {
     let gold = ([0x8a, 0x66, 0x14], [0x52, 0x3a, 0x0a], [0xe0, 0xb8, 0x50]);
     let off = ([0x22, 0x27, 0x2f], [0x1a, 0x1e, 0x25], [0x30, 0x36, 0x40]);
     let lit = ([0x3a, 0x6c, 0xb4], [0x22, 0x44, 0x7e], [0x6a, 0x98, 0xe0]);
+    if SHOP_VIEW {
+        shop_view(&g, o, (ty, th, tw, gap, pad, l, m), (f1, f2, f3), [blue, gold, off, lit]);
+    } else {
     let sizes = sizes_above(g.capacity.max(new_size.unwrap_or(0) - 1));
     let show_new = (grow_left == 0 && g.pending(&[SEATS, STANDING]) == 0 && !sizes.is_empty()) || new_size.is_some();
     if show_new {
@@ -1315,7 +1417,8 @@ pub unsafe fn flip() {
             ("NEW STADIUM".to_string(), format!("{} SEATS, ALL COVERED", sep(size)))
         };
         let (l1, l2) = (to_latin1(&line1), to_latin1(&line2));
-        text_at(cx, ty + th * 36 / 100, ty + th * 52 / 100, fit(&[f3, f2, f1], &l1, room), ink, &l1, 1);
+        // (800x600: f3 ran into the line under it)
+        text_at(cx, ty + th * 36 / 100, ty + th * 52 / 100, if small { fit(&[f2, f1], &l1, room) } else { fit(&[f3, f2, f1], &l1, room) }, ink, &l1, 1);
         text_at(cx, ty + th * 51 / 100, ty + th * 66 / 100, fit(&[f2, f1], &l2, room), if NAMING { GOLD } else { ink }, &l2, 1);
         // (the cost alone on its line, the deposit under it: one line ran past the tile, 2026-11-23)
         let cost_line = to_latin1(&format!("COST: {}", g.money(cost)));
@@ -1446,6 +1549,7 @@ pub unsafe fn flip() {
     };
     let note = to_latin1(&note);
     text_at(o.0 + pad + circle + m, y, y + l, fit(&[f2, f1], &note, o.2 - pad - (o.0 + pad + circle + m)), if g.said.is_empty() { [0xb0, 0xb8, 0xc4] } else { GOLD }, &note, 0);
+    }
     // what is being built: a panel over the picture's bottom left, a bar for each work (the card
     // had no room left for it, night 11)
     if !g.works.is_empty() && !FULL_VIEW {
@@ -1453,7 +1557,8 @@ pub unsafe fn flip() {
         let pw = ((pic.2 - pic.0) * 55 / 100).max(200);
         let shown = g.works.len().min(4) as i32;
         let row = l * 13 / 10;
-        let (px, py) = (pic.0 + m * 2, pic.3 - m * 2 - (l + row * shown + m));
+        // (bottom right: the club shop stands at the bottom left, 2026-11-23)
+        let (px, py) = (pic.2 - m * 2 - pw, pic.3 - m * 2 - (l + row * shown + m));
         let panel = (px, py, px + pw, py + l + row * shown + m);
         blend(panel.0, panel.1, panel.2 - panel.0, panel.3 - panel.1, |c, r| {
             let edge = c == 0 || r == 0 || c == panel.2 - panel.0 - 1 || r == panel.3 - panel.1 - 1;
@@ -1468,9 +1573,10 @@ pub unsafe fn flip() {
                 CONVERT => format!("{} places to seats", sep(w.1)),
                 ROOF => "The roof".into(),
                 NEW => format!("New stadium, {} seats", sep(w.1)),
+                SHOP => shop::LEVELS[(w.1 as usize).min(3)].0.to_string(),
                 _ => "Under-soil heating".into(),
             };
-            let left_days = format!("{} days", w.2);
+            let left_days = if w.2 == 1 { "1 day".to_string() } else { format!("{} days", w.2) };
             text_at(px + m, wy, wy + row * 6 / 10, fit(&[f2, f1], &to_latin1(&what), pw - m * 3 - text_width(f1, left_days.as_bytes())), WHITE, &to_latin1(&what), 0);
             text_at(px + pw - m, wy, wy + row * 6 / 10, f1, LIGHT, left_days.as_bytes(), 2);
             // how far it is: the days gone of the days it takes
@@ -1628,6 +1734,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if !released || OPENED_AT.is_some_and(|t| t.elapsed().as_millis() < 300) {
         return Some(false);
     }
+    if let Some(&(_, shop_view)) = CARD_PILLS.iter().find(|v| inside(v.0)) {
+        (SHOP_VIEW, ARMED, NAMING) = (shop_view, None, false);
+        return Some(true);
+    }
     if let Some(&(_, full)) = VIEW_PILLS.iter().find(|v| inside(v.0)) {
         FULL_VIEW = full;
         return Some(true);
@@ -1660,18 +1770,223 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             return Some(true);
         }
         NAMING = false;
-        // (real money: the first click asks, the second orders)
-        if ARMED == Some(kind) {
+        // (real money: the first click asks, the second orders; an item: the same item twice)
+        if ARMED == Some(kind) && (kind != ITEM || ARMED_ITEM == amount as usize) {
             ARMED = None;
             fetch(kind, amount, &[]);
         } else {
             ARMED = Some(kind);
+            ARMED_ITEM = amount as usize;
         }
         return Some(true);
     }
     (ARMED, NAMING) = (None, false);
     Some(true)
 }
+
+/// A layer of the pack (the club shop's building) fitted into r, for the shop's card; faint while
+/// it is being built.
+#[allow(static_mut_refs)]
+unsafe fn thumb(kind: &str, g: &Ground, r: (i32, i32, i32, i32), faint: bool) -> bool {
+    let Some(Some(pack)) = PACK.as_ref() else { return false };
+    let want = format!("{kind}_{}", size_of(g.capacity));
+    let Some(pic) = pack.iter().find(|p| p.name == want) else { return false };
+    let (w, h) = (r.2 - r.0, r.3 - r.1);
+    if w < 4 || h < 4 || pic.w < 2 || pic.h < 2 {
+        return false;
+    }
+    let sc = (w as f32 / pic.w as f32).min(h as f32 / pic.h as f32);
+    let (ox, oy) = ((w as f32 - pic.w as f32 * sc) / 2.0, (h as f32 - pic.h as f32 * sc) / 2.0);
+    let cols = mosaic(g.colours);
+    blend(r.0, r.1, w, h, |c, row| {
+        let (fx0, fy0) = (pic.x as f32 + (c as f32 - ox) / sc, pic.y as f32 + (row as f32 - oy) / sc);
+        match sample(pic, (fx0, fx0 + 1.0 / sc, fy0, fy0 + 1.0 / sc), cols, 1.0) {
+            Some((rgb, a)) => (rgb565(rgb.map(|v| v.clamp(0.0, 255.0) as u8)), (a * if faint { 110.0 } else { 255.0 }) as u32),
+            None => (0, 0),
+        }
+    });
+    true
+}
+
+/// The order card as the club shop (the user's and Grok's notes, 2026-11-23, in the page's own
+/// style): one card for the shop (its building from the pack, its level and status, the weekly
+/// boost split into the shop's and the results' part, the next upgrade), then the items with a
+/// small picture each: active, available or locked.
+#[allow(static_mut_refs)]
+unsafe fn shop_view(g: &Ground, o: (i32, i32, i32, i32), (ty, _th, _tw, gap, pad, l, m): (i32, i32, i32, i32, i32, i32, i32), (f1, f2, f3): (u32, u32, u32), [blue, gold, off, lit]: [([u8; 3], [u8; 3], [u8; 3]); 4]) {
+    let building = g.works.iter().find(|w| w.0 == SHOP).copied();
+    let level = g.shop.min(3);
+    let base = shop::pct(g.shop, g.items);
+    let results = g.merch_pct - base;
+    let green = ([0x1c, 0x3a, 0x2a], [0x14, 0x2a, 0x1e], [0x3c, 0xc8, 0x6e]);
+    // (800x600: no picture, no tags, shorter words: the fonts do not shrink)
+    let small = screen().1 < 750;
+    // the shop's card
+    let ch = l * 4;
+    let s = (o.0 + pad, ty, o.2 - pad, ty + ch);
+    gradient(s, [0x18, 0x1e, 0x28], [0x12, 0x17, 0x1e], EDGE, 6);
+    let t = if small { (s.0, s.1 + m, s.0, s.3 - m) } else { (s.0 + m, s.1 + m, s.0 + m + ch * 13 / 10, s.3 - m) };
+    if !small {
+        gradient(t, [0x0c, 0x10, 0x16], [0x0a, 0x0d, 0x12], [0x22, 0x28, 0x32], 5);
+    }
+    let shown = level.max(building.map_or(0, |w| w.1 as u8));
+    let kind = match shown {
+        0 => "",
+        1 => "shop",
+        _ => "mega",
+    };
+    if small {
+    } else if kind.is_empty() || !thumb(kind, g, (t.0 + 3, t.1 + 3, t.2 - 3, t.3 - 3), level < shown) {
+        icon(11, (t.0 + t.2) / 2, (t.1 + t.3) / 2, (t.3 - t.1) * 55 / 100, [0x4a, 0x52, 0x5e]);
+    }
+    let tx = t.2 + m * 2;
+    let ub = (s.2 - m - (s.2 - s.0) * if small { 42 } else { 30 } / 100, s.1 + m, s.2 - m, s.3 - m);
+    let text_w = ub.0 - m - tx;
+    let name = to_latin1(&shop::LEVELS[level as usize].0.to_uppercase());
+    text_at(tx, s.1 + ch * 5 / 100, s.1 + ch * 27 / 100, fit(&[f3, f2, f1], &name, text_w), WHITE, &name, 0);
+    // the level as a pill, the status beside it
+    let lv = to_latin1(&format!("LEVEL {level} OF 3"));
+    let (py0, py1) = (s.1 + ch * 29 / 100, s.1 + ch * 45 / 100);
+    let pill = (tx, py0, tx + text_width(f1, &lv) + m * 2, py1);
+    let (pt, pb, pe) = if level > 0 { green } else { off };
+    gradient(pill, pt, pb, pe, (py1 - py0) / 2 - 1);
+    text_at((pill.0 + pill.2) / 2, py0, py1, f1, if level > 0 { GREEN } else { DIM }, &lv, 1);
+    let status = match (building, level) {
+        (Some(w), _) => format!("{} BEING BUILT: {}", shop::LEVELS[(w.1 as usize).min(3)].0.to_uppercase(), span(w.2).to_uppercase()),
+        (None, 3) => "FULLY BUILT".into(),
+        (None, 0) => "NOT BUILT YET".into(),
+        (None, _) => "OPEN".into(),
+    };
+    let status = to_latin1(&status);
+    if !small {
+        text_at(pill.2 + m, py0, py1, fit(&[f1], &status, text_w - (pill.2 - tx) - m), if building.is_some() { WORKS } else { LIGHT }, &status, 0);
+    }
+    // the weekly boost: the shop's and the items' share, the results' share
+    let boost = to_latin1(&format!("WEEKLY BOOST {:+}%", g.merch_pct));
+    text_at(tx, s.1 + ch * 48 / 100, s.1 + ch * 66 / 100, fit(&[f3, f2, f1], &boost, text_w), if g.merch_pct >= 0 { GREEN } else { RED }, &boost, 0);
+    // (base: the shop and the items; form: this week's results)
+    let parts = to_latin1(&format!("BASE {base:+}%  -  FORM {results:+}%"));
+    text_at(tx, s.1 + ch * 66 / 100, s.1 + ch * 80 / 100, fit(&[f1], &parts, text_w), DIM, &parts, 0);
+    // (shorter where the long one does not fit: 1280x800)
+    let season = to_latin1(&format!("MERCHANDISING THIS SEASON: {}", g.money(g.merch)));
+    let season = if text_width(f1, &season) > text_w { to_latin1(&format!("THIS SEASON: {}", g.money(g.merch))) } else { season };
+    text_at(tx, s.1 + ch * 81 / 100, s.1 + ch * 96 / 100, fit(&[f1], &season, text_w), LIGHT, &season, 0);
+    // the next upgrade, at the card's right
+    let next = g.shop + 1;
+    let (bh, bx) = (ub.3 - ub.1, (ub.0 + ub.2) / 2);
+    let room = ub.2 - ub.0 - 10;
+    if next <= 3 && building.is_none() {
+        let (cost, days) = price(SHOP, next as i32);
+        let refused = g.refusal(SHOP, next as i32);
+        let armed = ARMED == Some(SHOP);
+        let (top, bottom, edge) = if armed { gold } else if refused.is_some() { off } else if HOVER == Some(ub) { lit } else { blue };
+        gradient(ub, top, bottom, edge, 6);
+        let ink = if refused.is_some() { [0x6a, 0x72, 0x7c] } else { WHITE };
+        let head = to_latin1(if small { ["", "CLUB SHOP", "MEGASTORE", "WEBSHOP"][next as usize] } else { ["", "BUILD A CLUB SHOP", "UPGRADE TO A MEGASTORE", "ADD A WEBSHOP"][next as usize] });
+        text_at(bx, ub.1 + bh * 6 / 100, ub.1 + bh * 30 / 100, fit(&[f2, f1], &head, room), ink, &head, 1);
+        let gain = shop::LEVELS[next as usize].1 - shop::LEVELS[level as usize].1;
+        let more = to_latin1(&if small { format!("+{gain}%") } else { format!("+{gain}% MERCHANDISE") });
+        text_at(bx, ub.1 + bh * 30 / 100, ub.1 + bh * 50 / 100, fit(&[f1], &more, room), if refused.is_none() { GREEN } else { ink }, &more, 1);
+        let cost_line = to_latin1(&if small { g.money(cost) } else { format!("{}  -  {}", g.money(cost), span(days).to_uppercase()) });
+        text_at(bx, ub.1 + bh * 52 / 100, ub.1 + bh * 72 / 100, fit(&[f2, f1], &cost_line, room), ink, &cost_line, 1);
+        let under = match (&refused, armed) {
+            (_, true) => "CLICK AGAIN TO ORDER".to_string(),
+            (Some(why), _) => short(why),
+            _ if small => span(days).to_uppercase(),
+            _ => "CLICK TO ORDER".to_string(),
+        };
+        let under = to_latin1(&under);
+        text_at(bx, ub.1 + bh * 74 / 100, ub.1 + bh * 94 / 100, fit(&[f1], &under, room), if armed { GOLD } else { [0xb8, 0xc8, 0xe0] }, &under, 1);
+        if refused.is_none() {
+            BUTTONS.push((ub, SHOP, next as i32));
+        }
+    } else {
+        gradient(ub, [0x14, 0x19, 0x21], [0x10, 0x14, 0x1a], EDGE, 6);
+        icon(14, bx, ub.1 + bh * 38 / 100, bh * 40 / 100, if building.is_some() { WORKS } else { GREEN });
+        let words: &[u8] = if building.is_some() { b"BEING BUILT" } else { b"ALL BUILT" };
+        text_at(bx, ub.1 + bh * 66 / 100, ub.1 + bh * 90 / 100, f1, DIM, words, 1);
+    }
+    // the items, two by two
+    let hy = s.3 + m;
+    text_at(o.0 + pad, hy, hy + l * 8 / 10, f1, DIM, b"MERCHANDISE", 0);
+    let gy = hy + l * 8 / 10;
+    let note_y = o.3 - m - l;
+    let rh = ((note_y - m - gy - m) / 2).max(l);
+    let iw = (o.2 - o.0 - pad * 2 - gap) / 2;
+    for (k, (name, more, cost)) in shop::ITEMS.iter().enumerate() {
+        let x = o.0 + pad + (k % 2) as i32 * (iw + gap);
+        let y = gy + (k / 2) as i32 * (rh + m);
+        let r = (x, y, x + iw, y + rh);
+        let owned = g.items & 1 << k != 0;
+        let refused = g.refusal(ITEM, k as i32);
+        let locked = refused.as_deref() == Some("Needs a club shop");
+        let armed = ARMED == Some(ITEM) && ARMED_ITEM == k;
+        let (top, bottom, edge) = if owned { green } else if armed { gold } else if refused.is_some() { off } else if HOVER == Some(r) { lit } else { blue };
+        gradient(r, top, bottom, edge, 6);
+        let ib = (r.0 + m / 2, r.1 + m / 2, r.0 + m / 2 + rh - m, r.3 - m / 2);
+        gradient(ib, [0x0c, 0x10, 0x16], [0x0a, 0x0d, 0x12], [0x22, 0x28, 0x32], 5);
+        let ink = if locked { [0x6a, 0x72, 0x7c] } else { WHITE };
+        let pic = if locked { 12 } else if k == 1 { 13 } else { 10 };
+        icon(pic, (ib.0 + ib.2) / 2, (ib.1 + ib.3) / 2, (ib.3 - ib.1) * 6 / 10, if owned { GREEN } else { ink });
+        let tx = ib.2 + m;
+        // the state, a tag at the top right
+        let (tag, tag_bg, tag_ink): (&[u8], [u8; 3], [u8; 3]) = if owned {
+            (b"ON SALE", [0x1f, 0x7a, 0x45], WHITE)
+        } else if locked {
+            (b"LOCKED", [0x30, 0x36, 0x40], [0x9a, 0xa0, 0xa8])
+        } else {
+            (b"AVAILABLE", [0x2a, 0x48, 0x78], WHITE)
+        };
+        let tg = if small { (r.2, r.1, r.2, r.1) } else { (r.2 - m / 2 - text_width(f1, tag) - m * 2, r.1 + m / 2, r.2 - m / 2, r.1 + m / 2 + l * 7 / 10) };
+        if !small {
+            gradient(tg, tag_bg, tag_bg, tag_bg, 3);
+            text_at((tg.0 + tg.2) / 2, tg.1, tg.3, f1, tag_ink, tag, 1);
+        }
+        // (a short tile, 1280x800 and down: the name with its share, then the state; no middle line)
+        let compact = rh < l * 2;
+        let n = to_latin1(&name.to_uppercase());
+        let name_box = if compact { (r.1 + rh * 4 / 100, r.1 + rh * 50 / 100) } else { (r.1 + rh * 6 / 100, r.1 + rh * 38 / 100) };
+        text_at(tx, name_box.0, name_box.1, fit(&[f2, f1], &n, tg.0 - m - tx), ink, &n, 0);
+        if !compact {
+            let p = to_latin1(&format!("+{more}% MERCHANDISE"));
+            text_at(tx, r.1 + rh * 38 / 100, r.1 + rh * 64 / 100, fit(&[f1], &p, r.2 - m - tx), if owned { GREEN } else { [0xb0, 0xbc, 0xcc] }, &p, 0);
+        }
+        let under = if owned && small {
+            "ON SALE".to_string()
+        } else if locked && small {
+            "NEEDS A SHOP".to_string()
+        } else if owned {
+            "ACTIVE: SELLING EVERY WEEK".to_string()
+        } else if armed {
+            "CLICK AGAIN TO UNLOCK".to_string()
+        } else if locked {
+            format!("NEEDS A CLUB SHOP  -  {}", g.money(*cost))
+        } else if let Some(why) = &refused {
+            short(why)
+        } else if small {
+            g.money(*cost)
+        } else {
+            format!("UNLOCK FOR {}", g.money(*cost))
+        };
+        let under = to_latin1(&under);
+        let under = if compact { [format!("+{more}%  ").as_bytes(), &under].concat() } else { under };
+        let under_box = if compact { (r.1 + rh * 50 / 100, r.1 + rh * 96 / 100) } else { (r.1 + rh * 64 / 100, r.1 + rh * 94 / 100) };
+        text_at(tx, under_box.0, under_box.1, fit(&[f1], &under, r.2 - m - tx), if armed { GOLD } else if owned { GREEN } else if refused.is_some() { [0x8a, 0x92, 0x9c] } else { WHITE }, &under, 0);
+        if refused.is_none() && !owned {
+            BUTTONS.push((r, ITEM, k as i32));
+        }
+    }
+    // how it works (or the answer to the last order)
+    let note = to_latin1(match (g.said.is_empty(), small) {
+        (false, _) => g.said.as_str(),
+        (true, false) => "Fans buy more when you win: +3% a win, +1% a draw, -2% a defeat that week.",
+        (true, true) => "Fans buy more when you win.",
+    });
+    text_at(o.0 + pad, note_y, note_y + l, fit(&[f2, f1], &note, o.2 - o.0 - pad * 2), if g.said.is_empty() { [0xb0, 0xb8, 0xc4] } else { GOLD }, &note, 0);
+}
+
+/// Which item is armed (the two clicks of an order: kind ITEM and its index).
+static mut ARMED_ITEM: usize = 0;
 
 /// Orders the new stadium of the size picked, with the name typed.
 #[allow(static_mut_refs)]
@@ -1729,5 +2044,20 @@ mod tests {
         let building = Ground { works: vec![(NEW, 30_000, 600)], ..full.clone() };
         assert_eq!(building.refusal(ROOF, 0).as_deref(), Some("New stadium being built"));
         assert_eq!(building.refusal(NEW, 30_000).as_deref(), Some("Being built"));
+        // the club shop: one level at a time, not while one is built, goes on during a new stadium;
+        // an item once
+        assert_eq!(full.refusal(SHOP, 1), None);
+        assert_eq!(full.refusal(SHOP, 2).as_deref(), Some("Fully built"));
+        assert_eq!(Ground { shop: 3, ..full.clone() }.refusal(SHOP, 4).as_deref(), Some("Fully built"));
+        assert_eq!(Ground { works: vec![(SHOP, 1, 30)], ..full.clone() }.refusal(SHOP, 1).as_deref(), Some("Being built"));
+        assert_eq!(building.refusal(SHOP, 1), None);
+        assert_eq!(building.refusal(ITEM, 0), None);
+        assert_eq!(full.refusal(ITEM, 3).as_deref(), Some("Needs a club shop"));
+        assert_eq!(Ground { shop: 1, ..full.clone() }.refusal(ITEM, 3), None);
+        assert_eq!(Ground { items: 0b0100, shop: 1, ..full.clone() }.refusal(ITEM, 2).as_deref(), Some("On sale"));
+        assert_eq!(price(SHOP, 1), (1_500_000, 120));
+        assert_eq!(price(ITEM, 2), (100_000, 0));
+        let g = Ground { shop: 2, items: 0b1001, merch: 123, merch_pct: 59, next_name: "X".into(), ..full.clone() };
+        assert_eq!(decode(&encode(&g)).unwrap(), g);
     }
 }

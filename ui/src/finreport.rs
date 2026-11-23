@@ -1073,6 +1073,37 @@ pub unsafe fn pay_ground(club: usize, sum: i64, debt: bool) -> bool {
     true
 }
 
+/// A club's finance record.
+unsafe fn record_of(club: usize) -> Option<usize> {
+    let club = club_ptr(club)?;
+    let table = rd::<usize>(FINANCE_TABLE);
+    let record = if table == 0 { 0 } else { game::<extern "thiscall" fn(usize, usize) -> usize>(FINANCE_FOR_CLUB)(table, club) };
+    readable(record, RECORD).then_some(record)
+}
+
+/// A club's merchandising this month (record +0xbc, as the game's Sunday pays it in, 0x59b7e0).
+pub unsafe fn merch_month(club: usize) -> Option<i32> {
+    record_of(club).map(|r| ((r + 0xbc) as *const i32).read_unaligned())
+}
+
+/// A club's merchandising this season (record +0x15c).
+pub unsafe fn merch_year(club: usize) -> i64 {
+    record_of(club).map_or(0, |r| ((r + 0x15c) as *const i32).read_unaligned() as i64)
+}
+
+/// More merchandising paid in (the club shop, `shop.rs`): this month's and this year's lines and
+/// the bank, as the game's own Sunday does.
+pub unsafe fn add_merch(club: usize, sum: i64) -> bool {
+    let Some(record) = record_of(club) else { return false };
+    for at in [0xbc, 0x15c] {
+        let p = (record + at) as *mut i32;
+        p.write_unaligned(p.read_unaligned().wrapping_add(sum as i32));
+    }
+    let balance = (record as *const i64).read_unaligned();
+    (record as *mut i64).write_unaligned(balance + sum);
+    true
+}
+
 /// A test script's money (`money n` in cmui.click): the bank balance only, no income line.
 pub unsafe fn add_money(club: usize, sum: i64) -> bool {
     let Some(club) = club_ptr(club) else { return false };

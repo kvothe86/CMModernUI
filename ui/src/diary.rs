@@ -182,6 +182,7 @@ pub unsafe fn tick() {
         SCOUTED = parse_scouted(&text);
         WORKS = parse_works(&text);
         (NAMES, PAID) = parse_new(&text);
+        MERCH = parse_merch(&text);
         FILE = file;
     }
     let (year, month) = (today.1 as i32, month_of(today.0 as i32, today.1 as i32));
@@ -245,6 +246,17 @@ fn parse_works(text: &str) -> Vec<(usize, u8, i32, i32)> {
 /// A new stadium's name, set when it is done (`N` lines: club seed, name), and the months its
 /// instalments were paid (`Q` lines: club seed, year, month; the order's own month is its deposit).
 pub static mut NAMES: Vec<(usize, String)> = Vec::new();
+/// A human club's club shop: club seed, level, items on sale (bits) (`M` lines, `shop.rs`).
+pub static mut MERCH: Vec<(usize, u8, u8)> = Vec::new();
+
+fn parse_merch(text: &str) -> Vec<(usize, u8, u8)> {
+    text.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() == 4 && f[0] == "M").then(|| Some((f[1].parse().ok()?, f[2].parse().ok()?, f[3].parse().ok()?)))?
+        })
+        .collect()
+}
 pub static mut PAID: Vec<(usize, i32, i32)> = Vec::new();
 
 fn parse_new(text: &str) -> (Vec<(usize, String)>, Vec<(usize, i32, i32)>) {
@@ -285,6 +297,7 @@ unsafe fn save() {
         .chain(SCOUTED.iter().map(scouted_line))
         .chain(WORKS.iter().map(|w| format!("G\t{}\t{}\t{}\t{}\n", w.0, w.1, w.2, w.3)))
         .chain(NAMES.iter().map(|n| format!("N\t{}\t{}\n", n.0, n.1)))
+        .chain(MERCH.iter().map(|m| format!("M\t{}\t{}\t{}\n", m.0, m.1, m.2)))
         .chain(PAID.iter().map(|q| format!("Q\t{}\t{}\t{}\n", q.0, q.1, q.2)))
         .collect();
     let temp = format!("{FILE}.tmp");

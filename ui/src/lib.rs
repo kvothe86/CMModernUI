@@ -48,6 +48,7 @@ mod finreport;
 mod diary;
 mod teletext;
 mod stadium;
+mod shop;
 mod cheesecorner;
 mod natpool;
 mod lineups;
@@ -8069,6 +8070,9 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
             local::install();
             if on(NEWS) {
                 cheesecorner::install();
+            }
+            if on(STADIUM) {
+                shop::install();
             }
             patch_call(OTHER_ITEM_CALL, 5, ADD_ITEM, other_item as usize);
             patch_call(RESULTS_CALL, 5, GET_RESULTS, get_results as usize);

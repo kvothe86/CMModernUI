@@ -27,6 +27,23 @@ mock picture (generated, not in the repository; its left menu ignored).
 - The crest lies flat on the centre spot (`flat_crest`, the pack's pitch axes); the bank balance
   has a green / red arrow against the last month's end (the diary's `B` lines, `Ground.last`).
 - Tiles light up under the mouse; refusals short ("NOT ENOUGH MONEY").
+- **Club shop** (`shop.rs`, user 2026-11-23): the order card's pills WORKS | CLUB SHOP. The shop
+  now (level, % more merchandise this week, merchandising this season), its next level (Club shop
+  +30%, Megastore +45%, Megastore and webshop +60%; 1.5 / 4 / 2 million, 120 / 180 / 90 days; job
+  `SHOP`, amount = level) and four items bought at once (`ITEM`: away shirt +8%, scarves and caps
+  +4%, name and number +8%, kids' kits +6%). Kept in the diary (`M` lines: seed, level, item bits),
+  not in the stadium record: a new stadium keeps it. Money: a hook on the game's Sunday
+  merchandise (0x59b7e0, thiscall(table, club)) adds the share to the same line (finance record
+  +0xbc month, +0x15c year, the bank), plus the week's results (+3 a win, +1 a draw, -2 a defeat,
+  at most 8). Computer clubs by reputation (+0x80): 6,000+ a club shop, 3,000+ away shirt and
+  scarves. The building is the pack's `shop_<size>` layer, `mega_<size>` from level 2 (faint while
+  built). The card (after the user's and Grok's notes): the building cut from the pack, LEVEL n OF
+  3, status, WEEKLY BOOST split into BASE (shop + items) and FORM (the week's results), the next
+  upgrade at the right; the items two by two, ON SALE / AVAILABLE (unlock price) / LOCKED (name and
+  number, kids' kits: "Needs a club shop"). 800x600: no picture or tags, shorter words.
+- A new stadium finished sooner than paid (a test's one day) pays the instalments still owed at
+  once (`complete`).
+- Test: cmui.ini `stadium_test_days=1` makes every work take one day; `money n` in cmui.click.
 - `fit()` picks the largest font that fits; shorter words below 1280x800. Seen at 1680x1050,
   1280x800 and 800x600.
 - The background picture pass (`let_picture_through`) skips the page.
