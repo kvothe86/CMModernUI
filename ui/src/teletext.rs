@@ -450,7 +450,7 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if !OPEN {
         // (not under one of our pages: the news screen's button area outlives it there, user
         // 2026-11-23: the Rad's Spin on CM Challenge opened Teletext)
-        if released && news::TELETEXT_BUTTON.is_some_and(inside) && !news::MENU_OPEN && !crate::finreport::covered() {
+        if released && news::TELETEXT_BUTTON.is_some_and(|r| inside(r) && news::drawn(r, [0x5a, 0x5a, 0x10])) && !news::MENU_OPEN && !crate::finreport::covered() {
             *(LEFT_CLICK as *mut u32) = 0;
             open();
             return Some(true);

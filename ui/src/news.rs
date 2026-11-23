@@ -456,6 +456,15 @@ pub unsafe fn mark_button(full_frame: bool) {
     TELETEXT_BUTTON = Some(t);
 }
 
+/// The button `r` is on screen now: its one-pixel edge (`edge`) at the middle of its left and top
+/// sides in the back buffer. (The click areas are cleared only by a whole frame without the news
+/// list; a screen drawn in parts, a live match, kept them and a click there opened Teletext,
+/// user 2026-11-23.)
+pub unsafe fn drawn(r: (i32, i32, i32, i32), edge: [u8; 3]) -> bool {
+    let near = |p: Option<[u8; 3]>| p.is_some_and(|p| (0..3).all(|i| (p[i] as i32 - edge[i] as i32).abs() <= 12));
+    near(crate::pixel_at(r.0, (r.1 + r.3) / 2)) && near(crate::pixel_at((r.0 + r.2) / 2, r.1))
+}
+
 /// The news screen's Teletext button while it is drawn (`teletext::input` opens the set).
 pub static mut TELETEXT_BUTTON: Option<(i32, i32, i32, i32)> = None;
 

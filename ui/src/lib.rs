@@ -3311,7 +3311,7 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
             return -1;
         }
         if let (true, Some(r)) = (released, news::MARK_BUTTON) {
-            if over(r) && !finreport::covered() {
+            if over(r) && !finreport::covered() && news::drawn(r, [0x8a, 0x70, 0x34]) {
                 if remote::CLIENT {
                     // the host marks them: the request first, then a click its news input takes
                     remote::send_now(&key(b'Q', &[]));
