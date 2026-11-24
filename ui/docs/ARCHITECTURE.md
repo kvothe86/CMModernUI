@@ -120,6 +120,7 @@ screen -> function tables are in [INDEX.md](INDEX.md) and [screens.md](screens.m
 | `natpool.rs` | 390 | National pool for a national team manager: every player of the country by group, + to the game's Short List; key `n` for clients. | `open`, `draw`, `input`, `remote` | `national_pool` |
 | `lineups.rs` | 330 | Saved line-ups 1 / 2 / 3 and Fill subs on the squad screen (`cmui_lineups.txt`); key `l` for clients. | `run`, `draw`, `input`, `remote_summary` | `saved_lineups` |
 | `coach.rs` | 1350 | Claude as coach: a button and page with four tabs (briefing, analysis, team report, Ask). WinHTTP request on its own thread; 1680 wide and up; off without `claude_api_key` in `cmui.ini`; key `k` carries a client's game data. | `button_shown`, `active`, `bar_item`, `flip`, `input`, `remote_data` | `coach` |
+| `music.rs` | 400 | Menu music: `Data\cmui_music\*.wav` (PCM 16 or mono IMA ADPCM) through winmm waveOut on its own thread, each loop twice then the next; the control (name, play / pause, next, mute, volume) under the menu bar's lowest button; `music_playing` / `music_volume` / `music_track` in `cmui.ini`. | `flip`, `input`, `play`, `decode` | `music` |
 | `challenge\mod.rs` | 1620 | CM Challenge: managers' league of a network game (or the one manager's career in single player): prizes from the staff history, `cmchallenge.tsv`, spin, seasons. Built to be droppable (remove the folder and the lines `challenge.md` lists). | `remote` (key `c`), `prizes`, `moves`, `seasons`, `page`, `update`, `league_place`, `summary` | `challenge` |
 | `challenge\draw.rs` | 1340 | The page in cmui's skin: tabs (Dashboard, Season, RAD, Stats, History, Rules), buttons under the menu bar, overlay. | `bar_item`, `button_shown`, `flip`, `input`, `overlay` | `challenge` |
 | `challenge\track.rs` | 1090 | RAD challenges the game can judge itself (squad stats, transfers, staff); read every human turn; host can override. | `rule`, `update`, `tick` | `challenge` |
@@ -238,6 +239,7 @@ Rules of thumb:
 | 37 | `saved_lineups` | `SAVED_LINEUPS` | `lineups.rs` |
 | 38 | `flat_buttons` | `FLAT_BUTTONS` | `lib.rs` `panel` (+ `rounded`, `FLAT_CELL`), `news.rs` `flat_tabs` |
 | 39 | `pl_report` | `PL_REPORT` | `finreport.rs` (+ `accountants_notes.tsv`) |
+| 41 | `music` | `MUSIC` | `music.rs` (+ `Data\cmui_music\*.wav` from `music\make_music.py`) |
 
 Club logos from footylogos.com: `footy.py` (`index`, `logos`) matches the site's logo list to a game
 folder's database and downloads only what matches (a polite 0.15 s per file); the pictures never go

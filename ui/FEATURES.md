@@ -223,3 +223,9 @@ database. `logos` writes `badge_match.tsv` (the fuzzy matches 0.8 and up, as for
 downloads only the matched files (a 404 falls back to the preview picture). Nothing from the site is committed.
 Player pictures (`faces`, `draw_face`, `cmui_faces.bin`) were scrapped by the user on 2026-11-16: removed from
 code, docs, package and every game folder.
+
+## Menu music (2026-11-24, asked by the user)
+
+"We have sound in CM, but I miss music": four original synth tracks in a late-90s football-management
+menu style, and a small player at the foot of the menu bar. Switch `music` (index 41). Details in
+[docs/music.md](docs/music.md). Built and installed (7A49CD) in every folder; not heard or seen in the game yet.

@@ -46,7 +46,8 @@ $switches = @(
     @('saved_lineups', 'Saved Line-ups', 'Squad screen: save line-ups 1 / 2 / 3, load them (stand-ins for who cannot play), Fill subs. Needs Assistant Pick.'),
     @('flat_buttons', 'Flat Buttons', 'Buttons flat with soft corners, tabs a bar with the open tab in gold, list cells without a box. Needs Modern Buttons.'),
     @('pl_report', 'P&L Report', 'Finances tab: a button for a signed profit and loss report (Accountants & Co), notes from how the club is doing. Needs Crests and Profile.'),
-    @('stadium', 'Stadium Builder', 'Finances tab: a Stadium button to order works on the ground at the game''s prices (changes the game). Needs P&L Report.')
+    @('stadium', 'Stadium Builder', 'Finances tab: a Stadium button to order works on the ground at the game''s prices (changes the game). Needs P&L Report.'),
+    @('music', 'Menu Music', 'cmui''s own synth menu music (Data\cmui_music) with a small player at the foot of the menu bar: play / pause, next, mute, volume.')
 )
 $extras = @(
     @('hide_ca_pa', 'Hide CA/PA', 'Hide the CA and PA stars on profiles (also the Hide button in the game).'),

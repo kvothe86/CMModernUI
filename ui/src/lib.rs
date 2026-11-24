@@ -49,6 +49,7 @@ mod finreport;
 mod diary;
 mod teletext;
 mod stadium;
+mod music;
 mod shop;
 mod cheesecorner;
 mod natpool;
@@ -2808,6 +2809,8 @@ unsafe fn sidebar_item(x1: i32, y1: i32, x2: i32, y2: i32, font: u32, colour: u3
     } else {
         (y1, y2, rgb)
     };
+    // (the bar's extent this frame: the music control goes under its lowest button)
+    music::BAR_SEEN = Some(music::BAR_SEEN.map_or((x1, y1, x2, y2), |b| (b.0.min(x1), b.1.min(y1), b.2.max(x2), b.3.max(y2))));
     if let Some(code) = sidebar_icon(&label, t) {
         draw_icon(code, cx, y1 + h * 8 / 100, h * 32 / 100, rgb);
     }
@@ -3000,14 +3003,14 @@ fn set_setting(key: &str, value: &str) {
 
 /// Every feature has its own switch in cmui.ini (`name=0` turns it off; missing names are
 /// written as on), so each can become a separate misc patch.
-const FEATURES: [&str; 41] = [
+const FEATURES: [&str; 42] = [
     "theme", "tabs", "attribute_bars", "crests", "profile", "stats_table", "news", "club_header",
     "squad_list", "tactics_pitch", "match_screen", "compare_screen", "menu_fixes", "status_bars",
     "search_ability", "scout_stars", "assistant_pick", "team_report", "honours", "export_button",
     "injury_history", "transfer_history", "compare_report", "scout_screen", "bigger_text",
     "squad_table", "table_icons", "background_show", "modern_buttons", "challenge", "career_goals",
     "coach", "weather_icons", "form_timeline", "match_card", "season_review", "national_pool",
-    "saved_lineups", "flat_buttons", "pl_report", "stadium",
+    "saved_lineups", "flat_buttons", "pl_report", "stadium", "music",
 ];
 /// Every feature in every list that names the switches (user, 2026-11-07: a solid safeguard
 /// against folders and tools that differ): make_exe.py's count, make_patches.py, install.py,
@@ -3036,6 +3039,7 @@ const SAVED_LINEUPS: usize = 37; // line-ups 1 / 2 / 3 saved and loaded, Fill su
 const FLAT_BUTTONS: usize = 38; // the buttons flat and rounded, the tabs a gold bar, list cells without a box (user 2026-11-09, styles B + D; needs modern_buttons)
 const PL_REPORT: usize = 39; // a signed profit and loss report on the Finances & Info tab (`finreport.rs`, the wording in accountants_notes.tsv)
 const STADIUM: usize = 40; // the stadium builder: the manager orders works on his ground at the game's prices (`stadium.rs`; needs pl_report, its button sits beside P&L)
+const MUSIC: usize = 41; // menu music and its control at the foot of the menu bar (`music.rs`, Data\cmui_music)
 const SEARCH_ABILITY: usize = 14;
 const SCOUT_STARS: usize = 15;
 const ASSISTANT_PICK: usize = 16;
@@ -3220,6 +3224,15 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
                 script();
                 return -1;
             }
+        }
+        // the music control at the foot of the menu bar
+        if on(MUSIC) {
+            if music::input(mx, my).is_some() {
+                game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                script();
+                return -1;
+            }
+            REDRAW |= music::changed();
         }
         // Teletext (the news screen's button, then the set over everything but the menu bar)
         // the stadium page (the Finances tab's Stadium button)
@@ -4572,6 +4585,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         if on(STADIUM) {
             stadium::flip();
         }
+        if on(MUSIC) {
+            music::flip(full_frame);
+        }
         // a live match runs its own loop without poll_input: the test script goes on from here
         if LAST_POLL.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(700)) {
             static mut SAID: bool = false;
@@ -4606,12 +4622,35 @@ const CREST_SIZE: usize = 80;
 static mut TITLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
 
 fn note_title(x1: i32, y1: i32, x2: i32, y2: i32) {
-    // at the top, about a tenth of the screen high, more than half of it wide: 148,17-1658,123
-    // at 1680x1050; all in proportion, so 800x600 and 1280x800 work the same
-    let (w, h) = screen();
-    if y1 <= h / 30 && y2 - y1 >= h * 8 / 100 && x2 - x1 > w / 2 {
-        unsafe { TITLE = (x1, y1, x2, y2) }
+    unsafe {
+        if is_title_bar(TITLE, (x1, y1, x2, y2), screen()) {
+            TITLE = (x1, y1, x2, y2);
+        }
     }
+}
+
+/// A box is the title bar: at the top, about a tenth of the screen high (at most 15 %: never a
+/// whole-screen panel), more than half of it wide: 148,17-1658,123 at 1680x1050; all in
+/// proportion, so 800x600 and 1280x800 work the same. Not a box in the bar already known that
+/// starts right of its left end: Offer Contract's centred name box (over half the screen wide)
+/// took the bar and the crest went into the name ("Mar[crest]van der Hoorn"); the text hook's own
+/// guard (089f1c) left the panel and button paths open (F:\CM2627, user 2026-11-24).
+fn is_title_bar(known: Rect, (x1, y1, x2, y2): Rect, (w, h): (i32, i32)) -> bool {
+    let bar = known.3 - known.1;
+    let inside = known.2 > known.0 && x1 > known.0 + bar / 2 && x2 <= known.2 + bar && y1 < known.3 && y2 > known.1;
+    y1 <= h / 30 && (h * 8 / 100..=h * 15 / 100).contains(&(y2 - y1)) && x2 - x1 > w / 2 && !inside
+}
+
+#[cfg(test)]
+#[test]
+fn title_bar_not_the_name_in_it() {
+    let (screen, bar) = ((1680, 1050), (148, 17, 1658, 123));
+    assert!(is_title_bar((0, 0, 0, 0), bar, screen));
+    assert!(is_title_bar(bar, bar, screen)); // the next screen's bar
+    assert!(!is_title_bar(bar, (432, 17, 1248, 123), screen)); // Offer Contract's name box
+    assert!(!is_title_bar(bar, (553, 17, 1679, 123), screen)); // a long name past the bar's end
+    assert!(!is_title_bar(bar, (0, 0, 1680, 1050), screen)); // a whole-screen panel
+    assert!(is_title_bar((0, 0, 0, 0), (70, 10, 790, 64), (800, 600))); // 800x600's bar
 }
 
 const CURRENT_CHANNEL: usize = 0xb77c7a; // i16: the network channel whose human is at the screen
