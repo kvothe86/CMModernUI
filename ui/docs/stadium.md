@@ -20,10 +20,22 @@ mock picture (generated, not in the repository; its left menu ignored).
   second click orders, Escape cancels; the keys through our window proc). 30% at the order (must be
   in the bank), the rest in monthly instalments into debt if need be (`instalments`, diary `Q`
   lines; the name in `N` lines). Every other work waits. Done (`complete`): capacity = seats =
-  size, room to grow a quarter more, roof, heating, the name written into the game's stadium record
-  (+4): the game's own General Info shows it ("60000 all seater with retractable roof and
-  under-soil heating"). "Fully built" shows the new one with its name and room. Test command:
-  `money n` in cmui.click (the human club's balance).
+  size, roof, heating, the name written into the game's stadium record (+4): the game's own General
+  Info shows it ("60000 all seater with retractable roof and under-soil heating"). "Fully built"
+  shows the new one with its name and room. Test commands in cmui.click: `money n` (the human
+  club's balance), `places n` (its ground n places, a quarter seated, full), `roof 0|1`; the last
+  two in memory only, never save after them.
+- **Room to grow of a new stadium** (`new_room`, user 2026-11-24: a level 7 club of 1,000 places
+  had to build five new stadiums): by the old ground's room, not the size picked: under 15,000 ->
+  30,000 (professional), under 50,000 -> 70,000 (big club), else 150,000 (`MOST`, was 125,000);
+  never under a quarter over its seats. Once the ground is full the info line says what comes
+  next (`full_note`): "Full. A new stadium: 15,000 seats, room to grow to 30,000. Its next one:
+  room to 70,000, then 150,000."
+- Roof words: only the ground's name, on the near roof (the far roof's club name went, a friend
+  2026-11-24: the crest on the pitch says it); on the amateur ground the stand's roof.
+- Mowing (`Mow`): the pack's pitch is one plain green with its own id (class 0, stand 3, seg 15 =
+  `PITCH_ID`); the DLL lays one of six patterns over it by the club's name (stripes across, checks,
+  diagonal, diamonds, rings, stripes along) through the pitch axes (pack points 0/6/7).
 - The crest lies flat on the centre spot (`flat_crest`, the pack's pitch axes); the bank balance
   has a green / red arrow against the last month's end (the diary's `B` lines, `Ground.last`).
 - Tiles light up under the mouse; refusals short ("NOT ENOUGH MONEY").
@@ -51,8 +63,25 @@ mock picture (generated, not in the repository; its left menu ignored).
 ## The rendered ground (`ui\stadium3d`)
 
 `build_stadium.py` (Blender 5.x, no window: `blender -b --factory-startup -P build_stadium.py --
-<out>`; env `STADIUM_ONLY=m` for one size) builds the ground in four sizes (`s` < 12,000, `m` <
-30,000, `l` < 60,000 two tiers, `x` above), each from one orthographic 3/4 camera, 780x1080:
+<out>`; env `STADIUM_ONLY=m` for one size; the whole pack about 70 s) builds the ground in five
+sizes (`a` amateur < 3,000, `s` < 12,000, `m` < 30,000, `l` < 60,000 two tiers, `x` above), each
+from one orthographic 3/4 camera, 780x1080.
+
+Amateur `a` (2026-11-24, after the user's reference picture, `sides_for` / `amateur_ground`): a
+46 m covered stand with six rows of seats on the far side (roof on front posts, `RH` 2.6), open
+concrete terraces with crush barriers on the near side and the east end, the west end open, a
+concrete walkway behind a low wall round the pitch, slim floodlight masts, a palisade fence, a gate
+in brick pillars, a brick clubhouse with a slate roof at the south-east, the ground in grass. On
+the page its stand always seats (labels: seats on the stand, standing on the terrace).
+
+The town (2026-11-24, after a friend's asset pictures; the stadium itself unchanged, checked by a
+pixel diff of old and new renders): kerbs and white edge lines on the ring road, kerbs, edge lines
+and pavements on the main road, kerbed car parks with paved edges and hatchback cars, leafy trees
+(14 shapes, `tree_shapes`, placed as linked copies: one mesh of a thousand trees took minutes),
+terraced brick / rendered houses with gables, chimneys, front gardens and railings
+(`terrace_row`), food vans in club colours on paved pads instead of kiosks and trucks
+(`food_van`), training pitches with cut corners, goals with nets, penalty boxes, slalom poles and
+small dummies; the megastore 33 m wide (was 24).
 
 | Picture | Engine | What |
 |---|---|---|

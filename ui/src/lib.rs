@@ -3596,6 +3596,9 @@ unsafe fn script() {
         ("wait", _, Ok(ms)) => pause = ms as u64,
         // (a test's money: the human club's bank balance up by n game units, a new stadium's order)
         ("money", _, Ok(n)) => log(&format!("money: {}", human_club_ptr().is_some_and(|c| finreport::add_money(c, n as i64)))),
+        // (a test's ground: the human club's stadium n places, `stadium::test_places`)
+        ("places", _, Ok(n)) => log(&format!("places: {}", stadium::test_places(n as i32))),
+        ("roof", _, Ok(n)) => log(&format!("roof: {}", stadium::test_roof(n != 0))),
         ("pause", _, Ok(ms)) => SCRIPT_PAUSE = ms as u64,
         ("shot", ..) => save_back_buffer(b),
         _ => log(&format!("script: {line}? (x y, type text, key vk, wait ms, pause ms, shot file.bmp)")),

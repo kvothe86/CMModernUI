@@ -30,7 +30,23 @@ SIZES = {
     "m": [(22, 0.85, 0.45)],
     "l": [(20, 0.85, 0.45), (14, 0.9, 0.62)],
     "x": [(26, 0.85, 0.45), (22, 0.9, 0.66)],
+    # amateur, under 3,000 (a friend 2026-11-24): its main stand's rows; `sides_for` has the rest
+    "a": [(6, 0.85, 0.42)],
 }
+AMATEUR = False  # (the ground being built is "a")
+RH = 5.0  # the roofs' height over a stand's last row (lower over an amateur ground's small stand)
+SIDE_GEOM = {}  # each built stand's (depth, top, length): its roof's corners and its middle
+
+
+def sides_for(size):
+    """Each side's (rows, length, kind): 'seats', 'terrace', or None (a rail behind the goal).
+    An amateur ground (a friend 2026-11-24: a 1,500 ground looked like one of 11,000): a short
+    covered stand with seats on the far side, a covered terrace on the near one, rails at the ends."""
+    if size == "a":
+        steps = lambda n: profile([(n, 0.75, 0.3)])
+        return [(profile(SIZES["a"]), 46.0, "seats"), (steps(4), PL + 8, "terrace"), (None, 0.0, None), (steps(3), PW + 4, "terrace")]
+    rows = profile(SIZES[size])
+    return [(rows, frame(s)[1], "seats") for s in range(4)]
 PL, PW = 105.0, 68.0  # the pitch
 GAP = 7.0  # touchline to the first row
 ROOF_FRONT = 0.58  # the roofs reach this far from the front (share of the stand's depth): the reference's seats show
@@ -86,12 +102,17 @@ def mat(name, color, rough=0.7, metal=0.0, emit=0.0):
     return m
 
 
-def grass_mat():
-    m = bpy.data.materials.new("Grass")
+def grass_mat(plain=False):
+    m = bpy.data.materials.new("GrassPlain" if plain else "Grass")
     m.use_nodes = True
     nt = m.node_tree
     p = nt.nodes.get("Principled BSDF")
     p.inputs["Roughness"].default_value = 0.9
+    if plain:
+        # (the main pitch: one green, its id PITCH_ID; the DLL mows the club's own pattern in,
+        # a friend 2026-11-24: "verschillende maaistijlen")
+        p.inputs["Base Color"].default_value = (0.0775, 0.315, 0.04, 1)
+        return m
     tc = nt.nodes.new("ShaderNodeTexCoord")
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
     l = nt.links
@@ -174,10 +195,10 @@ def profile(tiers):
 
 
 def build(size, colls):
-    tiers = SIZES[size]
-    rows = profile(tiers)
-    depth = max(r[1] for r in rows)
-    top = max(r[2] for r in rows)
+    specs = sides_for(size)
+    depth_all = max(max(r[1] for r in s[0]) for s in specs if s[0])
+    top_all = max(max(r[2] for r in s[0]) for s in specs if s[0])
+    SIDE_GEOM.clear()
     base, roof_c, works = colls[:3]
     seat = mat("Seat", (0.82, 0.82, 0.82), 0.45)
     concrete = mat("Concrete", (0.3, 0.305, 0.31), 0.85)
@@ -187,7 +208,13 @@ def build(size, colls):
     dark = mat("Fascia", (0.07, 0.075, 0.085), 0.5)
     tunnel = mat("Tunnel", (0.008, 0.008, 0.01), 0.9)
     for side in range(4):
-        w, length = frame(side)
+        rows, length, kind = specs[side]
+        if kind is None:  # (an amateur ground's end: a rail and the walkway, `amateur_ground`)
+            continue
+        w = frame(side)[0]
+        depth, top = max(r[1] for r in rows), max(r[2] for r in rows)
+        SIDE_GEOM[side] = (depth, top, length)
+        terrace = kind == "terrace"
         n_rows = len(rows)
         # aisles: a concrete stair between the seat blocks, as real stands (and the mock) have
         aisles = bmesh.new()
@@ -204,7 +231,14 @@ def build(size, colls):
                     u0, u1, z, t = rows[k]
                     floor = 0.0 if t == 0 else z - 2.5
                     add_box(bm, w(a0, u0, floor), w(a1, u1, z))
-                    add_box(bm, w(a0 + 0.05, u1 - 0.32, z), w(a1 - 0.05, u1 - 0.12, z + 0.42))  # the seat backs
+                    if terrace:  # (a crush barrier on every other step)
+                        if k % 2:
+                            add_box(bm, w(a0 + 0.3, u1 - 0.2, z + 0.95), w(a1 - 0.3, u1 - 0.08, z + 1.07))
+                    else:
+                        add_box(bm, w(a0 + 0.05, u1 - 0.32, z), w(a1 - 0.05, u1 - 0.12, z + 0.42))  # the seat backs
+                if terrace:  # (bare concrete steps: an amateur ground's standing side)
+                    obj(f"steps{side}_{seg}_{band}", bm, concrete, base)
+                    continue
                 cls = 1 + (seg // 2 + band) % 2  # (blocks two segments wide: the mock's mosaic)
                 obj(f"seats{side}_{seg}_{band}", bm, seat, base, id_colour(cls, side, seg))
         obj(f"aisles{side}", aisles, concrete, base)
@@ -212,7 +246,7 @@ def build(size, colls):
         lower = [r for r in rows if r[3] == 0]
         k0, k1 = len(lower) * 35 // 100, len(lower) * 55 // 100
         walls, mouths = bmesh.new(), bmesh.new()
-        for seg in range(1, SEGS - 1, 2):
+        for seg in range(1, SEGS - 1, 2) if not AMATEUR else ():  # (a few rows of steps: none)
             a = -length / 2 + seg * length / SEGS - aisle / 2
             u0, u1, z = lower[k0][0], lower[k1][1], lower[k1][2] + 0.5
             add_box(walls, w(a - 1.6, u0, 0.0), w(a + 1.6, u1, z))
@@ -228,7 +262,8 @@ def build(size, colls):
         add_box(bm, w(-length / 2, depth, 0), w(length / 2, depth + 1.4, top + 2.2))
         obj(f"back{side}", bm, facade, base)
         bm = bmesh.new()
-        add_box(bm, w(-length / 2, depth - 0.2, top + 2.2), w(length / 2, depth + 1.6, top + 2.9))
+        if not terrace:  # (a plain wall behind an amateur ground's steps)
+            add_box(bm, w(-length / 2, depth - 0.2, top + 2.2), w(length / 2, depth + 1.6, top + 2.9))
         obj(f"backtrim{side}", bm, trim, base, id_colour(3))
         bm = bmesh.new()
         for a in (-length / 2 - 0.8, length / 2):  # the end walls: a step for every row
@@ -241,7 +276,8 @@ def build(size, colls):
         for k in range(int(length // 6) + 1):
             a = -length / 2 + k * 6
             add_box(bm, w(a, depth + 1.4, 0), w(a + 0.5, depth + 1.75, top + 2.2))
-        add_box(gl, w(-length / 2, depth + 1.4, 3.0), w(length / 2, depth + 1.5, 5.2))
+        if not AMATEUR:  # (a small stand: a plain back wall, the clubhouse is the way in)
+            add_box(gl, w(-length / 2, depth + 1.4, 3.0), w(length / 2, depth + 1.5, 5.2))
         if top > 14:
             add_box(gl, w(-length / 2, depth + 1.4, top * 0.55), w(length / 2, depth + 1.5, top * 0.55 + 2.2))
         obj(f"ribs{side}", bm, mat("Ribs", (0.1, 0.104, 0.112), 0.6), base)
@@ -253,7 +289,9 @@ def build(size, colls):
         add_box(canopy, w(-7, bk, 3.3), w(7, bk + 1.6, 3.9))
         for k in range(5):
             add_box(gates, w(-4 + k * 2, bk + 0.6, 0), w(-3.6 + k * 2, bk + 1.4, 1.1))
-        for s in (-1, 1):
+        if AMATEUR:  # (none of the main stand's entrance on a small ground)
+            door, canopy, gates = bmesh.new(), bmesh.new(), bmesh.new()
+        for s in (-1, 1) if not AMATEUR else ():
             for k in range(6):
                 a0, a1 = sorted((s * 8, s * 11))
                 add_box(gates, w(a0, bk, 0), w(a1, bk + 4.2 - k * 0.7, 0.45 * (k + 1)))
@@ -263,41 +301,13 @@ def build(size, colls):
         # (lit from inside: the mock's evening, a warm band along each stand's back)
         obj(f"glass{side}", gl, mat("Concourse", (0.03, 0.035, 0.045), 0.1, 0.3), base)
         bm = bmesh.new()
-        add_box(bm, w(-length / 2 + 4, -GAP + 2.0, 0), w(length / 2 - 4, -GAP + 2.3, 0.95))
+        if not AMATEUR:  # (an amateur pitch has its low wall instead, `amateur_ground`)
+            add_box(bm, w(-length / 2 + 4, -GAP + 2.0, 0), w(length / 2 - 4, -GAP + 2.3, 0.95))
         obj(f"boards{side}", bm, trim, base, id_colour(3))
         # the roof: from behind the facade over two thirds of the rows, rising toward the pitch
-        bm, ribs = bmesh.new(), bmesh.new()
-        front = depth * ROOF_FRONT
-        for k in range(8):
-            u0 = depth + 1.6 - k * (depth + 1.6 - front) / 8
-            u1 = depth + 1.6 - (k + 1) * (depth + 1.6 - front) / 8
-            z = top + 5.0 + k * 0.35
-            add_box(bm, w(-length / 2 - 1, u1, z), w(length / 2 + 1, u0, z + 0.5))
-            # corrugation: a low rib every 2.5 m down the slope
-            a = -length / 2 - 0.5
-            while a < length / 2 + 0.5:
-                add_box(ribs, w(a, u1, z + 0.5), w(a + 0.3, u0, z + 0.68))
-                a += 2.5
-        obj(f"roof{side}", bm, metal, roof_c)
-        # (the ribs a lighter steel: the reference's roofs read as ribbed sheet)
-        obj(f"roofribs{side}", ribs, mat("RoofRibs", (0.3, 0.31, 0.33), 0.35, 0.5), roof_c)
-        bm, edge = bmesh.new(), bmesh.new()
-        add_box(edge, w(-length / 2 - 1, front - 0.4, top + 5.0 + 8 * 0.35 - 0.6), w(length / 2 + 1, front, top + 5.0 + 8 * 0.35 + 0.9))
-        for k in range(9):  # columns at the back
-            a = -length / 2 + k * length / 8
-            add_box(bm, w(a - 0.3, depth + 1.4, top + 2.9), w(a + 0.3, depth + 1.9, top + 5.5))
-        # the truss under the roof's front edge: two chords and a zigzag (the reference's girders)
-        zf = top + 5.0 + 8 * 0.35 - 0.6
-        a, step = -length / 2 - 1, 3.0
-        strut(bm, w(-length / 2 - 1, front - 0.2, zf - 2.6), w(length / 2 + 1, front - 0.2, zf - 2.6), 0.28)
-        up = True
-        while a < length / 2 + 1 - step / 2:
-            z0, z1 = (zf - 2.6, zf) if up else (zf, zf - 2.6)
-            strut(bm, w(a, front - 0.2, z0), w(a + step, front - 0.2, z1), 0.2)
-            a += step
-            up = not up
-        obj(f"fascia{side}", bm, dark, roof_c)
-        obj(f"roofedge{side}", edge, mat("RoofEdge", (0.55, 0.57, 0.6), 0.4, 0.3), roof_c)
+        # (an amateur ground's terrace has none: the reference's open steps)
+        if not terrace:
+            stand_roof(side, w, length, depth, top, metal, dark, roof_c)
         # works: scaffolding on the back, a grid of poles
         bm = bmesh.new()
         for k in range(int(length // 6) + 1):
@@ -308,8 +318,11 @@ def build(size, colls):
             add_box(bm, w(-length / 2, depth + 1.6, z), w(length / 2, depth + 1.95, z + 0.3))
             z += 3.0
         obj(f"scaffold{side}", bm, mat("Scaffold", (0.9, 0.45, 0.05), 0.5), works)
+    depth, top = depth_all, top_all
     if size == "x":
         corners(rows, depth, top, seat, facade, metal, base, roof_c)
+    if AMATEUR:
+        amateur_ground(base, depth, concrete, facade)
     # the crane at the north-east corner
     cx, cy = PL / 2 + GAP + depth * 0.6, PW / 2 + GAP + depth + 8
     tall = top + 34
@@ -324,6 +337,95 @@ def build(size, colls):
     add_box(bm, (cx - 31.5, cy - 1.5, tall - 21.5), (cx - 28.2, cy + 1.5, tall - 20))
     obj("hook", bm, mat("Hook", (0.1, 0.1, 0.1)), works)
     return depth, top
+
+
+def amateur_ground(coll, depth, concrete, facade):
+    """What an amateur ground has round its pitch (the user's reference, 2026-11-24): a concrete
+    walkway (the surround) behind a low wall, the open west end, a dark palisade fence round it
+    all, a gate in brick pillars and a brick clubhouse at the south-east corner."""
+    wall = bmesh.new()
+    hl, hw = PL / 2 + 3.5, PW / 2 + 3.5
+    for a, b in (((-hl, -hw), (hl, -hw + 0.25)), ((-hl, hw - 0.25), (hl, hw)), ((-hl, -hw), (-hl + 0.25, hw)), ((hl - 0.25, -hw), (hl, hw))):
+        add_box(wall, (*a, 0), (*b, 0.9))
+    obj("pitchwall", wall, mat("LowWall", (0.42, 0.42, 0.4), 0.8), coll)
+    # the fence: just outside the stands' backs, a gap in the south side for the gate
+    fx, fy = PL / 2 + GAP + depth + 3.0, PW / 2 + GAP + depth + 3.0
+    gx0, gx1 = 14.0, 20.0
+    fence = bmesh.new()
+    def run(a, b):
+        add_box(fence, (min(a[0], b[0]) - 0.08, min(a[1], b[1]) - 0.08, 0), (max(a[0], b[0]) + 0.08, max(a[1], b[1]) + 0.08, 2.1))
+    run((-fx, fy), (fx, fy)); run((-fx, -fy), (-fx, fy)); run((fx, -fy), (fx, fy))
+    run((-fx, -fy), (gx0, -fy)); run((gx1, -fy), (fx, -fy))
+    add_box(fence, (gx0, -fy - 0.05, 0), (gx1, -fy + 0.05, 2.4))  # the gate
+    obj("fence", fence, mat("Palisade", (0.035, 0.037, 0.04), 0.6, 0.5), coll)
+    brick = mat("Brick", (0.2, 0.065, 0.04), 0.9)
+    roof = mat("Slate", (0.03, 0.032, 0.036), 0.7)
+    lit = mat("Window", (1.0, 0.82, 0.55), 0.2, 0.0, 1.2)
+    walls, glass, slate = bmesh.new(), bmesh.new(), bmesh.new()
+    for x in (gx0 - 1.2, gx1):  # the gate's pillars and the gate
+        add_box(walls, (x, -fy - 0.6, 0), (x + 1.2, -fy + 0.6, 3.0))
+    # the clubhouse: brick, a slate roof ridged east-west, windows and a door on the south and west
+    x0, x1, y0, y1, h = fx - 22.0, fx - 4.0, -fy - 14.0, -fy - 3.0, 3.6
+    add_box(walls, (x0, y0, 0), (x1, y1, h))
+    for k in range(4):
+        add_box(glass, (x0 + 2.5 + k * 4.0, y0 - 0.06, 1.2), (x0 + 4.3 + k * 4.0, y0 + 0.1, 2.4))
+    for k in range(2):
+        add_box(glass, (x0 - 0.06, y0 + 2.0 + k * 4.5, 1.2), (x0 + 0.1, y0 + 3.8 + k * 4.5, 2.4))
+    add_box(glass, (x1 - 3.2, y0 - 0.06, 0), (x1 - 1.6, y0 + 0.1, 2.4))  # the door
+    ym = (y0 + y1) / 2
+    v = [slate.verts.new(p) for p in [(x0 - 0.5, y0 - 0.6, h), (x1 + 0.5, y0 - 0.6, h), (x1 + 0.5, y1 + 0.6, h), (x0 - 0.5, y1 + 0.6, h), (x0 - 0.5, ym, h + 2.6), (x1 + 0.5, ym, h + 2.6)]]
+    for f in ((0, 1, 5, 4), (3, 4, 5, 2), (0, 4, 3), (1, 2, 5)):
+        slate.faces.new([v[i] for i in f])
+    obj("clubhouse", walls, brick, coll)
+    obj("clubroof", slate, roof, coll)
+    obj("clubwindows", glass, lit, coll)
+    # a path from the gate to the clubhouse and down to the main road
+    path = bmesh.new()
+    add_box(path, (gx0 - 1.0, -fy - 30.0, -0.04), (gx1 + 1.0, -fy, 0.0))
+    add_box(path, (gx1, y0 - 3.0, -0.04), (x0, y0 - 0.5, 0.0))
+    obj("gatepath", path, mat("Gravel", (0.16, 0.15, 0.13), 0.9), coll)
+
+
+def stand_roof(side, w, length, depth, top, metal, dark, roof_c):
+    """A stand's roof (RH over its last row), its ribs, edge, back columns and front truss; over
+    an amateur ground's stand, posts at the front instead of the truss (the reference's)."""
+    bm, ribs = bmesh.new(), bmesh.new()
+    front = depth * (ROOF_FRONT if not AMATEUR else 0.4)  # (the amateur stand's seats show under it)
+    for k in range(8):
+        u0 = depth + 1.6 - k * (depth + 1.6 - front) / 8
+        u1 = depth + 1.6 - (k + 1) * (depth + 1.6 - front) / 8
+        z = top + RH + k * 0.35
+        add_box(bm, w(-length / 2 - 1, u1, z), w(length / 2 + 1, u0, z + 0.5))
+        # corrugation: a low rib every 2.5 m down the slope
+        a = -length / 2 - 0.5
+        while a < length / 2 + 0.5:
+            add_box(ribs, w(a, u1, z + 0.5), w(a + 0.3, u0, z + 0.68))
+            a += 2.5
+    obj(f"roof{side}", bm, metal, roof_c)
+    # (the ribs a lighter steel: the reference's roofs read as ribbed sheet)
+    obj(f"roofribs{side}", ribs, mat("RoofRibs", (0.3, 0.31, 0.33), 0.35, 0.5), roof_c)
+    bm, edge = bmesh.new(), bmesh.new()
+    add_box(edge, w(-length / 2 - 1, front - 0.4, top + RH + 8 * 0.35 - 0.6), w(length / 2 + 1, front, top + RH + 8 * 0.35 + 0.9))
+    for k in range(9):  # columns at the back
+        a = -length / 2 + k * length / 8
+        add_box(bm, w(a - 0.3, depth + 1.4, top + 2.9), w(a + 0.3, depth + 1.9, top + RH + 0.5))
+    zf = top + RH + 8 * 0.35 - 0.6
+    if AMATEUR:  # posts along the front, from the walkway up to the roof's edge
+        for k in range(5):
+            a = -length / 2 + k * length / 4
+            add_box(bm, w(a - 0.18, front - 0.3, 0), w(a + 0.18, front + 0.06, zf))
+    else:
+        # the truss under the roof's front edge: two chords and a zigzag (the reference's girders)
+        a, step = -length / 2 - 1, 3.0
+        strut(bm, w(-length / 2 - 1, front - 0.2, zf - 2.6), w(length / 2 + 1, front - 0.2, zf - 2.6), 0.28)
+        up = True
+        while a < length / 2 + 1 - step / 2:
+            z0, z1 = (zf - 2.6, zf) if up else (zf, zf - 2.6)
+            strut(bm, w(a, front - 0.2, z0), w(a + step, front - 0.2, z1), 0.2)
+            a += step
+            up = not up
+    obj(f"fascia{side}", bm, dark, roof_c)
+    obj(f"roofedge{side}", edge, mat("RoofEdge", (0.55, 0.57, 0.6), 0.4, 0.3), roof_c)
 
 
 def corners(rows, depth, top, seat, facade, metal, base, roof_c):
@@ -360,10 +462,10 @@ def corners(rows, depth, top, seat, facade, metal, base, roof_c):
 def pitch(coll):
     bm = bmesh.new()
     add_box(bm, (-PL / 2 - 3.5, -PW / 2 - 3.5, -0.1), (PL / 2 + 3.5, PW / 2 + 3.5, 0.02))
-    obj("pitch", bm, grass_mat(), coll)
-    bm = bmesh.new()  # the dark surround between the grass and the stands
+    obj("pitch", bm, grass_mat(plain=True), coll, id_colour(0, 3, 15))
+    bm = bmesh.new()  # the dark surround between the grass and the stands (an amateur ground: grass)
     add_box(bm, (-PL / 2 - GAP - 0.5, -PW / 2 - GAP - 0.5, -0.15), (PL / 2 + GAP + 0.5, PW / 2 + GAP + 0.5, -0.01))
-    obj("surround", bm, mat("Surround", (0.045, 0.048, 0.052), 0.8), coll)
+    obj("surround", bm, mat("Surround", (0.2, 0.2, 0.19) if AMATEUR else (0.045, 0.048, 0.052), 0.8), coll)
     white = mat("Lines", (0.95, 0.95, 0.95), 0.6)
     bm = bmesh.new()
     t, z = 0.25, 0.05
@@ -452,7 +554,8 @@ def surroundings(coll, ex, ey, top, reach):
     box, cut = (-ex - 9, ex + 9, -ey - 37, ey + 9), 18
     bm = bmesh.new()
     octagon(bm, box, cut, -0.9, -0.05)
-    obj("plaza", bm, paving(), coll)
+    # (an amateur ground stands in grass, the reference's)
+    obj("plaza", bm, mat("Lawn", (0.045, 0.11, 0.03), 0.95) if AMATEUR else paving(), coll)
     # a light kerb along the plinth's edge (the reference's low wall)
     bm = bmesh.new()
     outer, inner = oct_ring(*box, cut), oct_ring(box[0] + 0.9, box[1] - 0.9, box[2] + 0.9, box[3] - 0.9, cut - 0.37)
@@ -473,7 +576,7 @@ def surroundings(coll, ex, ey, top, reach):
         for sy in (-1, 1):
             xa, xb = sorted((sx * cxa, sx * (ex - 1.0)))
             ya, yb = sorted((sy * cya, sy * (ey - 1.0)))
-            if xb - xa > 2 and yb - ya > 2 and LEVEL < 3:  # (a huge ground's corners are seated, `corners`)
+            if xb - xa > 2 and yb - ya > 2 and LEVEL < 3 and not AMATEUR:  # (a huge ground's corners are seated, `corners`)
                 add_box(bm, (xa, ya, 0), (xb, yb, top * 0.62 - 0.4))
                 add_box(tops, (xa, ya, top * 0.62 - 0.4), (xb, yb, top * 0.62))
     obj("buildings", bm, walls, coll)
@@ -489,11 +592,15 @@ def surroundings(coll, ex, ey, top, reach):
             if LEVEL == 3:  # (seated corners: the mast stands on the corner roof's inner edge)
                 f = (ex - 2.5 - PL / 2 - GAP) * ROOF_FRONT
                 x, y, z0, hgt = sx * (PL / 2 + GAP + f), sy * (PW / 2 + GAP + f), top + 6.9, top + 18
+            if AMATEUR:  # (slim masts on the walkway beside the pitch, the stands being short)
+                x, y, hgt = sx * (PL / 2 - 14), sy * (PW / 2 + 5.2), 16.0
             legs = lambda z: [(x + dx * (1.3 - 0.8 * z / hgt), y + dy * (1.3 - 0.8 * z / hgt), z) for dx, dy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-            for k in range(4):
+            for k in range(4 if not AMATEUR else 0):
                 strut(pole, legs(z0)[k], legs(hgt)[k], 0.32)
+            if AMATEUR:
+                add_box(pole, (x - 0.22, y - 0.22, 0), (x + 0.22, y + 0.22, hgt))
             z, step = z0, 3.2
-            while z < hgt - 0.1:
+            while z < hgt - 0.1 and not AMATEUR:
                 z1 = min(z + step, hgt)
                 lo, hi = legs(z), legs(z1)
                 for k in range(4):
@@ -506,6 +613,8 @@ def surroundings(coll, ex, ey, top, reach):
             face = Vector((-x, -y, 0)).normalized() + Vector((VIEW.x, VIEW.y, 0)).normalized()
             turn = math.atan2(face.y, face.x)
             head = Matrix.Translation((x, y, hgt + 2.2)) @ Matrix.Rotation(turn, 4, "Z") @ Matrix.Rotation(math.radians(-30), 4, "Y")
+            if AMATEUR:  # (a small head on a slim mast)
+                head = head @ Matrix.Scale(0.45, 4)
             bmesh.ops.create_cube(pole, size=1.0, matrix=head @ Matrix.Diagonal((0.6, 8.4, 5.4, 1.0)))
             for row in range(3):
                 for col in range(4):
@@ -514,7 +623,8 @@ def surroundings(coll, ex, ey, top, reach):
                     bmesh.ops.create_cube(lamp, size=1.0, matrix=head @ off @ Matrix.Diagonal((0.9, 1.25, 1.05, 1.0)))
             spot_data = bpy.data.lights.new(f"flood{sx}{sy}", "SPOT")
             # (closer since they stand in the corners: weaker, a wide soft cone, no bright patches)
-            spot_data.energy = 200000 if LEVEL < 3 else 90000  # (on the roof: closer, it glared)
+            # (on the roof, or low beside an amateur pitch: closer, it glared in bright pools)
+            spot_data.energy = 14000 if AMATEUR else 90000 if LEVEL == 3 else 200000
             spot_data.spot_size = math.radians(120)
             spot_data.spot_blend = 1.0
             spot_data.use_shadow = False  # (the stands' shadows from the corners cut the pitch into triangles)
@@ -526,8 +636,7 @@ def surroundings(coll, ex, ey, top, reach):
     obj("poles", pole, mat("Pole", (0.16, 0.165, 0.175), 0.5, 0.6), coll)
     obj("lamps", lamp, mat("Lamp", (1.0, 0.98, 0.92), 0.3, 0.0, 2.2), coll)
     # small round trees and lamp posts along the plinth's edge
-    crowns = [bmesh.new() for _ in range(2)]
-    trunks, posts = bmesh.new(), bmesh.new()
+    edge_trees, posts = Bins(), bmesh.new()
     ring = oct_ring(box[0] + 3.5, box[1] - 3.5, box[2] + 3.5, box[3] - 3.5, cut - 1.5)
     for k in range(8):
         (x0, y0), (x1, y1) = ring[k], ring[(k + 1) % 8]
@@ -535,20 +644,233 @@ def surroundings(coll, ex, ey, top, reach):
         for i in range(n):
             t = (i + 0.5) / n
             x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
-            if -PL / 2 - 14 < x < -PL / 2 + 26 and y < -ey + 2:  # (the megastore's corner)
+            if -PL / 2 - 14 < x < -PL / 2 + 30 and y < -ey + 2:  # (the megastore's corner)
                 continue
             if (i + k) % 3:
-                h = rnd.uniform(2.2, 3.0)
-                add_box(trunks, (x - 0.3, y - 0.3, 0), (x + 0.3, y + 0.3, h))
-                bmesh.ops.create_icosphere(crowns[rnd.randrange(2)], subdivisions=3, radius=rnd.uniform(2.6, 3.2), matrix=Matrix.Translation((x, y, h + 2.2)) @ Matrix.Diagonal((0.9, 0.9, 1.3, 1)))
+                plant(coll, x, y, 0.0, rnd, 1.1)  # (the reference's leafy trees, 2026-11-24)
             else:
                 add_box(posts, (x - 0.12, y - 0.12, 0), (x + 0.12, y + 0.12, 6.0))
                 add_box(posts, (x - 0.35, y - 0.35, 6.0), (x + 0.35, y + 0.35, 6.25))
-    obj("trunks", trunks, mat("Bark", (0.1, 0.07, 0.045), 0.9), coll)
     obj("posts", posts, mat("Pole", (0.16, 0.165, 0.175), 0.5, 0.6), coll)
-    for k, c in enumerate([(0.03, 0.11, 0.025), (0.045, 0.14, 0.03)]):
-        obj(f"trees{k}", crowns[k], mat(f"Leaves{k}", c, 0.8), coll)
+    emit(coll, edge_trees)
     town(coll, box, ex, ey, reach)
+
+
+# ---------------------------------------------------------------- the town's pieces
+# (a friend's asset references, 2026-11-24: kerbed roads and car parks, real-looking cars, leafy
+# trees, terraced houses, food vans; the stadium itself stays as it is)
+class Bins(dict):
+    """A bmesh per material key, made on first use; `emit` turns them into objects."""
+    def __missing__(self, key):
+        self[key] = bmesh.new()
+        return self[key]
+
+
+CAR_COLOURS = [(0.03, 0.06, 0.28), (0.78, 0.78, 0.78), (0.42, 0.025, 0.02), (0.05, 0.15, 0.07), (0.36, 0.37, 0.39), (0.02, 0.02, 0.024)]
+LEAVES = [(0.03, 0.09, 0.022), (0.045, 0.12, 0.03), (0.07, 0.15, 0.025), (0.022, 0.07, 0.028), (0.17, 0.08, 0.02)]
+DOORS = [(0.01, 0.01, 0.012), (0.03, 0.12, 0.05), (0.02, 0.04, 0.16), (0.2, 0.06, 0.03)]
+TOWN_MATS = {
+    "bark": ((0.08, 0.055, 0.035), 0.9), "carglass": ((0.015, 0.02, 0.03), 0.1), "tyres": ((0.012, 0.012, 0.014), 0.8),
+    "kerb": ((0.34, 0.34, 0.33), 0.8), "pavement": ((0.22, 0.22, 0.21), 0.85), "paint": ((0.78, 0.78, 0.75), 0.6),
+    "brick": ((0.21, 0.07, 0.04), 0.9), "brick2": ((0.16, 0.055, 0.035), 0.9), "render": ((0.6, 0.58, 0.54), 0.8),
+    "slate": ((0.03, 0.032, 0.037), 0.6), "winframe": ((0.8, 0.8, 0.78), 0.5), "winglass": ((0.02, 0.026, 0.036), 0.1),
+    "railing": ((0.012, 0.012, 0.014), 0.4), "hedge": ((0.03, 0.1, 0.025), 0.85), "pots": ((0.25, 0.09, 0.05), 0.8),
+    "vanwhite": ((0.8, 0.8, 0.78), 0.4), "vandark": ((0.015, 0.016, 0.02), 0.5), "vanmetal": ((0.5, 0.5, 0.52), 0.3),
+    "pad": ((0.3, 0.3, 0.29), 0.8),
+}
+
+
+def emit(coll, bins):
+    """The bins as objects: club colour parts (keys ending 'club') as class 3, the rest by key."""
+    for key, bm in bins.items():
+        if key in TOWN_MATS:
+            c, r = TOWN_MATS[key]
+            obj(key, bm, mat(f"T_{key}", c, r, 0.5 if key in ("vanmetal", "railing") else 0.0), coll)
+        elif key.endswith("club"):
+            obj(key, bm, mat("Trim", (0.85, 0.85, 0.85), 0.4), coll, id_colour(3))
+        elif key.startswith("car"):
+            obj(key, bm, mat(f"Car{key[3:]}", CAR_COLOURS[int(key[3:])], 0.3, 0.4), coll)
+        elif key.startswith("leaves"):
+            obj(key, bm, mat(f"Leaf{key[6:]}", LEAVES[int(key[6:])], 0.85), coll)
+        elif key.startswith("door"):
+            obj(key, bm, mat(f"Door{key[4:]}", DOORS[int(key[4:])], 0.5), coll)
+        elif key == "winlit":
+            obj(key, bm, mat("Windows", (1.0, 0.8, 0.5), 0.2, 0.0, 1.0), coll)
+
+
+def oriented(bins, x, y, along_x):
+    """A box maker in a thing's own frame: a along it, b across, z up, centred on (x, y)."""
+    def box(key, a0, a1, b0, b1, z0, z1):
+        if along_x:
+            add_box(bins[key], (x + a0, y + b0, z0), (x + a1, y + b1, z1))
+        else:
+            add_box(bins[key], (x + b0, y + a0, z0), (x + b1, y + a1, z1))
+    return box
+
+
+def car(bins, x, y, g, along_x, colour):
+    """A hatchback: body, dark glass cabin, roof, four tyres (the reference's car park)."""
+    box = oriented(bins, x, y, along_x)
+    L, W, body = 4.3, 1.8, f"car{colour}"
+    box(body, -L / 2, L / 2, -W / 2, W / 2, g + 0.3, g + 0.85)
+    box(body, -L / 2 + 0.15, L / 2 - 0.1, -W / 2 + 0.05, W / 2 - 0.05, g + 0.85, g + 0.95)
+    box("carglass", -L / 2 + 0.95, L / 2 - 1.05, -W / 2 + 0.14, W / 2 - 0.14, g + 0.95, g + 1.38)
+    box(body, -L / 2 + 1.1, L / 2 - 1.2, -W / 2 + 0.2, W / 2 - 0.2, g + 1.38, g + 1.48)
+    for a in (-L / 2 + 0.8, L / 2 - 0.8):
+        for b in (-W / 2 - 0.03, W / 2 - 0.24):
+            box("tyres", a - 0.34, a + 0.34, b, b + 0.27, g, g + 0.64)
+
+
+TREES = []  # the tree shapes of this scene (`tree_shapes`), placed as linked copies
+
+
+def tree_shapes(n=14):
+    """n leafy trees as meshes (bark, two greens as material slots), each built once: a scene of
+    a thousand trees as one mesh took minutes to make."""
+    rnd = random.Random(31)
+    TREES.clear()
+    for k in range(n):
+        bins = Bins()
+        keys = tree(bins, 0.0, 0.0, 0.0, rnd)
+        me = bpy.data.meshes.new(f"treeshape{k}")
+        whole = bmesh.new()
+        for slot, key in enumerate(keys):
+            part = bpy.data.meshes.new("part")
+            bins[key].to_mesh(part)
+            bins[key].free()
+            first = len(whole.faces)
+            whole.from_mesh(part)
+            whole.faces.ensure_lookup_table()
+            for f in whole.faces[first:]:
+                f.material_index = slot
+            bpy.data.meshes.remove(part)
+        whole.to_mesh(me)
+        whole.free()
+        for key in keys:
+            me.materials.append(mat("T_bark", *TOWN_MATS["bark"]) if key == "bark" else mat(f"Leaf{key[6:]}", LEAVES[int(key[6:])], 0.85))
+        TREES.append(me)
+
+
+def plant(coll, x, y, g, rnd, size=1.0):
+    """One of the scene's tree shapes at (x, y), turned and sized at random."""
+    o = bpy.data.objects.new("tree", TREES[rnd.randrange(len(TREES))])
+    o.location = (x, y, g)
+    o.rotation_euler = (0, 0, rnd.uniform(0, 2 * math.pi))
+    o.scale = (size,) * 3
+    o.color = (0, 0, 0, 1)  # (id class 0, drawn as rendered: an object's own default is white)
+    coll.objects.link(o)
+
+
+def tree(bins, x, y, g, rnd, size=1.0):
+    """A leafy tree (the reference's): a trunk with two limbs, a crown of clumps in two greens,
+    sometimes tall and narrow, now and then turning. Returns its keys: bark, then the greens."""
+    h, r = rnd.uniform(2.4, 3.8) * size, rnd.uniform(2.3, 3.5) * size
+    tall = rnd.random() < 0.25
+    shades = [0, 1] if rnd.random() < 0.5 else [1, 2] if rnd.random() < 0.6 else [3, 0]
+    if rnd.random() < 0.06:
+        shades = [1, 4]
+    t = 0.26 * size
+    add_box(bins["bark"], (x - t, y - t, g), (x + t, y + t, g + h + r * 0.4))
+    for k in range(2):
+        a = rnd.uniform(0, 2 * math.pi)
+        strut(bins["bark"], (x, y, g + h * 0.8), (x + math.cos(a) * r * 0.5, y + math.sin(a) * r * 0.5, g + h + r * 0.35), 0.12 * size)
+    cz = g + h + r * (0.9 if tall else 0.7)
+    stretch = 1.5 if tall else 1.0
+    bmesh.ops.create_icosphere(bins[f"leaves{shades[0]}"], subdivisions=2, radius=r * 0.78, matrix=Matrix.Translation((x, y, cz)) @ Matrix.Diagonal((1, 1, stretch, 1)))
+    for k in range(rnd.randint(6, 9)):
+        a, d = rnd.uniform(0, 2 * math.pi), rnd.uniform(0.4, 0.7) * r * (0.8 if tall else 1.0)
+        zz = cz + rnd.uniform(-0.35, 0.55) * r * stretch
+        bmesh.ops.create_icosphere(bins[f"leaves{shades[k % 2]}"], subdivisions=1, radius=r * rnd.uniform(0.38, 0.55), matrix=Matrix.Translation((x + d * math.cos(a), y + d * math.sin(a), zz)))
+    return ["bark"] + [f"leaves{s}" for s in dict.fromkeys(shades)]
+
+
+def food_van(bins, x, y, g, along_x):
+    """A food van on its paved pad (the reference's BURGER / CHIPS vans): white over a band in the
+    club's colour, the hatch open on its -b side under a striped awning, a sign board on the roof,
+    an A-board by the pad."""
+    box = oriented(bins, x, y, along_x)
+    box("pad", -3.9, 3.9, -3.4, 2.0, g, g + 0.12)
+    box("padclub", -4.1, 4.1, -3.6, 2.2, g, g + 0.08)
+    box("vanclub", -2.8, 2.8, -1.1, 1.1, g + 0.45, g + 1.5)  # the lower band
+    box("vanwhite", -2.8, 1.4, -1.1, 1.1, g + 1.5, g + 3.0)  # the box
+    box("vanwhite", 1.4, 2.8, -1.1, 1.1, g + 1.5, g + 2.3)  # the cab
+    box("vandark", 1.9, 2.82, -1.0, 1.0, g + 1.6, g + 2.2)  # its windscreen
+    box("vandark", -2.2, 0.9, -1.13, -1.05, g + 1.55, g + 2.55)  # the hatch
+    box("vanmetal", -2.2, 0.9, -1.45, -1.05, g + 1.45, g + 1.55)  # the counter
+    for k in range(8):  # the awning: club colour and white by turns
+        a0 = -2.4 + k * 3.5 / 8
+        box("vanclub" if k % 2 == 0 else "vanwhite", a0, a0 + 3.5 / 8, -2.1, -1.1, g + 2.6, g + 2.85)
+    box("vanclub", -2.3, 0.8, -0.1, 0.1, g + 3.0, g + 3.9)  # the sign board
+    box("vanwhite", -2.4, 0.9, -0.12, 0.12, g + 3.0, g + 3.08)
+    for a in (-1.9, 1.9):
+        for b in (-1.15, 0.9):
+            box("tyres", a - 0.4, a + 0.4, b, b + 0.25, g + 0.1, g + 0.85)
+    box("padclub", 2.6, 3.4, -3.2, -3.05, g + 0.12, g + 1.3)  # an A-board
+    box("vanwhite", 2.7, 3.3, -3.25, -3.2, g + 0.3, g + 1.1)
+
+
+def terrace_row(bins, x0, yc, d, n, uw, hgt, f, g, rnd):
+    """A row of n terraced houses (the reference's): brick or white render by turns, a slate roof
+    ridged along the row with a small gable over each front, chimneys on the party walls, white
+    framed windows, coloured front doors, front gardens behind a low wall with railings and a
+    hedge. f: +1 or -1, the side the fronts face (y)."""
+    yf, yb = yc + f * d / 2, yc - f * d / 2
+    lo, hi = min(yf, yb), max(yf, yb)
+    walls = ["brick", "render", "brick2", "render", "brick"]
+    start = rnd.randrange(5)
+    for k in range(n):
+        xa, xb = x0 + k * uw, x0 + (k + 1) * uw
+        wall = walls[(start + k) % 5]
+        add_box(bins[wall], (xa, lo, g), (xb, hi, g + hgt))
+        # windows: two upstairs, one beside the door downstairs, the same at the back
+        for side, yy in ((f, yf), (-f, yb)):
+            for z, xs in ((3.4, (xa + 0.7, xb - 1.9)), (0.9, (xb - 1.9,) if side == f else (xa + 0.7, xb - 1.9))):
+                for wx in xs:
+                    add_box(bins["winframe"], (wx - 0.08, yy - 0.08, g + z - 0.1), (wx + 1.28, yy + 0.08, g + z + 1.5))
+                    add_box(bins["winlit" if rnd.random() < 0.3 else "winglass"], (wx, yy - 0.1, g + z), (wx + 1.12, yy + 0.1, g + z + 1.38))
+        add_box(bins[f"door{rnd.randrange(4)}"], (xa + 0.8, yf - 0.1, g), (xa + 1.9, yf + 0.1, g + 2.2))
+        add_box(bins["slate"], (xa + 0.6, yf + f * 0.05, g + 2.3), (xa + 2.1, yf + f * 0.6, g + 2.45))  # the porch hood
+        # the front garden: a low wall in front with railings and a gate gap, a hedge
+        gy = yf + f * 3.0
+        add_box(bins["brick" if wall != "render" else "render"], (xa + (0.0 if k else -0.2), min(gy, gy + f * 0.3), g), (xb, max(gy, gy + f * 0.3), g + 0.55))
+        for p in range(int(uw / 0.5)):
+            px = xa + 0.25 + p * 0.5
+            if not (xa + 0.8 < px < xa + 1.9):
+                add_box(bins["railing"], (px - 0.03, gy - 0.03, g + 0.55), (px + 0.03, gy + 0.03, g + 1.3))
+        add_box(bins["railing"], (xa, gy - 0.04, g + 1.22), (xb, gy + 0.04, g + 1.3))
+        add_box(bins["pavement"], (xa + 0.8, min(yf, gy), g), (xa + 1.9, max(yf, gy), g + 0.05))
+        for h in range(2):
+            bmesh.ops.create_icosphere(bins["hedge"], subdivisions=1, radius=0.55, matrix=Matrix.Translation((xa + 2.6 + h * 1.4, yf + f * 1.6, g + 0.45)))
+        # the gable over this front: a small triangle on the front slope
+        xm, gw = (xa + xb) / 2 + 0.6, uw * 0.32
+        v = [bins["slate"].verts.new(p) for p in [(xm - gw, yf + f * 0.35, g + hgt), (xm + gw, yf + f * 0.35, g + hgt), (xm, yf + f * 0.35, g + hgt + 1.7), (xm, yc, g + hgt + 1.7), (xm - gw, yc, g + hgt), (xm + gw, yc, g + hgt)]]
+        bins["slate"].faces.new([v[0], v[2], v[3], v[4]])
+        bins["slate"].faces.new([v[1], v[5], v[3], v[2]])
+        tri = bins[wall]
+        tv = [tri.verts.new(p) for p in [(xm - gw + 0.3, yf + f * 0.02, g + hgt), (xm + gw - 0.3, yf + f * 0.02, g + hgt), (xm, yf + f * 0.02, g + hgt + 1.35)]]
+        tri.faces.new(tv)
+        if k:  # a chimney on the party wall, two pots
+            add_box(bins["brick2"], (xa - 0.45, yc - 0.5, g + hgt), (xa + 0.45, yc + 0.5, g + hgt + 3.6))
+            for p in (-0.2, 0.2):
+                add_box(bins["pots"], (xa + p - 0.13, yc - 0.13, g + hgt + 3.6), (xa + p + 0.13, yc + 0.13, g + hgt + 4.1))
+    # the main roof: two slopes along the row, gable ends in the end houses' walls
+    xe0, xe1, top = x0 - 0.3, x0 + n * uw + 0.3, g + hgt + 2.9
+    s = bins["slate"]
+    v = [s.verts.new(p) for p in [(xe0, yf + f * 0.4, g + hgt), (xe1, yf + f * 0.4, g + hgt), (xe1, yc, top), (xe0, yc, top), (xe0, yb - f * 0.4, g + hgt), (xe1, yb - f * 0.4, g + hgt)]]
+    s.faces.new([v[0], v[1], v[2], v[3]])
+    s.faces.new([v[4], v[3], v[2], v[5]])
+    for xe, k in ((x0, 0), (x0 + n * uw, n - 1)):
+        w = bins[walls[(start + k) % 5]]
+        tv = [w.verts.new(p) for p in [(xe, yf, g + hgt), (xe, yc, top - 0.1), (xe, yb, g + hgt)]]
+        w.faces.new(tv)
+
+
+def kerbed(bins, a, b, width, z, g):
+    """A kerb (or pavement) strip from a to b (x, y), `width` wide, z high."""
+    (ax, ay), (bx, by) = a, b
+    ang, length = math.atan2(by - ay, bx - ax), math.hypot(bx - ax, by - ay)
+    at = Matrix.Translation(((ax + bx) / 2, (ay + by) / 2, g + z / 2)) @ Matrix.Rotation(ang, 4, "Z")
+    bmesh.ops.create_cube(bins, size=1.0, matrix=at @ Matrix.Diagonal((length, width, z, 1.0)))
 
 
 def town(coll, box, ex, ey, reach):
@@ -581,6 +903,7 @@ def town(coll, box, ex, ey, reach):
                 return ccx + rad * math.cos(a0 + d / rad), cy + ccy + rad * math.sin(a0 + d / rad)
             d -= arc
         return starts[0][0], cy + starts[0][1]
+    bins = Bins()
     steps = 240
     for k in range(steps):
         (ax, ay), (bx, by) = ring_point(k / steps), ring_point((k + 1) / steps)
@@ -589,6 +912,10 @@ def town(coll, box, ex, ey, reach):
         bmesh.ops.create_cube(road, size=1.0, matrix=at @ Matrix.Diagonal((seg, 9.0, 0.14, 1.0)))
         if k % 3 == 0:
             bmesh.ops.create_cube(dashes, size=1.0, matrix=Matrix.Translation((0, 0, 0.08)) @ at @ Matrix.Diagonal((seg * 1.4, 0.3, 0.02, 1.0)))
+        # (the road assets: light kerbs both sides, a solid white line inside each)
+        for off in (-4.75, 4.75):
+            bmesh.ops.create_cube(bins["kerb"], size=1.0, matrix=at @ Matrix.Translation((0, off, 0.1)) @ Matrix.Diagonal((seg, 0.5, 0.3, 1.0)))
+            bmesh.ops.create_cube(dashes, size=1.0, matrix=Matrix.Translation((0, 0, 0.08)) @ at @ Matrix.Translation((0, off * 0.83, 0)) @ Matrix.Diagonal((seg, 0.16, 0.02, 1.0)))
     ring_s, ring_n, ring_w, ring_e = cy - hy, cy + hy, -hx, hx
     main = ring_s - 26  # the main road in front, its middle
     add_box(road, (-reach * 3, main - 6, g), (reach * 3, main + 6, g + 0.12))
@@ -598,6 +925,18 @@ def town(coll, box, ex, ey, reach):
         x += 7.0
     for rx in (-30.0, 34.0):  # two roads in from the main road
         add_box(road, (rx - 4.5, main, g), (rx + 4.5, ring_s + 2, g + 0.12))
+    # the main road's kerbs, white edge lines and pavements (gaps where the two roads join it);
+    # kerbs along the two roads in
+    for side in (-1, 1):
+        y = main + side * 6.25
+        cuts = [(-reach * 3, reach * 3)] if side < 0 else [(-reach * 3, -35.0), (-25.0, 29.0), (39.0, reach * 3)]
+        for xa, xb in cuts:
+            kerbed(bins["kerb"], (xa, y), (xb, y), 0.5, 0.3, g)
+            kerbed(bins["pavement"], (xa, y + side * 1.75), (xb, y + side * 1.75), 3.0, 0.25, g)
+        add_box(dashes, (-reach * 3, main + side * 5.3 - 0.08, g + 0.12), (reach * 3, main + side * 5.3 + 0.08, g + 0.14))
+    for rx in (-30.0, 34.0):
+        for s in (-1, 1):
+            kerbed(bins["kerb"], (rx + s * 4.75, main + 6.5), (rx + s * 4.75, ring_s - 4.7), 0.5, 0.3, g)
     # car parks east and west of the ring road, a lane into each
     # (the town grows with the ground, a friend's idea 2026-11-23: an amateur ground one small car park,
     # two kiosks, no fan zone; a huge one big car parks, every stall, a crowd)
@@ -608,30 +947,36 @@ def town(coll, box, ex, ey, reach):
         [(ring_e + 8, ring_e + 74, cy - 46, cy + 40), (ring_w - 60, ring_w - 8, cy - 30, cy + 36)],
         [(ring_e + 8, ring_e + 116, cy - 60, cy + 52), (ring_w - 96, ring_w - 8, cy - 46, cy + 50)],
     ][lv]
-    cars = [bmesh.new() for _ in range(6)]
     bays = bmesh.new()
     for px0, px1, py0, py1 in parks:
         add_box(road, (px0, py0, g), (px1, py1, g + 0.12))
         lane = (ring_e - 2, px0 + 1) if px0 > 0 else (px1 - 1, ring_w + 2)
         add_box(road, (min(lane), cy - 5, g), (max(lane), cy + 5, g + 0.12))
+        # (the car park asset: a kerb all round but the lane's mouth, a paved edge, clean bays)
+        near = px0 if px0 > 0 else px1  # (the side toward the ring road, the lane's)
+        far = px0 + px1 - near
+        out = 1.5 if far > near else -1.5
+        for a, b in (((px0, py0), (px1, py0)), ((px0, py1), (px1, py1)), ((far, py0), (far, py1))):
+            kerbed(bins["kerb"], a, b, 0.6, 0.35, g)
+        kerbed(bins["pavement"], (px0, py0 - 1.5), (px1, py0 - 1.5), 2.4, 0.22, g)
+        kerbed(bins["pavement"], (px0, py1 + 1.5), (px1, py1 + 1.5), 2.4, 0.22, g)
+        kerbed(bins["pavement"], (far + out, py0 - 2.7), (far + out, py1 + 2.7), 2.4, 0.22, g)
+        kerbed(bins["kerb"], (near, py0), (near, cy - 5), 0.6, 0.35, g)
+        kerbed(bins["kerb"], (near, cy + 5), (near, py1), 0.6, 0.35, g)
         x = px0 + 5
         while x + 15 < px1:
             y = py0 + 3
             while y < py1 - 3:
-                add_box(bays, (x - 0.08, y, g + 0.12), (x + 5.2, y + 0.12, g + 0.14))
-                add_box(bays, (x + 9.8, y, g + 0.12), (x + 15, y + 0.12, g + 0.14))
+                add_box(bays, (x - 0.08, y, g + 0.12), (x + 5.2, y + 0.15, g + 0.14))
+                add_box(bays, (x + 9.8, y, g + 0.12), (x + 15, y + 0.15, g + 0.14))
                 for xx in (x + 0.4, x + 10.2):
                     if rnd.random() < 0.72:
-                        c = cars[rnd.randrange(6)]
-                        add_box(c, (xx, y + 0.45, g + 0.12), (xx + 4.4, y + 2.25, g + 1.1))
-                        add_box(c, (xx + 1.1, y + 0.6, g + 1.1), (xx + 3.4, y + 2.1, g + 1.6))
+                        car(bins, xx + 2.2, y + 1.35, g + 0.12, True, rnd.randrange(6))
                 y += 2.7
             x += 21
     obj("roads", road, mat("Asphalt", (0.028, 0.029, 0.033), 0.85), coll)
     obj("roadlines", dashes, mat("Paint", (0.75, 0.75, 0.72), 0.7), coll)
     obj("bays", bays, mat("Paint", (0.75, 0.75, 0.72), 0.7), coll)
-    for k, c in enumerate([(0.6, 0.6, 0.62), (0.06, 0.06, 0.07), (0.5, 0.05, 0.04), (0.05, 0.12, 0.4), (0.85, 0.85, 0.85), (0.6, 0.45, 0.08)]):
-        obj(f"cars{k}", cars[k], mat(f"Car{k}", c, 0.3, 0.4), coll)
     # food and drink, big enough to read (the user: "food stalls etc. (properly shown)"): kiosks
     # with striped awnings round the plinth; in front of the near stand, beside the megastore, a
     # fan zone: food trucks, a beer tent, picnic tables under parasols, fans in the club's colours
@@ -649,22 +994,14 @@ def town(coll, box, ex, ey, reach):
                 add_box(stripes[a if k % 2 == 0 else b], (x0, ya, z), (x1, ya + (y1 - y0) / n, z + 0.35))
     spots = [(x, ey + 4.0, True) for x in range(-56, 57, 16)] + [(-ex - 4.5, y, False) for y in (-26, -9, 9, 26)] + [(ex + 4.5, y, False) for y in (-26, -9, 9, 26)]
     spots = [[(-8, ey + 4.0, True), (8, ey + 4.0, True)], spots[:8] + [spots[9], spots[10], spots[13], spots[14]], spots, spots][lv]
-    for k, (x, y, along_x) in enumerate(spots):
-        w, d = (4.6, 3.2) if along_x else (3.2, 4.6)
-        add_box(body, (x - w / 2, y - d / 2, 0), (x + w / 2, y + d / 2, 2.8))
-        add_box(lit, (x - w / 2 + 0.4, y - d / 2 - 0.06, 1.0), (x + w / 2 - 0.4, y - d / 2 + 0.1, 2.2)) if along_x else add_box(lit, (x - w / 2 - 0.06, y - d / 2 + 0.4, 1.0), (x - w / 2 + 0.1, y + d / 2 - 0.4, 2.2))
-        awning(x - w / 2 - 0.5, y - d / 2 - 1.0, x + w / 2 + 0.5, y + d / 2 + 0.3, 2.8, k % 4, 4, along_x)
-    # the fan zone: from the megastore's east side to near the east end, the near stand's back to
-    # the plinth's edge
-    fx0, fx1, fy0, fy1 = -PL / 2 + 21, PL / 2 + 2, -ey - 33, -ey - 6
+    for k, (x, y, along_x) in enumerate(spots):  # (food vans, the reference's: hatch toward the stand)
+        food_van(bins, x, y, 0.0, along_x)
+    # the fan zone: from the megastore's east side (wider since 2026-11-24) to near the east end,
+    # the near stand's back to the plinth's edge
+    fx0, fx1, fy0, fy1 = -PL / 2 + 30, PL / 2 + 2, -ey - 33, -ey - 6
     trucks = [(), (fx0 + 2, fx0 + 14), (fx0 + 2, fx0 + 14, fx0 + 26, fx0 + 38), (fx0 + 2, fx0 + 14, fx0 + 26, fx0 + 38, fx0 + 50)][lv]
-    for k, x in enumerate(trucks):  # food trucks, hatches south
-        y = fy1 - 4
-        add_box(body, (x, y - 1.3, 0.4), (x + 6.5, y + 1.3, 3.2))
-        add_box(body, (x + 6.5, y - 1.3, 0.4), (x + 8.6, y + 1.3, 2.5))  # the cab
-        add_box(lit, (x + 0.8, y - 1.36, 1.5), (x + 5.7, y - 1.2, 2.7))
-        awning(x + 0.4, y - 2.6, x + 6.1, y - 1.3, 2.8, k % 4, 4)
-        add_box(tables, (x + 1, y - 1.3, 0), (x + 7.6, y + 1.3, 0.4))  # the wheels' shadow line
+    for k, x in enumerate(trucks):  # food vans, hatches south
+        food_van(bins, x + 4.3, fy1 - 3.0, 0.0, True)
     tx0 = fx1 - 18  # the beer tent: white, a pitched roof (large grounds and up)
     if lv >= 2:
         add_box(body, (tx0, fy0 + 8, 0), (tx0 + 14, fy0 + 18, 2.6))
@@ -727,13 +1064,22 @@ def town(coll, box, ex, ey, reach):
     spots_t = [ground_at(0.16, 0.6), ground_at(0.84, 0.4)]
     tpitches = [clear_of_parks(x, y, (math.copysign(1, x), 0)) for x, y in spots_t]
     tpitches = [[], tpitches[1:], tpitches, tpitches][lv]
-    turf, lines = bmesh.new(), bmesh.new()
+    turf, lines, goalnet = bmesh.new(), bmesh.new(), bmesh.new()
     for x0, x1, y0, y1 in tpitches:
         add_box(turf, (x0 - 3, y0 - 3, g), (x1 + 3, y1 + 3, g + 0.06))
         for a, b in [((x0, y0), (x1, y0 + 0.3)), ((x0, y1 - 0.3), (x1, y1)), ((x0, y0), (x0 + 0.3, y1)), ((x1 - 0.3, y0), (x1, y1)), (((x0 + x1) / 2 - 0.15, y0), ((x0 + x1) / 2 + 0.15, y1))]:
             add_box(lines, (*a, g + 0.06), (*b, g + 0.09))
-        for s in (x0, x1 - 0.4):  # the goals
-            add_box(lines, (s, (y0 + y1) / 2 - 3.6, g), (s + 0.4, (y0 + y1) / 2 + 3.6, g + 2.4))
+        # (the training ground reference, 2026-11-24): penalty boxes, goals with nets
+        my_ = (y0 + y1) / 2
+        bd, bh = (x1 - x0) * 0.16, (y1 - y0) * 0.3
+        for s, x in ((1, x0), (-1, x1)):
+            xb = x + s * bd
+            for a, b in (((min(x, xb), my_ - bh), (max(x, xb), my_ - bh + 0.3)), ((min(x, xb), my_ + bh - 0.3), (max(x, xb), my_ + bh)), ((xb - 0.15, my_ - bh), (xb + 0.15, my_ + bh))):
+                add_box(lines, (*a, g + 0.06), (*b, g + 0.09))
+            for yy in (my_ - 3.66, my_ + 3.5):  # posts, crossbar, the net behind
+                add_box(lines, (x - 0.08, yy, g), (x + 0.08, yy + 0.16, g + 2.44))
+            add_box(lines, (x - 0.08, my_ - 3.66, g + 2.3), (x + 0.08, my_ + 3.66, g + 2.44))
+            add_box(goalnet, (min(x, x - s * 1.8), my_ - 3.6, g + 0.02), (max(x, x - s * 1.8), my_ + 3.6, g + 2.3))
         n = 32
         mx, my = (x0 + x1) / 2, (y0 + y1) / 2
         for k in range(n):
@@ -742,24 +1088,26 @@ def town(coll, box, ex, ey, reach):
     # (the user: "the high fence and some more details"): a 5 m ball-stop fence of posts, rails
     # and see-through green netting, a gate; four light masts; a shelter with benches, a
     # changing hut and a path to it; mini goals, poles and a line of cones
-    posts, net, kit, hut, path, cones = (bmesh.new() for _ in range(6))
+    posts, net, kit, hut, path, cones, dummies = (bmesh.new() for _ in range(7))
     for x0, x1, y0, y1 in tpitches:
         fx0, fx1, fy0, fy1, fh = x0 - 4, x1 + 4, y0 - 4, y1 + 4, 5.0
-        for (ax, ay), (bx, by) in (((fx0, fy0), (fx1, fy0)), ((fx1, fy0), (fx1, fy1)), ((fx1, fy1), (fx0, fy1)), ((fx0, fy1), (fx0, fy0))):
+        my_, bd = (y0 + y1) / 2, (x1 - x0) * 0.16
+        # (the corners cut off, the reference's; a gate in the near side)
+        ring = oct_ring(fx0, fx1, fy0, fy1, 5.0)
+        for k in range(8):
+            (ax, ay), (bx, by) = ring[k], ring[(k + 1) % 8]
             n = max(1, int(math.hypot(bx - ax, by - ay) / 4))
-            for k in range(n + 1):
-                px, py = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+            for j in range(n + 1):
+                px, py = ax + (bx - ax) * j / n, ay + (by - ay) * j / n
                 add_box(posts, (px - 0.12, py - 0.12, g), (px + 0.12, py + 0.12, g + fh))
             for z in (1.2, fh - 0.1):
                 strut(posts, (ax, ay, g + z), (bx, by, g + z), 0.1)
-            gate = (ax == fx0 and ay == fy0)  # (a gap on the near side: the way in)
-            mx = (ax + bx) / 2
-            if gate:
-                add_box(net, (ax, ay - 0.03, g + 0.05), (mx - 2, ay + 0.03, g + fh))
-                add_box(net, (mx + 2, ay - 0.03, g + 0.05), (bx, ay + 0.03, g + fh))
+            if abs(ay - fy0) < 0.01 and abs(by - fy0) < 0.01:  # the near side: the gate's gap
+                mx = (ax + bx) / 2
+                kerbed(net, (min(ax, bx), ay), (mx - 2, ay), 0.06, fh - 0.05, g + 0.05)
+                kerbed(net, (mx + 2, ay), (max(ax, bx), ay), 0.06, fh - 0.05, g + 0.05)
             else:
-                lo, hi = (min(ax, bx), min(ay, by)), (max(ax, bx), max(ay, by))
-                add_box(net, (lo[0] - 0.03, lo[1] - 0.03, g + 0.05), (hi[0] + 0.03, hi[1] + 0.03, g + fh))
+                kerbed(net, (ax, ay), (bx, by), 0.06, fh - 0.05, g + 0.05)
         for cx_, cy_ in ((fx0, fy0), (fx1, fy0), (fx1, fy1), (fx0, fy1)):  # light masts
             add_box(posts, (cx_ - 0.25, cy_ - 0.25, g), (cx_ + 0.25, cy_ + 0.25, g + 12))
             add_box(kit, (cx_ - 1.0, cy_ - 1.0, g + 12), (cx_ + 1.0, cy_ + 1.0, g + 13.2))
@@ -774,10 +1122,18 @@ def town(coll, box, ex, ey, reach):
         for gx in (x0 + 18, x1 - 18):  # mini goals across the pitch
             add_box(lines, (gx - 0.1, (y0 + y1) / 2 - 12, g), (gx + 0.1, (y0 + y1) / 2 - 10, g + 1.2))
             add_box(lines, (gx - 0.1, (y0 + y1) / 2 + 10, g), (gx + 0.1, (y0 + y1) / 2 + 12, g + 1.2))
-        for k in range(8):  # a line of cones and two rows of poles for the drills
+        for k in range(8):  # a line of cones for the drills
             cx_ = x0 + 8 + k * 2.5
             bmesh.ops.create_cone(cones, cap_ends=True, segments=8, radius1=0.35, radius2=0.05, depth=0.6, matrix=Matrix.Translation((cx_, y0 + 6, g + 0.36)))
-            add_box(cones, (x1 - 8 - k * 2.5 - 0.06, y1 - 6 - 0.06, g), (x1 - 8 - k * 2.5 + 0.06, y1 - 6 + 0.06, g + 1.6))
+        # slalom poles in pairs, red and white bands; small dummy players on their plates
+        for k, (px, py) in enumerate(((x0 + bd + 8, my_ - 9), (x0 + bd + 8, my_ + 7), (x1 - bd - 8, my_ - 8), (x1 - bd - 8, my_ + 8))):
+            for dx in (0.0, 1.6):
+                for band in range(5):
+                    add_box(cones if band % 2 == 0 else lines, (px + dx - 0.07, py - 0.07, g + band * 0.36), (px + dx + 0.07, py + 0.07, g + (band + 1) * 0.36))
+        for px, py in ((x0 + bd + 3, my_ + 3), ((x0 + x1) / 2 + 9, my_ - 4), (x1 - bd - 3, my_ - 2)):
+            add_box(dummies, (px - 0.4, py - 0.4, g), (px + 0.4, py + 0.4, g + 0.08))
+            add_box(dummies, (px - 0.24, py - 0.13, g + 0.08), (px + 0.24, py + 0.13, g + 1.25))
+            add_box(dummies, (px - 0.11, py - 0.11, g + 1.25), (px + 0.11, py + 0.11, g + 1.52))
     tm = grass_mat()  # (mown stripes, as the main pitch)
     obj("trainingturf", turf, tm, coll)
     obj("traininglines", lines, mat("Lines", (0.95, 0.95, 0.95), 0.6), coll)
@@ -789,33 +1145,24 @@ def town(coll, box, ex, ey, reach):
     obj("traininghut", hut, mat("Hut", (0.55, 0.52, 0.47), 0.8), coll)
     obj("trainingpath", path, mat("Path2", (0.22, 0.2, 0.17), 0.9), coll)
     obj("cones", cones, mat("Cone", (0.95, 0.45, 0.05), 0.6), coll)
+    obj("dummies", dummies, mat("Dummy", (0.07, 0.075, 0.08), 0.6), coll)
+    obj("goalnets", goalnet, netting, coll)
     # low buildings beyond the main road and north of the ring road; a pub by the east car park
-    walls = [mat(f"House{k}", c, 0.8) for k, c in enumerate([(0.22, 0.12, 0.08), (0.3, 0.28, 0.25), (0.16, 0.17, 0.19)])]
-    houses, roofs, lit = [bmesh.new() for _ in range(3)], bmesh.new(), bmesh.new()
+    # (terraced rows since 2026-11-24, the reference's houses: fronts and gardens toward the road)
     rows = [(main - 22, -1), (ring_n + 22, 1)]
     for y, s in rows:
         x = -reach * 1.2
         while x < reach * 1.2:
-            w, d, hgt = rnd.uniform(9, 16), rnd.uniform(8, 12), rnd.uniform(5, 11)
-            yy = y + s * d / 2
+            n, uw, d = rnd.randint(4, 7), 5.6, 9.0
+            w = n * uw
+            yy = y + s * (d / 2 + 3.3)  # (the gardens between the fronts and the road)
             if not any(p[0] - 6 < x + w and x < p[1] + 6 and p[2] - 6 < yy < p[3] + 6 for p in parks + tpitches):
-                add_box(houses[rnd.randrange(3)], (x, yy - d / 2, g), (x + w, yy + d / 2, g + hgt))
-                add_box(roofs, (x - 0.4, yy - d / 2 - 0.4, g + hgt), (x + w + 0.4, yy + d / 2 + 0.4, g + hgt + 0.6))
-                for fl in range(int(hgt // 3)):
-                    if rnd.random() < 0.5:
-                        add_box(lit, (x + 1, yy - s * (d / 2 + 0.05), g + 1.2 + fl * 3), (x + w - 1, yy - s * (d / 2 - 0.1), g + 2.2 + fl * 3))
-            x += w + rnd.uniform(3, 9)
+                terrace_row(bins, x, yy, d, n, uw, rnd.choice((5.6, 5.9, 6.2)), -s, g, rnd)
+            x += w + rnd.uniform(6, 14)
     px0, _, py0, _ = parks[0]
-    add_box(houses[0], (px0 + 4, py0 - 20, g), (px0 + 24, py0 - 6, g + 6))  # the pub
-    add_box(roofs, (px0 + 3.5, py0 - 20.5, g + 6), (px0 + 24.5, py0 - 5.5, g + 6.8))
-    add_box(lit, (px0 + 6, py0 - 6.05, g + 1), (px0 + 22, py0 - 5.9, g + 3.5))
-    for k in range(3):
-        obj(f"houses{k}", houses[k], walls[k], coll)
-    obj("houseroofs", roofs, mat("HouseRoof", (0.07, 0.07, 0.08), 0.7), coll)
-    obj("windows", lit, mat("Windows", (1.0, 0.8, 0.5), 0.2, 0.0, 1.0), coll)
+    terrace_row(bins, px0 + 4, py0 - 13, 10.0, 3, 6.8, 6.0, 1, g, rnd)  # the pub
     # trees in the grass: rows along the ring road, many more in the fields; never on a road,
     # a car park, a building or the plinth
-    crowns, trunks = [bmesh.new() for _ in range(3)], bmesh.new()
     def free(x, y):
         if box[0] - 9 < x < box[1] + 9 and box[2] - 9 < y < box[3] + 9:
             return False
@@ -834,12 +1181,8 @@ def town(coll, box, ex, ey, reach):
         if not free(x, y) or any((x - a) ** 2 + (y - b) ** 2 < 20 for a, b in placed[-60:]):
             continue
         placed.append((x, y))
-        r, h = rnd.uniform(2.2, 3.8), rnd.uniform(2.5, 4.5)
-        add_box(trunks, (x - 0.3, y - 0.3, g), (x + 0.3, y + 0.3, g + h))
-        bmesh.ops.create_icosphere(crowns[rnd.randrange(3)], subdivisions=2, radius=r, matrix=Matrix.Translation((x, y, g + h + r * 0.8)))
-    obj("fieldtrunks", trunks, mat("Bark", (0.1, 0.07, 0.045), 0.9), coll)
-    for k, c in enumerate([(0.025, 0.08, 0.022), (0.04, 0.11, 0.03), (0.022, 0.065, 0.03)]):
-        obj(f"fieldtrees{k}", crowns[k], mat(f"FieldLeaves{k}", c, 0.85), coll)
+        plant(coll, x, y, g, rnd, rnd.uniform(1.1, 1.5))  # (the reference's leafy trees)
+    emit(coll, bins)
 
 
 # ---------------------------------------------------------------- scene, camera, renders
@@ -852,8 +1195,11 @@ def scene_for(size):
         c = bpy.data.collections.new(name)
         sc.collection.children.link(c)
         colls.append(c)
-    global LEVEL
-    LEVEL = "smlx".index(size)  # (the town's size, `town`)
+    global LEVEL, AMATEUR, RH
+    LEVEL = max(0, "smlx".find(size))  # (the town's size, `town`; an amateur ground the small one's)
+    AMATEUR = size == "a"
+    RH = 2.6 if AMATEUR else 5.0
+    tree_shapes()
     depth, top = build(size, colls)
     pitch(colls[0])
     ex, ey = PL / 2 + GAP + depth + 2.5, PW / 2 + GAP + depth + 2.5
@@ -900,7 +1246,8 @@ def scene_for(size):
     def at(p):
         v = world_to_camera_view(sc, cam, Vector(p))
         return (round(v.x * W), round((1 - v.y) * H))
-    mid = lambda side: frame(side)[0](0, depth / 2, top * 0.55)
+    geom = lambda side: SIDE_GEOM.get(side, (depth, top, frame(side)[1]))
+    mid = lambda side: frame(side)[0](0, geom(side)[0] / 2, geom(side)[1] * 0.55)
     points = [at((0, 0, 0))] + [at(mid(s)) for s in range(4)]
     edge = max(math.dist(at((0, 0, 0)), at(p)) for p in [(9.15, 0, 0), (0, 9.15, 0)])
     points.append((round(edge), 0))
@@ -911,12 +1258,15 @@ def scene_for(size):
     # writes the club's name on the far one and the ground's on the near one (the mock's HERACLES,
     # ALMELO); far = stand 0 (north), near = stand 1 (south)
     def roof_corners(side):
-        w, length = frame(side)
-        front = depth * ROOF_FRONT
-        zb, zf = top + 5.5, top + 5.0 + 8 * 0.35 + 0.5
+        w = frame(side)[0]
+        depth, top, length = geom(side)
+        front = depth * (ROOF_FRONT if not AMATEUR else 0.4)
+        zb, zf = top + RH + 0.5, top + RH + 8 * 0.35 + 0.5
         pts = [at(w(-length / 2 - 1, depth + 1.6, zb)), at(w(length / 2 + 1, depth + 1.6, zb)), at(w(length / 2 + 1, front, zf)), at(w(-length / 2 - 1, front, zf))]
         ends = [(pts[0], pts[3]), (pts[1], pts[2])]  # (back, front) at each end of the stand
-        back_top = (pts[0][1] + pts[1][1]) < (pts[2][1] + pts[3][1])
+        # (the words' top: the far roof's back edge, the near roof's front edge; by the screen's
+        # heights the amateur stand's short steep roof had its front higher: mirrored, 2026-11-24)
+        back_top = side == 0
         tops = [e[0] if back_top else e[1] for e in ends]
         bots = [e[1] if back_top else e[0] for e in ends]
         i = 0 if tops[0][0] < tops[1][0] else 1
@@ -932,7 +1282,8 @@ def club_shop(coll, ey, mega=False):
     block beside the south stand's near (west) end, its glass front and sign facing west (the
     camera), pillars, sign band and a roof panel in the club's first colour (id class 3), the name
     in its second (class 2), a roof unit, planters. Its own layer, drawn once the club has one."""
-    wx, wy, h = (24.0, 32.0, 12.0) if mega else (15.0, 20.0, 8.0)
+    # (the megastore wider since 2026-11-24, a friend: "wider than the reference, its style")
+    wx, wy, h = (33.0, 32.0, 12.0) if mega else (15.0, 20.0, 8.0)
     x0 = -PL / 2 - 7.5
     x1, y1 = x0 + wx, -ey - 3.0
     y0 = y1 - wy

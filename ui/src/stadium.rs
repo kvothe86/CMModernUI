@@ -42,8 +42,23 @@ pub fn deposit(cost: i64) -> i64 {
 fn instalment_months(days: i32) -> i32 {
     ((days as f32 / 30.44).ceil() as i32 - 1).max(1)
 }
-/// The most a ground can hold (the game's own bound for its works).
-const MOST: i32 = 125_000;
+/// The most a ground can hold (the game's own bound for its works was 125,000; 150,000 since the
+/// new stadium's top level, `new_room`).
+const MOST: i32 = 150_000;
+
+/// A new stadium's room to grow, by the old ground's (the user 2026-11-24: a level 7 club with
+/// 1,000 places and room for 1,000 had to build new stadiums five times over): a small ground's
+/// club moves to a professional one (room to 30,000), a bigger one's to a big club's (70,000), a
+/// ground of 50,000 and more to the very top (150,000); never less than a quarter over its places,
+/// as before. The places themselves are the size picked, as before.
+fn new_room(old_room: i32, places: i32) -> i32 {
+    let level = match old_room {
+        ..15_000 => 30_000,
+        ..50_000 => 70_000,
+        _ => MOST,
+    };
+    level.max(places * 5 / 4).min(MOST).max(places)
+}
 
 /// A work's price in the game's units and how many days it takes (`amount` places for 1..3).
 pub fn price(kind: u8, amount: i32) -> (i64, i32) {
@@ -212,6 +227,46 @@ unsafe fn stadium_of(club: usize) -> Option<usize> {
     readable(s, 78).then_some(s)
 }
 
+/// The page's word once the ground is full (no room left to grow, no new stadium ordered yet):
+/// what a new stadium gives, its room to grow by the old ground's level (`new_room`), and the
+/// levels after it. None while there is room, or a new stadium is being built.
+fn full_note(g: &Ground, small: bool) -> Option<String> {
+    if g.capacity + g.pending(&[SEATS, STANDING]) < g.room.min(MOST) || g.works.iter().any(|w| w.0 == NEW) {
+        return None;
+    }
+    let Some(&next) = sizes_above(g.capacity).first() else {
+        return Some("The ground is full and as big as a ground gets.".into());
+    };
+    let room = new_room(g.room, next);
+    if small {
+        return Some(format!("Full: a new stadium of {}, room to grow to {}.", sep(next), sep(room)));
+    }
+    let after = match room {
+        ..70_000 => " Its next one: room to 70,000, then 150,000.",
+        ..MOST => " Its next one: room to 150,000.",
+        _ => "",
+    };
+    Some(format!("Full. A new stadium: {} seats, room to grow to {}.{}", sep(next), sep(room), after))
+}
+
+/// A test's ground (script line `places n`, as `money n`): the human club's stadium n places, a
+/// quarter of them seats, no room to grow; in memory only, until the game is saved.
+pub unsafe fn test_places(n: i32) -> bool {
+    let Some(s) = human_club_ptr().and_then(|c| stadium_of(c)) else { return false };
+    for (off, v) in [(0x3c, n), (0x40, n / 4), (0x44, n)] {
+        *((s + off) as *mut i32) = v;
+    }
+    true
+}
+
+/// A test's roof (script line `roof 1` / `roof 0`): the human club's ground roofed or not; in
+/// memory only, as `test_places`.
+pub unsafe fn test_roof(on: bool) -> bool {
+    let Some(s) = human_club_ptr().and_then(|c| stadium_of(c)) else { return false };
+    *((s + 0x4c) as *mut u8) = on as u8;
+    true
+}
+
 /// Host: a club's ground as text, after the order (kind 0: none) of the manager whose club it is.
 pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8]) -> Option<Vec<u8>> {
     let seed = finreport::seed_of(club)?;
@@ -324,10 +379,12 @@ pub unsafe fn complete() -> bool {
                 diary::MERCH[at].1 = amount as u8;
             }
             NEW => {
-                // all seated, roofed, heated, room to grow a quarter more; the name typed at the order
+                // all seated, roofed, heated, room to grow by the old ground's level (`new_room`);
+                // the name typed at the order
+                let old_room = *at(0x44);
                 *at(0x3c) = amount;
                 *at(0x40) = amount;
-                *at(0x44) = (amount * 5 / 4).min(MOST).max(amount);
+                *at(0x44) = new_room(old_room, amount);
                 *((s + 0x4c) as *mut u8) = 1;
                 *((s + 0x4d) as *mut u8) = 1;
                 if let Some(n) = diary::NAMES.iter().find(|n| n.0 == seed) {
@@ -707,6 +764,8 @@ struct Shot {
     /// the long roofs' corners (far: top left, top right, bottom left; then the near one) when
     /// the ground has a roof: the words go on them
     roof: Option<[(i32, i32); 8]>,
+    /// the amateur ground (`size_of` "a"): one seated stand (north) and a terrace (south)
+    amateur: bool,
 }
 
 static mut PACK: Option<Option<Vec<Pic>>> = None;
@@ -752,9 +811,12 @@ fn unruns(src: &[u8], want: usize) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The pack's ground for a capacity: small, middle, large (two tiers), huge.
+/// The pack's ground for a capacity: amateur (one small stand, a terrace, rails behind the goals:
+/// a friend 2026-11-24, a non-league ground of 1,500 looked like one of 11,000), small, middle,
+/// large (two tiers), huge.
 fn size_of(capacity: i32) -> &'static str {
     match capacity {
+        ..3_000 => "a",
         ..12_000 => "s",
         ..30_000 => "m",
         ..60_000 => "l",
@@ -803,9 +865,67 @@ fn paint(p: &[u8], cols: [[u8; 3]; 2], seated: f32) -> [u32; 3] {
     base.map(|v| ((v as u32).max(30) * lum / 205).min(255))
 }
 
+/// The pitch's grass in the pack's ids (class 0, "stand" 3, segment 15): rendered one plain green,
+/// the club's mowing pattern goes over it here (`Mow`).
+const PITCH_ID: u8 = 0xfc;
+
+/// A club's mowing pattern on the pitch (a friend 2026-11-24: "verschillende maaistijlen"; the
+/// pack had one, stripes, since the 2026-11-23 restyle; checks before it): one of six, by the
+/// club's name, laid on the pitch through its axes in the frame (pack points 0, 6, 7: the centre
+/// spot and the centre circle's edge along and across, 9.15 m).
+struct Mow {
+    c: (f32, f32),
+    inv: [f32; 4],
+    kind: u32,
+}
+
+impl Mow {
+    fn new(pts: &[(i32, i32); 8], club: &str) -> Option<Mow> {
+        if pts[6] == (0, 0) {
+            return None;
+        }
+        let d = |p: (i32, i32)| ((p.0 - pts[0].0) as f32 / 9.15, (p.1 - pts[0].1) as f32 / 9.15);
+        let ((ax, ay), (bx, by)) = (d(pts[6]), d(pts[7]));
+        let det = ax * by - bx * ay;
+        if det.abs() < 1e-3 {
+            return None;
+        }
+        let kind = club.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)) % 6;
+        Some(Mow { c: (pts[0].0 as f32, pts[0].1 as f32), inv: [by / det, -bx / det, -ay / det, ax / det], kind })
+    }
+
+    /// The pitch's metres (along, across from the centre spot) at a frame point.
+    fn uv(&self, x: f32, y: f32) -> (f32, f32) {
+        let (dx, dy) = (x - self.c.0, y - self.c.1);
+        (self.inv[0] * dx + self.inv[1] * dy, self.inv[2] * dx + self.inv[3] * dy)
+    }
+
+    /// The light of the grass at a frame point (1.0 the pack's own green).
+    fn shade(&self, x: f32, y: f32) -> f32 {
+        let (u, v) = self.uv(x, y);
+        let odd = |t: f32| (t.floor() as i32).rem_euclid(2) == 1;
+        let pm = |on: bool, d: f32| if on { 1.0 + d } else { 1.0 - d };
+        match self.kind {
+            // stripes across the pitch, faintly along it too (the restyle's lawn)
+            0 => pm(odd(u / 7.5), 0.09) * pm(odd(v / 11.33), 0.025),
+            // checks (the first pack's)
+            1 => pm(odd(u / 10.5) != odd(v / 11.33), 0.09),
+            // diagonal bands
+            2 => pm(odd((u + v) / 7.0), 0.085),
+            // diamonds
+            3 => pm(odd((u + v) / 9.0) != odd((u - v) / 9.0), 0.08),
+            // rings round the centre spot
+            4 => pm(odd(u.hypot(v) / 6.5), 0.08),
+            // stripes along the pitch
+            _ => pm(odd(v / 7.56), 0.09),
+        }
+    }
+}
+
 /// The average of a picture's pixels under the frame rectangle [fx0, fx1) x [fy0, fy1): colour
-/// (weighted by alpha) and alpha; None where it has nothing.
-fn sample(pic: &Pic, f: (f32, f32, f32, f32), cols: [[u8; 3]; 2], seated: f32) -> Option<([f32; 3], f32)> {
+/// (weighted by alpha) and alpha; None where it has nothing. With `mow` the pitch's grass takes
+/// the club's mowing pattern.
+fn sample(pic: &Pic, f: (f32, f32, f32, f32), cols: [[u8; 3]; 2], seated: f32, mow: Option<&Mow>) -> Option<([f32; 3], f32)> {
     let span = |a: f32, b: f32, at: i32, n: i32| {
         let lo = a.floor() as i32;
         ((lo - at).max(0), ((b.ceil() as i32).max(lo + 1) - at).min(n))
@@ -823,7 +943,11 @@ fn sample(pic: &Pic, f: (f32, f32, f32, f32), cols: [[u8; 3]; 2], seated: f32) -
                 continue;
             }
             let a = p[2] as f32 / 255.0;
-            let c = paint(p, cols, seated);
+            let mut c = paint(p, cols, seated);
+            if let Some(m) = mow.filter(|_| p[3] == PITCH_ID) {
+                let k = m.shade((pic.x + x) as f32 + 0.5, (pic.y + y) as f32 + 0.5);
+                c = c.map(|v| ((v as f32 * k) as u32).min(255));
+            }
             for i in 0..3 {
                 acc[i] += c[i] as f32 * a;
             }
@@ -848,7 +972,10 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
     let centre = |p: i32, size: f32, full: i32| (size / 2.0 - p as f32 * sc).clamp(size - full as f32 * sc, 0.0);
     let (ox, oy) = (centre(base.pts[0].0, w as f32, base.fw), centre(base.pts[0].1, h as f32, base.fh));
     let cols = mosaic(g.colours);
-    let seated = if g.capacity > 0 { g.seats as f32 / g.capacity as f32 } else { 1.0 };
+    // (the amateur ground: its one stand always seats, its terrace is drawn as one)
+    let amateur = size == "a";
+    let seated = if amateur { 1.0 } else if g.capacity > 0 { g.seats as f32 / g.capacity as f32 } else { 1.0 };
+    let mow = Mow::new(&base.pts, &g.club);
     let shop_built = g.works.iter().any(|w| w.0 == SHOP);
     // (a megastore from level 2: the bigger building, its own layer; the club shop before)
     let shop_level = g.shop.max(g.works.iter().filter(|w| w.0 == SHOP).map(|w| w.1 as u8).max().unwrap_or(0));
@@ -868,7 +995,7 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
             let (mut acc, mut alpha) = ([0f32; 3], 0f32);
             for (pic, fade) in layers {
                 let Some(pic) = pic else { continue };
-                if let Some((c, a)) = sample(pic, (fx0, fx1, fy0, fy1), cols, seated) {
+                if let Some((c, a)) = sample(pic, (fx0, fx1, fy0, fy1), cols, seated, mow.as_ref()) {
                     let a = a * fade;
                     for i in 0..3 {
                         acc[i] = acc[i] * (1.0 - a) + c[i] * a;
@@ -898,7 +1025,7 @@ fn compose(pack: &[Pic], g: &Ground, w: i32, h: i32) -> Option<Shot> {
     }
     let key = String::new();
     let roof_pts = if g.roof { roof.map(|r| r.pts).filter(|p| p[1] != (0, 0)) } else { None };
-    Some(Shot { key, w, h, px, sc, ox, oy, pts: base.pts, roof: roof_pts })
+    Some(Shot { key, w, h, px, sc, ox, oy, pts: base.pts, roof: roof_pts, amateur })
 }
 
 /// The rendered ground in r, with the club's badge in the centre circle and each stand's places;
@@ -911,15 +1038,17 @@ unsafe fn rendered(r: (i32, i32, i32, i32), g: &Ground, f2: u32) -> bool {
         return false;
     }
     let works: Vec<u8> = g.works.iter().map(|w| w.0).collect();
-    let key = format!("{w}x{h} {} {} {} {:?} {:?} {}", g.capacity, g.seats, g.roof, g.colours, works, g.shop);
+    let key = format!("{w}x{h} {} {} {} {:?} {:?} {} {} {}", g.capacity, g.seats, g.roof, g.colours, works, g.shop, g.club, g.name);
     if SHOT.as_ref().is_none_or(|s| s.key != key) {
         let started = std::time::Instant::now();
         SHOT = compose(pack, g, w, h).map(|s| Shot { key: key.clone(), ..s });
         if let Some(s) = SHOT.as_mut() {
             if let Some(c) = s.roof {
-                // (the mock's roofs carry the club's name: the far one the club, the near one the ground)
-                roof_words(s, r, [c[0], c[1], c[2]], &to_latin1(&g.club.to_uppercase()));
-                roof_words(s, r, [c[3], c[4], c[5]], &to_latin1(&g.name.to_uppercase()));
+                // (the ground's name on the near roof; the club's on the far one went, a friend
+                // 2026-11-24: the crest on the pitch says it already)
+                // (the amateur ground's one roof is its stand's, the far one)
+                let on = if s.amateur { [c[0], c[1], c[2]] } else { [c[3], c[4], c[5]] };
+                roof_words(s, r, on, &to_latin1(&g.name.to_uppercase()));
             }
         }
         log(&format!("stadium: picture {key} made in {} ms", started.elapsed().as_millis()));
@@ -938,15 +1067,21 @@ unsafe fn rendered(r: (i32, i32, i32, i32), g: &Ground, f2: u32) -> bool {
         let size = rad * 26 / 10;
         draw_crest(&key, cx - size / 2, cy - size / 2, size);
     }
-    // each stand's places (the long sides 35% each, the ends 15%) on a dark label
-    for (k, share) in [(1, 0.35f32), (2, 0.35), (3, 0.15), (4, 0.15)] {
+    // each stand's places (the long sides 35% each, the ends 15%) on a dark label; the amateur
+    // ground's stand its seats, its terrace the standing places, nothing behind the goals
+    let labels: Vec<(usize, i32)> = if s.amateur {
+        vec![(1, g.seats), (2, g.capacity - g.seats)].into_iter().filter(|l| l.1 > 0).collect()
+    } else {
+        [(1, 0.35f32), (2, 0.35), (3, 0.15), (4, 0.15)].map(|(k, share)| (k, (g.capacity as f32 * share / 100.0).round() as i32 * 100)).to_vec()
+    };
+    for (k, places) in labels {
         // (toward the front rows: on the roof they covered the club's name, night 11)
         let (mx, my) = at(s.pts[k]);
         // (smaller on a small screen, and further in: at 800x600 they covered the roof's name)
         let small = screen().1 < 750;
         let (font, inward, ph) = if small { (0xffff0001u32, 60, 16) } else { (f2, 72, 24) };
         let (x, y) = (cx + (mx - cx) * inward / 100, cy + (my - cy) * inward / 100);
-        let t = sep((g.capacity as f32 * share / 100.0).round() as i32 * 100);
+        let t = sep(places);
         let tw = text_width(font, t.as_bytes());
         let half = ph / 2;
         if x - tw / 2 - 8 < r.0 || x + tw / 2 + 8 > r.2 || y - half < r.1 || y + half > r.3 {
@@ -1303,9 +1438,9 @@ pub unsafe fn flip() {
             px = r.0 - m / 2;
         }
         if FULL_VIEW {
-            // (a new stadium: its own room to grow, a quarter more, as `complete` sets it)
+            // (a new stadium: its own room to grow by the old ground's level, as `complete` sets it)
             let note = match new_size {
-                Some(n) => format!("{} PLACES, ALL SEATED, ROOFED  -  ROOM TO GROW TO {}", sep(n), sep((n * 5 / 4).min(MOST).max(n))),
+                Some(n) => format!("{} PLACES, ALL SEATED, ROOFED  -  ROOM TO GROW TO {}", sep(n), sep(new_room(g.room, n))),
                 None => format!("{} PLACES, ALL SEATED, ROOFED", sep(most)),
             };
             // (on a dark band: the town under it made the gold hard to read)
@@ -1573,8 +1708,11 @@ pub unsafe fn flip() {
         (rgb565([0x7a, 0x82, 0x8c]), ((0.5 - d).clamp(0.0, 1.0) * 255.0) as u32)
     });
     text_at(ix, y, y + l, f1, CARD, b"i", 1);
+    // (a full ground: how it goes on from here, the user 2026-11-24; `full_note`)
+    let full = full_note(&g, small);
     let note = match (g.said.is_empty(), small) {
         (false, _) => g.said.clone(),
+        (true, _) if full.is_some() => full.unwrap_or_default(),
         (true, false) => "Paid at once from the bank; the works are finished in the weeks shown.".to_string(),
         (true, true) => "Paid at once; ready in the weeks shown.".to_string(),
     };
@@ -1835,7 +1973,7 @@ unsafe fn thumb(kind: &str, g: &Ground, r: (i32, i32, i32, i32), faint: bool) ->
     let cols = mosaic(g.colours);
     blend(r.0, r.1, w, h, |c, row| {
         let (fx0, fy0) = (pic.x as f32 + (c as f32 - ox) / sc, pic.y as f32 + (row as f32 - oy) / sc);
-        match sample(pic, (fx0, fx0 + 1.0 / sc, fy0, fy0 + 1.0 / sc), cols, 1.0) {
+        match sample(pic, (fx0, fx0 + 1.0 / sc, fy0, fy0 + 1.0 / sc), cols, 1.0, None) {
             Some((rgb, a)) => (rgb565(rgb.map(|v| v.clamp(0.0, 255.0) as u8)), (a * if faint { 110.0 } else { 255.0 }) as u32),
             None => (0, 0),
         }
@@ -2094,6 +2232,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mowing_patterns_lie_on_the_pitch() {
+        // a frame where 9.15 m is 20 px along (x) and 10 px across, tilted: pitch metres come back
+        let mut pts = [(0, 0); 8];
+        pts[0] = (500, 400);
+        pts[6] = (520, 404);
+        pts[7] = (497, 410);
+        let m = Mow::new(&pts, "Ajax").unwrap();
+        let at = |u: f32, v: f32| (500.0 + u * 20.0 / 9.15 - v * 3.0 / 9.15, 400.0 + u * 4.0 / 9.15 + v * 10.0 / 9.15);
+        let (x, y) = at(30.0, -12.0);
+        let (u, v) = m.uv(x, y);
+        assert!((u - 30.0).abs() < 0.01 && (v + 12.0).abs() < 0.01, "{u} {v}");
+        // every club gets one of the six, each with light and dark grass
+        assert!(m.kind < 6);
+        for kind in 0..6 {
+            let m = Mow { kind, ..Mow::new(&pts, "Ajax").unwrap() };
+            let shades: Vec<f32> = (0..40).map(|k| { let (x, y) = at(-50.0 + k as f32 * 2.6, -30.0 + k as f32 * 1.5); m.shade(x, y) }).collect();
+            assert!(shades.iter().any(|&s| s > 1.0) && shades.iter().any(|&s| s < 1.0), "kind {kind}");
+        }
+        assert!(Mow::new(&[(0, 0); 8], "Ajax").is_none());
+    }
+
+    #[test]
     fn the_games_prices_and_the_rules() {
         // the board's own sums for 1,000 places
         assert_eq!(price(SEATS, 1000), ((2 * 6000 + 1000) * 125, 63));
@@ -2126,9 +2286,17 @@ mod tests {
         assert_eq!(sizes_above(7_500), vec![15_000, 25_000, 40_000, 60_000, 90_000, 125_000]);
         assert_eq!(sizes_above(14_000), vec![25_000, 40_000, 60_000, 90_000, 125_000]);
         assert_eq!(price(NEW, 30_000), (100_000_000, 665));
+        // its room to grow by the old ground's: a level 7 ground of 1,000 to 30,000, then 70,000,
+        // then the top; never under a quarter more than its places
+        assert_eq!((new_room(1_000, 15_000), new_room(20_000, 25_000), new_room(60_000, 90_000)), (30_000, 70_000, 150_000));
+        assert_eq!(new_room(1_000, 40_000), 50_000);
+        assert_eq!(new_room(100_000, 125_000), 150_000);
         assert_eq!((deposit(100_000_000), instalment_months(665)), (30_000_000, 21));
         let full = Ground { capacity: 7_500, seats: 5_000, room: 7_500, balance: 40_000_000, symbol: "E".into(), rate: 1.0, ..Default::default() };
         assert_eq!(full.refusal(NEW, 30_000), None);
+        // the full ground's word: the next stadium and its room; none while there is room
+        assert_eq!(full_note(&full, false).as_deref(), Some("Full. A new stadium: 15,000 seats, room to grow to 30,000. Its next one: room to 70,000, then 150,000."));
+        assert_eq!(full_note(&Ground { room: 9_000, ..full.clone() }, false), None);
         assert_eq!(full.refusal(NEW, 60_000).as_deref(), Some("Not enough money in the bank"));
         assert_eq!(Ground { room: 9_000, ..full.clone() }.refusal(NEW, 30_000).as_deref(), Some("Room left to grow first"));
         let building = Ground { works: vec![(NEW, 30_000, 600)], ..full.clone() };
