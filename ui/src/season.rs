@@ -617,9 +617,12 @@ unsafe fn draw() {
     }
     // RISERS / FALLERS beside the last six, in the bottom row's free right half (user 2026-11-22:
     // the key attributes' change over the season, `diary::movers`; HONOURS keeps its rows)
-    if !card.movers.is_empty() {
-        text_at(sx, by - line - 4, by - 4, f2, GOLD, b"RISERS / FALLERS", 0);
-        let mut x = sx;
+    // (right of the last pill: six pills run past sx at 1680 and the names were drawn over them,
+    // FC United 2026-27 season card, 2026-11-24)
+    let rx = sx.max(x1 + m + card.last.len() as i32 * (line * 3 + 8) + 12);
+    if !card.movers.is_empty() && rx + text_width(f2, b"RISERS / FALLERS") <= x2 - m {
+        text_at(rx, by - line - 4, by - 4, f2, GOLD, b"RISERS / FALLERS", 0);
+        let mut x = rx;
         let fs = if small_screen() { f1 } else { f2 };
         for (name, change) in &card.movers {
             let short = name.split(|&c| c == b' ').next_back().unwrap_or(name).to_vec();
