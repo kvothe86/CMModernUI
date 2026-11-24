@@ -7803,6 +7803,28 @@ unsafe fn squad_buffer_guard() {
         VirtualProtect((AT + 2) as *mut u8, 1, old, &mut old);
         log("0x85a072: squad numbers' gathering cap back to 50 (NickDLL had 99: a stack overflow on squad numbers day)");
     }
+    // `SQUAD_MANAGER::allocate_squad_number` (0x85a470) marks the club's taken numbers in 50 bytes
+    // on its stack (`mov byte [esp+eax+0x1b], 1`, eax = |number|), right below its 50 player
+    // pointers (youngest first). A number of 53..99 (NickDLL) wrote a 1 into the pointer of a later
+    // player, who was then read: a crash at 0x85a4d7 (Squad Numbers > Auto, user 2026-11-24). Now
+    // only 1..50 are marked; a player keeps his higher number.
+    const TAKEN: usize = 0x85a4f9;
+    let was = [0x84, 0xc0, 0x74, 0x14, 0x0f, 0xbe, 0xc0, 0xc6, 0x44, 0x04, 0x1b, 0x01, 0xeb, 0x0a];
+    let now = [
+        0x48, // dec eax
+        0x83, 0xf8, 0x31, // cmp eax, 49
+        0x77, 0x12, // ja 0x85a511 (0, or over 50: not marked)
+        0xc6, 0x44, 0x04, 0x1c, 0x01, // mov byte [esp+eax+0x1c], 1
+        0xeb, 0x0b, // jmp 0x85a511
+        0x90,
+    ];
+    if std::slice::from_raw_parts(TAKEN as *const u8, 14) == was {
+        let mut old = 0;
+        VirtualProtect(TAKEN as *mut u8, 14, 0x40, &mut old);
+        std::ptr::copy_nonoverlapping(now.as_ptr(), TAKEN as *mut u8, 14);
+        VirtualProtect(TAKEN as *mut u8, 14, old, &mut old);
+        log("0x85a4f9: free squad numbers mark only 1..50 (a number to 99 broke a player pointer: crash at 0x85a4d7)");
+    }
 }
 
 /// Network Play's adapter scan `tcpip_scan_adapter_addresses` (0x8aee20, si\tcpip.cpp): on NT it
