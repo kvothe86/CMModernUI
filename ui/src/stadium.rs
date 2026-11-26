@@ -26,11 +26,22 @@ pub const NEW: u8 = 6;
 /// The club shop's next level (amount: the level), an item put on sale (amount: its index): `shop.rs`.
 pub const SHOP: u8 = 7;
 pub const ITEM: u8 = 8;
-const SIZES: [i32; 6] = [15_000, 25_000, 40_000, 60_000, 90_000, 125_000];
+/// (from 3,000 since 2026-11-24: a level 7 club could only pick 15,000 for 62.5 million, some 600
+/// seasons of its turnover in the cm25 Glory save)
+const SIZES: [i32; 15] = [3_000, 5_000, 8_000, 12_000, 15_000, 20_000, 25_000, 30_000, 40_000, 50_000, 60_000, 75_000, 90_000, 110_000, 125_000];
 
 /// The new stadiums a ground of `capacity` can move up to.
 pub fn sizes_above(capacity: i32) -> Vec<i32> {
-    SIZES.into_iter().filter(|&s| s > capacity + 2000).collect()
+    SIZES.into_iter().filter(|&s| s > capacity + 1000).collect()
+}
+
+/// What `places` places cost a place, rising with the size of the ground they make (user
+/// 2026-11-24, after the cm25 Glory save's turnovers: level 7 0.1 million, League Two 2.7,
+/// Premier League 39, Man Utd 77; set a little above the plan for the European prize money
+/// later on). A new stadium of 30,000: 1,935 a place, 58 million; of 3,000 0.74 million; of
+/// 125,000 nearly a billion. Seats added cost half as much a place.
+fn a_place(ground: i32) -> i64 {
+    60 + ground as i64 / 16
 }
 
 /// What a new stadium asks at the order: 30% (the rest in monthly instalments, `instalments`).
@@ -68,12 +79,13 @@ pub fn price(kind: u8, amount: i32) -> (i64, i32) {
     // seats 6 weeks + 3 a thousand, standing 4 + 2, converting 3 + 1.5, a roof half a year)
     let k = amount / 1000;
     match kind {
-        SEATS => ((blocks * 6000 + n) * 125, 42 + k * 21),
+        // (the price by the ground they make: `Ground::cost`; here as if on an empty ground)
+        SEATS => (n * a_place(amount) / 2, 42 + k * 21),
         STANDING => ((n + blocks * 1000) * 50, 28 + k * 14),
         CONVERT => (n * 75 + blocks * 50_000, 21 + k * 21 / 2),
         ROOF => (7_500_000, 182),
-        // (25 million and 2,500 a place: 30,000 places 100 million; a year and 10 days a thousand)
-        NEW => (25_000_000 + n * 2500, 365 + k * 10),
+        // (a year and 10 days a thousand)
+        NEW => (n * a_place(amount), 365 + k * 10),
         SHOP => shop::LEVELS.get(amount as usize).map_or((0, 0), |l| (l.2, l.3)),
         ITEM => shop::ITEMS.get(amount as usize).map_or((0, 0), |i| (i.2, 0)),
         _ => (1_500_000, 56),
@@ -103,6 +115,7 @@ pub struct Ground {
     pub items: u8,
     pub merch: i64,                 // merchandising this season
     pub merch_pct: i32,             // the share more this week: shop, items, last week's results
+    pub shared: String,             // another club on the same stadium record (Milan and Internazionale): no works
 }
 
 /// A club's first two kit colours (club +0x83: six colour records, each red / green / blue at +55);
@@ -123,9 +136,16 @@ impl Ground {
     pub fn pending(&self, kinds: &[u8]) -> i32 {
         self.works.iter().filter(|w| kinds.contains(&w.0)).map(|w| w.1).sum()
     }
+    /// A work's price: seats by the ground they make, the rest as `price`.
+    pub fn cost(&self, kind: u8, amount: i32) -> i64 {
+        match kind {
+            SEATS => amount as i64 * a_place(self.capacity + self.pending(&[SEATS, STANDING]) + amount) / 2,
+            _ => price(kind, amount).0,
+        }
+    }
     /// Why an order cannot be placed, or None.
     pub fn refusal(&self, kind: u8, amount: i32) -> Option<String> {
-        let (cost, _) = price(kind, amount);
+        let cost = self.cost(kind, amount);
         let busy = |k: u8| self.works.iter().any(|w| w.0 == k);
         match kind {
             SHOP if busy(SHOP) => return Some("Being built".into()),
@@ -134,6 +154,11 @@ impl Ground {
             // (name and number, kids' kits: sold in a club shop only)
             ITEM if amount >= 2 && self.shop == 0 => return Some("Needs a club shop".into()),
             _ => {}
+        }
+        // (a ground two clubs share: no works, they would change the other club's too; a new
+        // stadium of its own would first need the club moved to a stadium record of its own)
+        if !self.shared.is_empty() && !matches!(kind, SHOP | ITEM) {
+            return Some(format!("Shared with {}", self.shared));
         }
         // (the shop goes on while a new stadium is built: it is not the stadium's)
         if busy(NEW) && !matches!(kind, SHOP | ITEM) {
@@ -161,14 +186,15 @@ impl Ground {
 fn encode(g: &Ground) -> String {
     let c = g.colours;
     let mut out = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{},{},{},{},{},{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
         g.club, g.name, g.capacity, g.seats, g.room, g.roof as i32, g.heating as i32, g.average, g.balance, g.symbol, g.rate, g.said, c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2],
         g.last.map_or(String::new(), |v| v.to_string()),
         g.next_name,
         g.shop,
         g.items,
         g.merch,
-        g.merch_pct
+        g.merch_pct,
+        g.shared
     );
     for w in &g.works {
         out += &format!("{}\t{}\t{}\n", w.0, w.1, w.2);
@@ -180,7 +206,7 @@ fn decode(text: &str) -> Option<Ground> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     // (13 fields before the trend arrow, night 11)
-    if !(13..=19).contains(&h.len()) {
+    if !(13..=20).contains(&h.len()) {
         return None;
     }
     let v: Vec<u8> = h[12].split(',').filter_map(|x| x.parse().ok()).collect();
@@ -206,6 +232,7 @@ fn decode(text: &str) -> Option<Ground> {
         items: h.get(16).and_then(|v| v.parse().ok()).unwrap_or(0),
         merch: h.get(17).and_then(|v| v.parse().ok()).unwrap_or(0),
         merch_pct: h.get(18).and_then(|v| v.parse().ok()).unwrap_or(0),
+        shared: h.get(19).map_or(String::new(), |v| v.to_string()),
     };
     for l in lines {
         let f: Vec<&str> = l.split('\t').collect();
@@ -227,6 +254,16 @@ unsafe fn stadium_of(club: usize) -> Option<usize> {
     readable(s, 78).then_some(s)
 }
 
+/// Another club whose stadium is the same record (Milan and Internazionale at San Siro): its
+/// name, or empty. Works on it would change both clubs' grounds (user 2026-11-25).
+unsafe fn sharer(club: usize, s: usize) -> String {
+    let (base, count) = (rd::<usize>(CLUB_TABLE), rd::<i32>(CLUB_COUNT).clamp(0, 100_000) as usize);
+    (0..count)
+        .map(|k| base + k * CLUB_SIZE)
+        .find(|&c| c != club && readable(c, 0x6d) && rd::<usize>(c + 0x69) == s)
+        .map_or(String::new(), |c| latin1(&game_text(c + 4, 51)).into_owned())
+}
+
 /// The page's word once the ground is full (no room left to grow, no new stadium ordered yet):
 /// what a new stadium gives, its room to grow by the old ground's level (`new_room`), and the
 /// levels after it. None while there is room, or a new stadium is being built.
@@ -246,7 +283,7 @@ fn full_note(g: &Ground, small: bool) -> Option<String> {
         ..MOST => " Its next one: room to 150,000.",
         _ => "",
     };
-    Some(format!("Full. A new stadium: {} seats, room to grow to {}.{}", sep(next), sep(room), after))
+    Some(format!("Full. A new stadium: from {} seats, room to grow to {}.{}", sep(next), sep(room), after))
 }
 
 /// A test's ground (script line `places n`, as `money n`): the human club's stadium n places, a
@@ -272,12 +309,15 @@ pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8])
     let seed = finreport::seed_of(club)?;
     let s = stadium_of(club)?;
     let mut said = String::new();
+    if kind != 0 {
+        log(&format!("stadium: order kind {kind} amount {amount} for club {club:#x}, own {own}"));
+    }
     if kind != 0 && own {
         let g = ground(club, seed, s, String::new())?;
         said = match g.refusal(kind, amount) {
             Some(why) => why,
             None => {
-                let (cost, days) = price(kind, amount);
+                let (cost, days) = (g.cost(kind, amount), price(kind, amount).1);
                 let now = if kind == NEW { deposit(cost) } else { cost };
                 // (cmui.ini stadium_test_days=1: every work done the next day, for a test)
                 let days = if setting("stadium_test_days").as_deref() == Some("1") { 1 } else { days };
@@ -347,6 +387,7 @@ unsafe fn ground(club: usize, seed: usize, s: usize, said: String) -> Option<Gro
         items: shop::kit(club).1,
         merch: finreport::merch_year(club),
         merch_pct: shop::pct(shop::kit(club).0, shop::kit(club).1) + shop::results_pct(club),
+        shared: sharer(club, s),
     })
 }
 
@@ -448,6 +489,9 @@ static mut ARMED: Option<u8> = None;
 static mut AMOUNTS: [i32; 3] = [1000; 3];
 static mut STEPS: Vec<((i32, i32, i32, i32), u8, i32)> = Vec::new();
 static mut OPENED_AT: Option<std::time::Instant> = None;
+/// A client's last order, and the last refresh asked after it (`flip`).
+static mut ORDERED_AT: Option<std::time::Instant> = None;
+static mut LAST_ASK: u128 = 0;
 /// The new stadium: the size picked (of `sizes_above`), its name being typed, Enter pressed, a
 /// key since the last frame.
 static mut NEW_PICK: usize = 0;
@@ -522,6 +566,9 @@ pub fn page_open() -> bool {
 
 #[allow(static_mut_refs)]
 unsafe fn fetch(kind: u8, amount: i32, name: &[u8]) {
+    if remote::CLIENT && kind != 0 {
+        (ORDERED_AT, LAST_ASK) = (Some(std::time::Instant::now()), 0);
+    }
     let text = if remote::CLIENT {
         let mut k = key(b'!', &[CLUB as u32, kind as u32, amount as u32]);
         k.extend_from_slice(name);
@@ -1378,6 +1425,26 @@ pub unsafe fn flip() {
     if !OPEN {
         return;
     }
+    // (a client's order: the host's answer comes after the click, so the page is asked for again
+    // (the view, never the order: it would be paid twice) for a few seconds, night 12)
+    if let Some(t) = ORDERED_AT {
+        let ms = t.elapsed().as_millis();
+        if ms > 6000 {
+            ORDERED_AT = None;
+        } else if ms > 400 && ms / 400 != LAST_ASK {
+            // (forgotten once, at the first refresh: the order is asked before it, so the host
+            // answers this after the order; forgotten each time, its answer was dropped unread)
+            let k = key(b'!', &[CLUB as u32, 0, 0]);
+            if LAST_ASK == 0 || ms / 400 == 1 {
+                remote::forget(&k);
+            }
+            LAST_ASK = ms / 400;
+            if let Some(g) = ask_host(&k).and_then(|t| decode(&String::from_utf8_lossy(&t))) {
+                GROUND = Some(g);
+                REDRAW = true;
+            }
+        }
+    }
     let Some(g) = GROUND.clone() else { return };
     let (sw, sh) = screen();
     let (f1, f2, f3, f5, f6) = (0xffff0001u32, 0xffff0002u32, 0xffff0003u32, 0xffff0005u32, 0xffff0006u32);
@@ -1625,7 +1692,7 @@ pub unsafe fn flip() {
             continue;
         }
         let amount = amounts[k];
-        let (cost, days) = price(kind, amount);
+        let (cost, days) = (g.cost(kind, amount), price(kind, amount).1);
         let refused = g.refusal(kind, amount);
         let armed = ARMED == Some(kind);
         let x = o.0 + pad + k as i32 * (tw + gap);
@@ -2256,13 +2323,16 @@ mod tests {
     #[test]
     fn the_games_prices_and_the_rules() {
         // the board's own sums for 1,000 places
-        assert_eq!(price(SEATS, 1000), ((2 * 6000 + 1000) * 125, 63));
+        assert_eq!(price(SEATS, 1000).1, 63);
         assert_eq!(price(STANDING, 1000), ((1000 + 2000) * 50, 42));
         assert_eq!(price(CONVERT, 1000), (1000 * 75 + 2 * 50_000, 31));
         // the more places, the longer: 5,000 seats take 21 weeks
-        assert_eq!(price(SEATS, 5000), ((6 * 6000 + 5000) * 125, 147));
+        assert_eq!(price(SEATS, 5000).1, 147);
         assert_eq!((price(ROOF, 0).0, price(HEATING, 0).0), (7_500_000, 1_500_000));
         let g = Ground { capacity: 20_000, seats: 15_000, room: 21_000, balance: 2_000_000, symbol: "E".into(), rate: 1.0, ..Default::default() };
+        // seats by the ground they make: 1,000 onto 20,000 at (60 + 21,000 / 16) / 2 a seat
+        assert_eq!(g.cost(SEATS, 1000), 686_000);
+        assert_eq!(Ground { capacity: 3_000, ..g.clone() }.cost(SEATS, 1000), 1000 * (60 + 250) / 2);
         assert_eq!(g.refusal(SEATS, 1000), None);
         let mut busy = g.clone();
         busy.works.push((STANDING, 1000, 10));
@@ -2283,19 +2353,24 @@ mod tests {
         assert_eq!(unruns(&[2, 1, 2, 3, 4, 1, 9, 9, 9, 9], 12), Some(vec![1, 2, 3, 4, 1, 2, 3, 4, 9, 9, 9, 9]));
         assert_eq!(unruns(&[2, 1, 2, 3, 4], 12), None);
         // the new stadium: only once the ground is full, sizes above it, 30% now, the rest monthly
-        assert_eq!(sizes_above(7_500), vec![15_000, 25_000, 40_000, 60_000, 90_000, 125_000]);
-        assert_eq!(sizes_above(14_000), vec![25_000, 40_000, 60_000, 90_000, 125_000]);
-        assert_eq!(price(NEW, 30_000), (100_000_000, 665));
+        assert_eq!(sizes_above(1_000)[..3], [3_000, 5_000, 8_000]);
+        assert_eq!(sizes_above(7_500)[0], 12_000);
+        assert_eq!(sizes_above(14_000), vec![20_000, 25_000, 30_000, 40_000, 50_000, 60_000, 75_000, 90_000, 110_000, 125_000]);
+        // the price a place rises with the size: 3,000 for 0.74 million, 30,000 for 58, 125,000
+        // for nearly a billion
+        assert_eq!(price(NEW, 3_000).0, 741_000);
+        assert_eq!(price(NEW, 30_000), (58_050_000, 665));
+        assert_eq!(price(NEW, 125_000).0, 984_000_000);
         // its room to grow by the old ground's: a level 7 ground of 1,000 to 30,000, then 70,000,
         // then the top; never under a quarter more than its places
         assert_eq!((new_room(1_000, 15_000), new_room(20_000, 25_000), new_room(60_000, 90_000)), (30_000, 70_000, 150_000));
         assert_eq!(new_room(1_000, 40_000), 50_000);
         assert_eq!(new_room(100_000, 125_000), 150_000);
-        assert_eq!((deposit(100_000_000), instalment_months(665)), (30_000_000, 21));
+        assert_eq!((deposit(58_050_000), instalment_months(665)), (17_415_000, 21));
         let full = Ground { capacity: 7_500, seats: 5_000, room: 7_500, balance: 40_000_000, symbol: "E".into(), rate: 1.0, ..Default::default() };
         assert_eq!(full.refusal(NEW, 30_000), None);
         // the full ground's word: the next stadium and its room; none while there is room
-        assert_eq!(full_note(&full, false).as_deref(), Some("Full. A new stadium: 15,000 seats, room to grow to 30,000. Its next one: room to 70,000, then 150,000."));
+        assert_eq!(full_note(&full, false).as_deref(), Some("Full. A new stadium: from 12,000 seats, room to grow to 30,000. Its next one: room to 70,000, then 150,000."));
         assert_eq!(full_note(&Ground { room: 9_000, ..full.clone() }, false), None);
         assert_eq!(full.refusal(NEW, 60_000).as_deref(), Some("Not enough money in the bank"));
         assert_eq!(Ground { room: 9_000, ..full.clone() }.refusal(NEW, 30_000).as_deref(), Some("Room left to grow first"));

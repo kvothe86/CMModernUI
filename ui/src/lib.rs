@@ -52,6 +52,7 @@ mod stadium;
 mod music;
 mod shop;
 mod cheesecorner;
+mod staff;
 mod natpool;
 mod lineups;
 mod export;
@@ -816,7 +817,10 @@ unsafe fn story_crest(head: &[u8], body: &[u8]) -> Option<Vec<u8>> {
     // (the board's stories name the opponent of the game they're about, "Board delighted after
     // NEC game", "Sparta match pleases board": the human's board all the same; a chairman or a
     // search only when the headline names no club, "Chelsea chairman ...")
-    let own = has_word(b"board") || ((has_word(b"chairman") || has(b"search completed")) && crests_named(head).is_empty());
+    // (a staff member's monthly report is the club's own too: a client took the first club its
+    // text names, Galatasaray for the scout, the youth coach's old club; night 12)
+    let staff_report = has(b"monthly report - ");
+    let own = staff_report || has_word(b"board") || ((has_word(b"chairman") || has(b"search completed")) && crests_named(head).is_empty());
     if own {
         key = human_club().map(|(club, _)| club).filter(|c| has_crest(c));
     }
@@ -957,6 +961,9 @@ unsafe fn story_header(rect: (i32, i32, i32, i32), head: &[u8], date: &[u8], fon
         let tile = h - 22;
         cheesecorner::photo(tx, y1 + 10, tile);
         tx += tile + 16;
+    } else if staff::photo(head, tx, y1 + 10, h - 22) {
+        // (a staff member's monthly report: his portrait in the club's colours)
+        tx += h - 22 + 16;
     }
     let key = story_crest(head, body);
     if let Some(key) = &key {
@@ -995,6 +1002,7 @@ static mut PENDING_CLUB: (i16, usize) = (0, 0);
 const NEWS_INPUT: usize = 0x7892b0; // news_screens_news_input(widget), cdecl, returns a screen code
 const OPEN_CLUB: usize = 0x453d60; // open_club_squad_screen(club, reserves, restore, alt_view, locked)
 const OBJECT_LINK: usize = 0x7643d0; // menubar_handle_object_link(short cell), cdecl, returns a screen code
+const OPEN_PROFILE: usize = 0x8702a0; // staff_screens_open_staff_profile(staff, tab, slot2, keep_view, attribute_mode), cdecl
 static mut NEWS_INPUT_ORIG: usize = 0;
 
 /// The news screen's input: a club asked for by the story's row opens as a club link does
@@ -1002,6 +1010,13 @@ static mut NEWS_INPUT_ORIG: usize = 0;
 extern "C" fn news_input(widget: i32) -> i32 {
     unsafe {
         let serving = *((SCREEN_MANAGER + 0x382a) as *const i16);
+        // a name on a staff report's page (single player / host): his profile, as a story's link
+        if let Some(staff) = finreport::PENDING_PERSON.take() {
+            // (tab 1, slot 1 as the game's own links open a profile, 0x7643d0: tab 0 gave the
+            // error box "staff_screens.cpp 2014", a half-drawn profile and a stuck game, night 12)
+            game::<extern "C" fn(usize, i32, i32, i32, i32)>(OPEN_PROFILE)(staff, 1, 1, 0, 0);
+            return -4;
+        }
         let (channel, club) = PENDING_CLUB;
         if club != 0 && channel == serving {
             PENDING_CLUB = (0, 0);
@@ -2675,6 +2690,20 @@ unsafe fn widget_at(r: Rect) -> Option<usize> {
     (0..count).map(|k| display + 0xba95e + k * 0x18c).find(|&w| widget_box(w) == [r.0, r.1, r.2, r.3])
 }
 
+/// The widget of the screen within 4 pixels of box `r` (Game Options: the news screen's bar sits
+/// 2 pixels off the others', so the home kept from one screen missed the other's widget exactly,
+/// its click area stayed under CM Challenge while it was drawn lower: dead after a staff report's
+/// page, night 12).
+unsafe fn widget_near(r: Rect) -> Option<usize> {
+    let display = own_display();
+    let count = if display != 0 && mapped(display + 0x12e9a0, 2) { ((display + 0x12e9a0) as *const i16).read_unaligned().clamp(0, 1200) as usize } else { 0 };
+    if count == 0 || !mapped(display + 0xba95e, count * 0x18c) {
+        return None;
+    }
+    let want = [r.0, r.1, r.2, r.3];
+    (0..count).map(|k| display + 0xba95e + k * 0x18c).find(|&w| widget_box(w).iter().zip(want).all(|(a, b)| (a - b).abs() <= 4))
+}
+
 /// The flip pass: Game Options' box from this frame; after cmui's buttons are placed (full frame),
 /// its widget moved under them, the screen again when that changed.
 #[allow(static_mut_refs)]
@@ -2706,12 +2735,21 @@ unsafe fn options_flip(full_frame: bool, placed: bool) {
     let s = extra * (home.3 - home.1 + 4);
     let target = (home.0, home.1 + s, home.2, home.3 + s);
     // (a widget table built again since: its widget back in its own box)
-    if OPTIONS_MOVED.is_some_and(|(w, t)| !mapped(w, 0x20) || widget_box(w) != [t.0, t.1, t.2, t.3]) {
+    // (or a slot past the table's live count: the staff report's page screen had Game Options in
+    // slot 408, the news screen after it 257 widgets and Game Options in 243 at home; the stale
+    // 408 still held the moved box, so nothing was moved again and Game Options was dead, night 12)
+    let live = |w: usize| {
+        let display = own_display();
+        let base = display + 0xba95e;
+        let count = if display != 0 && mapped(display + 0x12e9a0, 2) { ((display + 0x12e9a0) as *const i16).read_unaligned().clamp(0, 1200) as usize } else { 0 };
+        w >= base && (w - base) % 0x18c == 0 && (w - base) / 0x18c < count
+    };
+    if OPTIONS_MOVED.is_some_and(|(w, t)| !mapped(w, 0x20) || !live(w) || widget_box(w) != [t.0, t.1, t.2, t.3]) {
         OPTIONS_MOVED = None;
     }
     let now = OPTIONS_MOVED.map_or(home, |m| m.1);
     if now != target {
-        if let Some(w) = OPTIONS_MOVED.map(|m| m.0).or_else(|| widget_at(now)) {
+        if let Some(w) = OPTIONS_MOVED.map(|m| m.0).or_else(|| widget_at(now)).or_else(|| widget_near(now)) {
             for (i, v) in [target.0, target.1, target.2, target.3].into_iter().enumerate() {
                 *((w + 0x10 + 4 * i) as *mut i32) = v;
             }
@@ -3253,6 +3291,13 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
                 script();
                 return -1;
             }
+        }
+        // a network client's Full Report on a staff report: opened here (the game's button runs
+        // on the host, which does not know the client's item: nothing opened, night 12)
+        if remote::CLIENT && released && !finreport::page_shown() && staff::client_full_report(mx, my) {
+            *(LEFT_CLICK as *mut u32) = 0;
+            script();
+            return -1;
         }
         // the P&L report (the Finances tab's button, then the report over everything)
         if on(PL_REPORT) {

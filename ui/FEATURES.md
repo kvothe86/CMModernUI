@@ -3,6 +3,16 @@
 Ideas agreed with the user, not built yet. One section per feature: what, open questions,
 where it goes. Move a feature to `docs\screens.md` / `docs\switches.md` once it is built.
 
+**Built 2026-11-24, build 9E2B41, installed in all 7 folders, not yet seen in the game:** the
+staff's monthly reports as news items (`staff.rs`), replacing the Assistant menu's Medical /
+Youth / Scouting report pages. Three items on the 1st of each month for every human club: the
+best physio (injured, to watch, fit), the coach best with youngsters + judging potential (new
+faces, prospects, loans, let go), the chief scout (this month's three names, his stars; needs the
+`scout_screen` switch). Badge: one of 9 photos (`ui\staff_faces\`, `staff_faces.py`), picked by
+the staff member's name, shirt in the club's first kit colour, trim in the second. Runs with the
+`news` switch (no switch of its own). Open: photo 3 keeps his own beige jacket (only the shirt
+under it is recoloured); a client sees the items through the host's news like Cheesecorner's.
+
 **Built 2026-11-07, build 0EC7A5, installed in all six folders, not yet seen in the game:**
 - History medals: `comp.rs` header branch + `medal`.
 - Season card CM Challenge block: `challenge::summary`, `season.rs` `draw`.
@@ -229,3 +239,7 @@ code, docs, package and every game folder.
 "We have sound in CM, but I miss music": four original synth tracks in a late-90s football-management
 menu style, and a small player at the foot of the menu bar. Switch `music` (index 41). Details in
 [docs/music.md](docs/music.md). Built and installed (7A49CD) in every folder; not heard or seen in the game yet.
+Same evening the synth tracks were replaced by eight Kevin MacLeod tracks (CC BY 4.0, credits in
+`Data\cmui_music\CREDITS.txt`), picked by the site's tags (Electronica / Funk, Bright). Later that evening the user asked for music
+like Europa Universalis 4's (copyrighted): now eight orchestral tracks by Alexander Nakarada (CC BY 4.0,
+`ui\music\tracks`).

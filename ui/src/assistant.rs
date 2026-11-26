@@ -395,6 +395,9 @@ pub unsafe fn flip(full_frame: bool) {
     // (taken on every frame: a part frame's Clear Squad must not count for the next full frame)
     if !std::mem::take(&mut CLEAR_SEEN) && full_frame {
         CLEAR_BUTTON = None;
+        // (another tab of the club screen is the same screen, `forget` not run: the saved line-ups'
+        // spots stayed and took the View menu's Players Out on Transfers, user 2026-11-26)
+        SQUAD_HERE = false;
     }
     let texts = std::mem::take(&mut SLOT_TEXTS);
     INF_TEXTS.clear();
@@ -563,9 +566,6 @@ unsafe fn menu_len() -> usize {
 
 const POOL_ITEM: &str = "National pool";
 const SEASON_ITEM: &str = "Season review";
-const MEDICAL_ITEM: &str = "Medical report";
-const YOUTH_ITEM: &str = "Youth report";
-const SCOUTING_ITEM: &str = "Scouting report";
 
 /// The items after the four picks that this screen has, in order.
 unsafe fn extras() -> Vec<&'static str> {
@@ -580,15 +580,8 @@ unsafe fn extras() -> Vec<&'static str> {
     if squad && on(SEASON_REVIEW) {
         out.push(SEASON_ITEM);
     }
-    // (the physio's report, user 2026-11-22: with the team report's switch, a club only)
-    // (drawn by `finreport`, which runs with the P&L switch)
-    if squad && on(TEAM_REPORT) && on(crate::PL_REPORT) && my_team().is_some_and(|t| !national_team(t)) {
-        out.push(MEDICAL_ITEM);
-        out.push(YOUTH_ITEM);
-        if on(SCOUT_SCREEN) {
-            out.push(SCOUTING_ITEM);
-        }
-    }
+    // (the physio's, youth coach's and chief scout's reports were items here; since 2026-11-24
+    // they are monthly news items, `staff.rs`, on the user's word)
     out
 }
 
@@ -1405,21 +1398,6 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
                         }
                     }
                     SEASON_ITEM => crate::season::open_now(),
-                    MEDICAL_ITEM => {
-                        if let Some(team) = my_team() {
-                            crate::finreport::open_medical(team);
-                        }
-                    }
-                    YOUTH_ITEM => {
-                        if let Some(team) = my_team() {
-                            crate::finreport::open_youth(team);
-                        }
-                    }
-                    SCOUTING_ITEM => {
-                        if let Some(team) = my_team() {
-                            crate::finreport::open_scouting(team);
-                        }
-                    }
                     _ => open_report(),
                 }
                 return Some(true);

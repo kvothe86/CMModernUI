@@ -59,7 +59,7 @@ FEATURES = [
     ('flat_buttons', 'Flat Buttons', 'Needs Modern Buttons. The buttons flat with soft corners and small gaps, no bevel; the tabs one dark bar with the open tab in gold; the clickable cells of a list (positions, dates) without a box, their text light blue.'),
     ('pl_report', 'Profit and Loss Report',"A P&L report button on a club's Finances & Info tab: a full profit and loss account on a page signed by the made-up firm Accountants & Co, with notes written from how the club is doing. Needs Crests and Profile."),
     ('stadium', 'Stadium Builder',"A Stadium button beside P&L report: the ground drawn, and works the manager orders himself (seats, standing places, a roof, under-soil heating) at the game's own prices, paid at once and built in weeks. Changes the game. Needs P&L Report."),
-    ('music', 'Menu Music', "cmui's own synth menu music (needs the WAVs in Data\\cmui_music) with a small player at the foot of the menu bar: the track's name, play / pause, next, mute and a volume bar, kept in cmui.ini."),
+    ('music', 'Menu Music', "orchestral menu music (needs the MP3s in Data\\cmui_music) with a small player at the foot of the menu bar: the track's name, play / pause, next, mute and a volume bar, kept in cmui.ini."),
 ]
 
 

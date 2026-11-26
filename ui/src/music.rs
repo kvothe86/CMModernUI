@@ -1,5 +1,5 @@
-//! Menu music (switch `music`, user 2026-11-24): cmui's own synth tracks (ui\music\make_music.py)
-//! from Data\cmui_music\*.wav, played in a loop by a thread of its own through winmm's waveOut,
+//! Menu music (switch `music`, user 2026-11-24): Alexander Nakarada's orchestral tracks (ui\music\tracks,
+//! CC BY 4.0) from Data\cmui_music\*.mp3 / *.wav, played in a loop by a thread of its own through winmm's waveOut,
 //! which Windows mixes with the game's own DirectSound sounds. Each track plays its loop twice,
 //! the second time fading out, then the next. A network client plays its own.
 //!
@@ -14,7 +14,9 @@
 use crate::*;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::Relaxed};
 
-static PLAYING: AtomicBool = AtomicBool::new(true);
+static PLAYING: AtomicBool = AtomicBool::new(false);
+/// The player shown (true) or folded into its note icon at the bar's bottom corner.
+static OPEN: AtomicBool = AtomicBool::new(false);
 static VOLUME: AtomicU32 = AtomicU32::new(50);
 static TRACK: AtomicUsize = AtomicUsize::new(0);
 static SKIP: AtomicBool = AtomicBool::new(false);
@@ -29,7 +31,8 @@ static mut UNMUTED: u32 = 50;
 pub(crate) static mut BAR_SEEN: Option<Rect> = None;
 static mut BAR: Option<Rect> = None;
 /// Where the control's parts are this frame: play / pause, next, mute, the volume bar.
-static mut BOXES: [Rect; 4] = [(0, 0, -1, -1); 4];
+/// Play / pause, next, mute, the volume bar, and the fold / unfold icon.
+static mut BOXES: [Rect; 5] = [(0, 0, -1, -1); 5];
 static mut WAS_HELD: bool = false;
 
 #[repr(C, packed)]
@@ -285,7 +288,10 @@ unsafe fn start() {
     log(&format!("music: {} tracks (Data\\cmui_music, music_folder {own:?})", tracks.len()));
     let empty = tracks.is_empty();
     let _ = TRACKS.set(tracks);
-    PLAYING.store(setting("music_playing").as_deref() != Some("0"), Relaxed);
+    // (paused unless the player was left playing, and folded away unless left open: it covered
+    // the bar's "You Have News", user 2026-11-25)
+    PLAYING.store(setting("music_playing").as_deref() == Some("1"), Relaxed);
+    OPEN.store(setting("music_open").as_deref() == Some("1"), Relaxed);
     VOLUME.store(setting("music_volume").and_then(|v| v.parse().ok()).unwrap_or(50u32).min(100), Relaxed);
     UNMUTED = VOLUME.load(Relaxed).max(10);
     TRACK.store(setting("music_track").and_then(|v| v.parse().ok()).unwrap_or(0), Relaxed);
@@ -405,7 +411,7 @@ pub unsafe fn flip(full_frame: bool) {
         set_setting("music_track", &TRACK.load(Relaxed).to_string());
     }
     let _ = input(*(MOUSE_X as *const i32), *(MOUSE_Y as *const i32));
-    BOXES = [(0, 0, -1, -1); 4];
+    BOXES = [(0, 0, -1, -1); 5];
     let (Some(bar), Some(tracks)) = (BAR, TRACKS.get()) else { return };
     if tracks.is_empty() || season::page_open() {
         return;
@@ -413,19 +419,46 @@ pub unsafe fn flip(full_frame: bool) {
     let (_, sh) = screen();
     let u = (sh * 30 / 1050).max(16); // a row: 30 px at 1680x1050
     let (x1, x2) = (bar.0, bar.2);
-    let y2 = sh - u / 2;
-    let y1 = y2 - u * 3 - u / 3;
-    if y1 < bar.3 + u / 2 || x2 - x1 < 3 * u / 2 {
+    let playing = PLAYING.load(Relaxed);
+    // folded: only a note, just under the bar's lowest button: the bar's bottom corner holds the
+    // game's "You Have News" / "2/3 Players Waiting" (user 2026-11-25)
+    let top = bar.3 + u / 3;
+    if !OPEN.load(Relaxed) {
+        let cx = (x1 + x2) / 2;
+        let b = (cx - u / 2, top, cx + u / 2, top + u);
+        if b.3 > sh - u * 2 {
+            return; // no room under the bar's buttons
+        }
+        BOXES[4] = b;
+        draw_icon(0xE8D6, cx, top + u / 6, u * 2 / 3, if playing { GOLD } else { [0x9a, 0xa0, 0xab] });
+        return;
+    }
+    // (open: there too, above the bar's bottom text)
+    let y1 = top;
+    let y2 = y1 + u * 3 + u / 3;
+    if y2 > sh - u * 2 || x2 - x1 < 3 * u / 2 {
         return; // no room under the bar's buttons
     }
     fill(x1, y1, x2, y2, [0x1c, 0x20, 0x26]);
     fill(x1, y1, x2, y1 + 1, [0x3a, 0x40, 0x4a]);
     let font = SMALL_FONT.unwrap_or(0xffff0001);
+    // the fold icon at the right of the name row
+    let fold = (x2 - u * 2 / 3, y1, x2, y1 + u);
+    BOXES[4] = fold;
+    draw_icon(0xE70D, (fold.0 + fold.2) / 2, y1 + u / 4, u / 2, [0x9a, 0xa0, 0xab]);
     // the track's name
-    let (playing, volume) = (PLAYING.load(Relaxed), VOLUME.load(Relaxed));
+    let volume = VOLUME.load(Relaxed);
     let name = &tracks[TRACK.load(Relaxed) % tracks.len()].0;
-    let name = clip_text(font, &to_latin1(name), x2 - x1 - 8);
-    text_at((x1 + x2) / 2, y1 + u / 6, y1 + u, font, if playing { GOLD } else { GREY }, &name, 1);
+    // (a name too wide a size smaller first: "Hymn To The Gods" lost its last letter, night 12)
+    let full = to_latin1(name);
+    let room = fold.0 - x1 - 4;
+    let mut font = font;
+    let mut name = clip_text(font, &full, room);
+    if name.len() < full.len() {
+        font = smaller(font, 1);
+        name = clip_text(font, &full, room);
+    }
+    text_at((x1 + fold.0) / 2, y1 + u / 6, y1 + u, font, if playing { GOLD } else { GREY }, &name, 1);
     // play / pause, next, mute
     let (by1, by2) = (y1 + u, y1 + u * 2 + u / 3);
     let w = (x2 - x1) / 3;
@@ -469,6 +502,10 @@ pub unsafe fn input(mx: i32, my: i32) -> Option<bool> {
                 UNMUTED = v;
             }
             VOLUME.store(if v > 0 { 0 } else { UNMUTED.max(10) }, Relaxed);
+        }
+        4 => {
+            let open = !OPEN.fetch_xor(true, Relaxed);
+            set_setting("music_open", if open { "1" } else { "0" });
         }
         _ => {
             let (x1, x2) = (BOXES[3].0, BOXES[3].2);
@@ -538,9 +575,9 @@ fn decodes_its_own_tracks() {
     let (ch, rate, pcm) = decode(&wav).unwrap();
     assert_eq!((ch, rate, &pcm[..3]), (1, 22050, &[100i16, 111, 81][..]));
     assert_eq!(track_name(std::path::Path::new("Data\\cmui_music\\03 Sunday League.wav")), "Sunday League");
-    // the tracks themselves, when built
-    for f in std::fs::read_dir("music\\out").into_iter().flatten().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "wav")) {
-        let (ch, rate, pcm) = decode(&std::fs::read(f.path()).unwrap()).unwrap();
-        assert!(ch == 1 && rate == 22050 && pcm.len() > 22050 * 30, "{:?}", f.path());
+    // the tracks shipped (Nakarada's, 128 kbps stereo): all of each decodes
+    for f in std::fs::read_dir("music\\tracks").into_iter().flatten().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "mp3")) {
+        let (ch, rate, pcm) = decode_mp3(&std::fs::read(f.path()).unwrap()).unwrap();
+        assert!(ch == 2 && rate == 44100 && pcm.len() > 44100 * 2 * 40, "{:?}", f.path());
     }
 }

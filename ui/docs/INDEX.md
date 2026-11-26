@@ -22,10 +22,11 @@ Grep `fn <name>` in `ui\src`. The code map with every file is in [ARCHITECTURE.m
 | Assistant pick, team report | [screens.md](screens.md#assistant) , `..\assistant_pick.md` | `assistant.rs`: `pick_for`, `flip`, `input`, `run_pending`; `report_for`, `report` |
 | Player profile | [screens.md](screens.md#player-profile) | `text_box_hooked` (bars), `info_strip`, `ca_pa`, `reputation`, `player_status`, `positions`, `ability` |
 | Compare players | [screens.md](screens.md#compare) | `compare_players`, `compare_overlay`, `compare_text` |
-| Menu music and its control at the foot of the menu bar | [music.md](music.md) | `music.rs`: `flip`, `input`, `play`, `decode`; `ui\music\make_music.py` |
+| Menu music and its control at the foot of the menu bar | [music.md](music.md) | `music.rs`: `flip`, `input`, `play`, `decode`; tracks `ui\music\tracks` (Alexander Nakarada, CC BY 4.0) |
 | Stadium page (Finances > Stadium), rendered grounds | [stadium.md](stadium.md) | `stadium.rs`: `flip`, `rendered`, `compose`, `roof_words`, `input`; `ui\stadium3d\build_stadium.py` |
 | Player search, Ability view, scout stars | [screens.md](screens.md#search-and-scout-stars) , `..\scout_stars.md` | `other_item`, `get_results`, `search_input`, `ability_text`; `scout.rs` |
 | News | [screens.md](screens.md#news) | `news.rs`: `story`, `row`, `word_links`, `mark_button`; `lib.rs`: `story_header`, `story_crest`, `news_input` |
+| Monthly staff reports in the news (physio, youth coach, chief scout; portrait badge in club colours; replaced the Assistant's Medical / Youth / Scouting pages 2026-11-24; with the `news` switch) | this row | `staff.rs`: `tick`, `photo`, `dress`, `*_words`; data from `finreport::*_remote`; hooks shared with `cheesecorner.rs`; faces `ui\staff_faces.py` -> `src\staff_faces.bin` (from `ui\staff_faces\*.webp`) |
 | Competition table / stats / history | [screens.md](screens.md#competition-screens) | `comp.rs`: `text`, `panel`, `flip`, `titles`, `add_history`, `history_winners` |
 | Match screen (overview, stats, live) | [screens.md](screens.md#match-screen) | `match_text`, `match_overlays`, `key_stats`, `event_icon`, `match_record` |
 | CM Challenge (managers' league, network games; how to drop it) | [challenge.md](challenge.md) | `src\challenge\`: `prizes`, `moves`, `seasons`, `page`, `update`, `overlay` |

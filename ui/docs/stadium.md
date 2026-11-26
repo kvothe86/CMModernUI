@@ -15,8 +15,15 @@ mock picture (generated, not in the repository; its left menu ignored).
   heating; first click arms (gold), second orders), the key.
 - "Now | Fully built" pills over the picture: the ground at its room to grow, all seated, roofed.
 - **New stadium** (job 6, `NEW`; user 2026-11-23): once the ground is at its room to grow, a wide
-  tile replaces seats / standing. Sizes 15,000 .. 125,000 above the ground (- / +); price 25 million
-  + 2,500 a place (game units), a year + 10 days a thousand. First click: type the name (Enter or a
+  tile replaces seats / standing. Sizes 3,000 .. 125,000 above the ground (- / +; `SIZES`, from
+  3,000 since 2026-11-24); a year + 10 days a thousand.
+- **Prices** (`a_place`, user 2026-11-24, after the cm25 Glory save's turnovers a season: level
+  7 0.1 million, National League 0.8, League Two 2.7, League One 6.6, Championship 13, Premier
+  League 39, Man Utd 77; a little above that for European prize money later): a place costs
+  60 + (the ground's size) / 16. A new stadium of 3,000 0.74 million, 15,000 15 million, 30,000
+  58, 60,000 229, 125,000 984. Seats added cost half that a place, the size being the ground they
+  make (`Ground::cost`): 1,000 onto 20,000 0.69 million. A full seat pays back in some 2-4
+  seasons at every level. Standing, converting, roof and heating as before. First click: type the name (Enter or a
   second click orders, Escape cancels; the keys through our window proc). 30% at the order (must be
   in the bank), the rest in monthly instalments into debt if need be (`instalments`, diary `Q`
   lines; the name in `N` lines). Every other work waits. Done (`complete`): capacity = seats =
@@ -29,7 +36,7 @@ mock picture (generated, not in the repository; its left menu ignored).
   had to build five new stadiums): by the old ground's room, not the size picked: under 15,000 ->
   30,000 (professional), under 50,000 -> 70,000 (big club), else 150,000 (`MOST`, was 125,000);
   never under a quarter over its seats. Once the ground is full the info line says what comes
-  next (`full_note`): "Full. A new stadium: 15,000 seats, room to grow to 30,000. Its next one:
+  next (`full_note`): "Full. A new stadium: from 12,000 seats, room to grow to 30,000. Its next one:
   room to 70,000, then 150,000."
 - Roof words: only the ground's name, on the near roof (the far roof's club name went, a friend
   2026-11-24: the crest on the pitch says it); on the amateur ground the stand's roof.

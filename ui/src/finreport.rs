@@ -607,7 +607,7 @@ fn encode_medical(m: &Medical) -> String {
     out
 }
 
-fn decode_medical(text: &str) -> Option<Medical> {
+pub fn decode_medical(text: &str) -> Option<Medical> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     if h.len() != 4 {
@@ -666,11 +666,22 @@ pub unsafe fn medical_remote(club: usize) -> Option<Vec<u8>> {
             trains,
         });
     }
+    // (jadedness against the squad's own level: the game keeps nearly everyone at 50, but a
+    // human club's training lifts its whole squad (68 for 34 of MVV's, night 12), so all came out
+    // "very high, jaded": only what is above the squad's median counts)
+    let mut js: Vec<i32> = m.rows.iter().map(|r| r.jaded).collect();
+    js.sort_unstable();
+    if let Some(&median) = js.get(js.len() / 2).filter(|&&v| v > 50) {
+        for r in &mut m.rows {
+            r.jaded -= median - 50;
+        }
+    }
     Some(encode_medical(&m).into_bytes())
 }
 
 /// Opens the physio's report of a club (the Assistant menu's item), the host's or asked of it.
 pub unsafe fn open_medical(club: usize) {
+    PAGE_CLUB = club;
     let text = if remote::CLIENT { ask_host(&key(b')', &[club as u32])) } else { medical_remote(club) };
     MEDICAL = text.and_then(|t| decode_medical(&String::from_utf8_lossy(&t)));
     if MEDICAL.is_some() {
@@ -713,6 +724,7 @@ unsafe fn paint_medical(md: &Medical, dry: bool, x0: i32, top: i32, pw: i32, fb:
     } else {
         for r in &injured {
             text(l, y, ft, LIGHT, &r.name, 0);
+            name_box(dry, l, y, ft, &r.name);
             text(col(40), y, ft, LIGHT, &r.pos, 0);
             text(rt, y, ft, red, &r.advice(), 2);
             y += tall(ft) + 2;
@@ -723,7 +735,8 @@ unsafe fn paint_medical(md: &Medical, dry: bool, x0: i32, top: i32, pw: i32, fb:
     watch.sort_by_key(|r| (-r.risk(), r.condition));
     text(l, y, fs, GOLD, &format!("To watch ({})", watch.len()), 0);
     y += tall(fs) + 3;
-    for (x, head, align) in [(l, "Player", 0), (col(34), "Pos", 0), (col(48), "Age", 2), (col(58), "Cond", 2), (col(72), "Risk", 2), (rt, "Physio's word", 2)] {
+    // (the larger fonts ran the risk word into the physio's word: columns moved left, night 12)
+    for (x, head, align) in [(l, "Player", 0), (col(29), "Pos", 0), (col(45), "Age", 2), (col(53), "Cond", 2), (col(65), "Risk", 2), (rt, "Physio's word", 2)] {
         text(x, y, ft, GREY, head, align);
     }
     y += tall(ft) + 2;
@@ -732,11 +745,17 @@ unsafe fn paint_medical(md: &Medical, dry: bool, x0: i32, top: i32, pw: i32, fb:
     for r in watch.iter().take(16) {
         let risky = r.risk() >= 50;
         text(l, y, ft, LIGHT, &r.name, 0);
-        text(col(34), y, ft, LIGHT, &r.pos, 0);
-        text(col(48), y, ft, LIGHT, &r.age.to_string(), 2);
-        text(col(58), y, ft, if r.condition < 80 { red } else { LIGHT }, &format!("{}%", r.condition), 2);
-        text(col(72), y, ft, if risky { red } else { LIGHT }, r.risk_word(), 2);
+        name_box(dry, l, y, ft, &r.name);
+        text(col(29), y, ft, LIGHT, &r.pos, 0);
+        text(col(45), y, ft, LIGHT, &r.age.to_string(), 2);
+        text(col(53), y, ft, if r.condition < 80 { red } else { LIGHT }, &format!("{}%", r.condition), 2);
+        text(col(65), y, ft, if risky { red } else { LIGHT }, r.risk_word(), 2);
         text(rt, y, ft, LIGHT, &r.advice(), 2);
+        y += tall(ft) + 2;
+    }
+    // (the list stops at 16: say so instead of a wrong "other" count, night 12)
+    if watch.len() > 16 {
+        text(l, y, ft, GREY, &format!("... and {} more", watch.len() - 16), 0);
         y += tall(ft) + 2;
     }
     let fit = md.rows.iter().filter(|r| r.out == 0).count() - watch.len();
@@ -791,7 +810,7 @@ fn encode_youth(y: &Youth) -> String {
     out
 }
 
-fn decode_youth(text: &str) -> Option<Youth> {
+pub fn decode_youth(text: &str) -> Option<Youth> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     if h.len() != 5 {
@@ -904,7 +923,7 @@ pub unsafe fn scouting_remote(club: usize) -> Option<Vec<u8>> {
     Some(out.into_bytes())
 }
 
-fn decode_scouting(text: &str) -> Option<Scouting> {
+pub fn decode_scouting(text: &str) -> Option<Scouting> {
     let mut lines = text.lines();
     let h: Vec<&str> = lines.next()?.split('\t').collect();
     if h.len() != 3 {
@@ -924,6 +943,7 @@ static mut SCOUTING: Option<Scouting> = None;
 
 /// Opens the chief scout's report of a club (the Assistant menu's item).
 pub unsafe fn open_scouting(club: usize) {
+    PAGE_CLUB = club;
     let text = if remote::CLIENT { ask_host(&key(b'-', &[club as u32])) } else { scouting_remote(club) };
     SCOUTING = text.and_then(|t| decode_scouting(&String::from_utf8_lossy(&t)));
     if SCOUTING.is_some() {
@@ -965,7 +985,7 @@ unsafe fn paint_scouting(sc: &Scouting, dry: bool, x0: i32, top: i32, pw: i32, f
             let head = if k == 0 { format!("{}: a {} better than ours", r.0, r.1.to_lowercase()) } else { format!("{}: {}", r.0, r.1.to_lowercase()) };
             text(l, y, fs, GOLD, &head, 0);
             y += tall(fs) + 3;
-            for (x, h, align) in [(l, "Player", 0), (col(30), "Pos", 0), (col(42), "Age", 2), (col(45), "Club", 0), (col(80), "Value", 2), (col(82), "Rating", 0)] {
+            for (x, h, align) in [(l, "Player", 0), (col(29), "Pos", 0), (col(44), "Age", 2), (col(46), "Club", 0), (col(85), "Value", 2), (col(87), "Rating", 0)] {
                 text(x, y, ft, GREY, h, align);
             }
             y += tall(ft) + 2;
@@ -974,12 +994,14 @@ unsafe fn paint_scouting(sc: &Scouting, dry: bool, x0: i32, top: i32, pw: i32, f
         }
         let f = if k < 3 { fs } else { ft };
         text(l, y, f, LIGHT, &r.2, 0);
-        text(col(30), y, ft, LIGHT, &r.3, 0);
-        text(col(42), y, ft, LIGHT, &r.4.to_string(), 2);
-        text(col(45), y, ft, LIGHT, &r.5, 0);
-        text(col(80), y, ft, LIGHT, &r.6, 2);
+        name_box(dry, l, y, f, &r.2);
+        // (columns moved for the larger fonts: Pos ran into Age, Club into Value, night 12)
+        text(col(29), y, ft, LIGHT, &r.3, 0);
+        text(col(44), y, ft, LIGHT, &r.4.to_string(), 2);
+        text(col(46), y, ft, LIGHT, &r.5, 0);
+        text(col(85), y, ft, LIGHT, &r.6, 2);
         if !dry {
-            stars(col(82), y + 2, star, r.7 * 20, GOLD);
+            stars(col(87), y + 2, star, r.7 * 20, GOLD);
         }
         y += tall(f) + 3;
     }
@@ -988,6 +1010,7 @@ unsafe fn paint_scouting(sc: &Scouting, dry: bool, x0: i32, top: i32, pw: i32, f
 
 /// Opens the youth coach's report of a club (the Assistant menu's item), the host's or asked of it.
 pub unsafe fn open_youth(club: usize) {
+    PAGE_CLUB = club;
     let text = if remote::CLIENT { ask_host(&key(b'+', &[club as u32])) } else { youth_remote(club) };
     YOUTH = text.and_then(|t| decode_youth(&String::from_utf8_lossy(&t)));
     if YOUTH.is_some() {
@@ -1025,7 +1048,7 @@ unsafe fn paint_youth(yr: &Youth, dry: bool, x0: i32, top: i32, pw: i32, fb: u32
     }
     y += 8;
     let col = |pct: i32| l + (rt - l) * pct / 100;
-    for (x, head, align) in [(l, "Player", 0), (col(30), "Pos", 0), (col(42), "Age", 2), (col(46), "Now", 0), (col(60), "Potential", 0), (rt, "Coach's word", 2)] {
+    for (x, head, align) in [(l, "Player", 0), (col(28), "Pos", 0), (col(43), "Age", 2), (col(45), "Now", 0), (col(55), "Potential", 0), (rt, "Coach's word", 2)] {
         text(x, y, ft, GREY, head, align);
     }
     y += tall(ft) + 2;
@@ -1038,11 +1061,13 @@ unsafe fn paint_youth(yr: &Youth, dry: bool, x0: i32, top: i32, pw: i32, fb: u32
     let star = tall(ft) - 2;
     for r in yr.rows.iter().take(26) {
         text(l, y, ft, if r.new { green } else { LIGHT }, &if r.new { format!("{}  new", r.name) } else { r.name.clone() }, 0);
-        text(col(30), y, ft, LIGHT, &r.pos, 0);
-        text(col(42), y, ft, LIGHT, &r.age.to_string(), 2);
+        name_box(dry, l, y, ft, &r.name);
+        // (columns moved for the larger fonts: Pos ran into Age, the word into the stars, night 12)
+        text(col(28), y, ft, LIGHT, &r.pos, 0);
+        text(col(43), y, ft, LIGHT, &r.age.to_string(), 2);
         if !dry {
-            stars(col(46), y + 2, star, r.now, [0x9a, 0xa0, 0xab]);
-            stars(col(60), y + 2, star, r.seen, GOLD);
+            stars(col(45), y + 2, star, r.now, [0x9a, 0xa0, 0xab]);
+            stars(col(55), y + 2, star, r.seen, GOLD);
         }
         text(rt, y, ft, LIGHT, r.word(), 2);
         y += tall(ft) + 3;
@@ -1219,6 +1244,7 @@ pub(crate) fn covered() -> bool {
 /// The flip pass: the button while the money views show, the report while it is open.
 #[allow(static_mut_refs)]
 pub unsafe fn flip(full_frame: bool) {
+    retry();
     let fin = std::mem::take(&mut FIN_SEEN);
     let view = VIEW_SEEN.take();
     if fin {
@@ -1277,14 +1303,121 @@ const PAGE_PLAN: u8 = 1;
 const PAGE_MEDICAL: u8 = 2;
 const PAGE_YOUTH: u8 = 3;
 const PAGE_SCOUTING: u8 = 4;
+/// The staff reports' pages by report kind (physio, youth coach, chief scout).
+pub const STAFF_PAGES: [u8; 3] = [PAGE_MEDICAL, PAGE_YOUTH, PAGE_SCOUTING];
 static mut MEDICAL: Option<Medical> = None;
+
+/// The names a staff page drew (box, name): a click opens the person, as a story's name does
+/// (user 2026-11-24). The page's club: whose people they are. A client's names stay text.
+static mut NAMES: Vec<((i32, i32, i32, i32), String)> = Vec::new();
+static mut PAGE_CLUB: usize = 0;
+/// The person a click on a staff page asked for: the news screen's input opens him (`news_input`).
+pub static mut PENDING_PERSON: Option<usize> = None;
+
+#[allow(static_mut_refs)]
+unsafe fn name_box(dry: bool, x: i32, y: i32, f: u32, name: &str) {
+    if !dry {
+        let h = game::<extern "C" fn(i32) -> i32>(FONT_HEIGHT)((f & 0xffff) as i32);
+        NAMES.push(((x, y, x + text_width(f, &to_latin1(name)), y + h + 2), name.to_string()));
+    }
+}
 static mut PLAN: Option<Plan> = None;
 static mut PLAN_HOVER: bool = false;
+
+/// A network client's page whose figures the host has not sent yet: the click only asked, the
+/// answer comes a moment later, and the page opened only on a second click (P&L, planner, stadium
+/// and the staff reports' Full Report, night 12). Tried again every frame for a few seconds:
+/// (the page, its club, when asked).
+static mut RETRY: Option<(u8, usize, std::time::Instant)> = None;
+const RETRY_STADIUM: u8 = 100;
+
+/// Asks again for the page a client clicked (`RETRY`); a P&L page that opened without its
+/// balance months (their own question) is read again until they come.
+#[allow(static_mut_refs)]
+unsafe fn retry() {
+    let Some((page, club, at)) = RETRY else { return };
+    let pl_months = OPEN && page == PAGE_PL && REPORT.as_ref().is_some_and(|r| r.history.is_empty());
+    if !remote::CLIENT || at.elapsed() > std::time::Duration::from_secs(8) || (OPEN && !pl_months) || stadium::page_open() {
+        RETRY = None;
+        return;
+    }
+    let opened = match page {
+        PAGE_PL => {
+            let r = read();
+            let fuller = r.as_ref().is_some_and(|r| !r.history.is_empty()) || !OPEN;
+            if r.is_some() && fuller {
+                REPORT = r;
+            }
+            REPORT.is_some() && fuller
+        }
+        PAGE_PLAN => {
+            PLAN = read_plan();
+            PLAN.is_some()
+        }
+        PAGE_MEDICAL => {
+            open_medical(club);
+            OPEN
+        }
+        PAGE_YOUTH => {
+            open_youth(club);
+            OPEN
+        }
+        PAGE_SCOUTING => {
+            open_scouting(club);
+            OPEN
+        }
+        RETRY_STADIUM => {
+            stadium::open(club);
+            stadium::page_open()
+        }
+        _ => false,
+    };
+    if opened {
+        if matches!(page, PAGE_PL | PAGE_PLAN) && !OPEN {
+            (PAGE, OPEN, OPENED_AT) = (page, true, Some(std::time::Instant::now()));
+        }
+        REDRAW = true;
+        // (P&L: keep asking for the months while they are missing)
+        if !(page == PAGE_PL && REPORT.as_ref().is_some_and(|r| r.history.is_empty())) {
+            RETRY = None;
+        }
+    }
+}
+
+/// A page of this module is open.
+pub fn page_shown() -> bool {
+    unsafe { OPEN }
+}
+
+/// A client's click whose page did not open: try again as the host's answer comes (`retry`).
+pub unsafe fn ask_again(page: u8, club: usize) {
+    if remote::CLIENT {
+        // (an empty months answer cached from before is asked again once, not used for ever)
+        if page == PAGE_PL {
+            if let Some(c) = [screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().find_map(|p| club_ptr(p)) {
+                remote::forget(&key(b'%', &[c as u32]));
+            }
+        }
+        RETRY = Some((page, club, std::time::Instant::now()));
+    }
+}
 
 /// The mouse: the button opens the report; while it is open it takes every click.
 #[allow(static_mut_refs)]
 pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     let inside = |r: (i32, i32, i32, i32)| (r.0..=r.2).contains(&mx) && (r.1..=r.3).contains(&my);
+    // (a client: the retry also from here, and the question sent, as the coach's: a page that
+    // stands still has no flip pass, so the P&L months came after the retry's 8 s and the page
+    // kept its chart-less first reading; night 12)
+    if RETRY.is_some() && remote::CLIENT {
+        let state = || (OPEN, REPORT.as_ref().map_or(0, |r| r.history.len()), stadium::page_open());
+        let before = state();
+        retry();
+        remote::ask();
+        if state() != before {
+            return Some(true);
+        }
+    }
     if !OPEN {
         if covered() {
             return None;
@@ -1303,6 +1436,9 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             let test = setting("stadium_test_club").and_then(|n| club_named(n.trim().as_bytes()));
             if let Some(club) = test.into_iter().chain([screen_param(0), SQUAD_CLUB, human_club_ptr().unwrap_or(0)].into_iter().filter_map(|p| club_ptr(p))).next() {
                 stadium::open(club);
+                if !stadium::page_open() {
+                    ask_again(RETRY_STADIUM, club);
+                }
             }
             return Some(true);
         }
@@ -1315,6 +1451,10 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
             } else {
                 REPORT = read();
                 OPEN = REPORT.is_some();
+            }
+            // (a client: the host's figures come after this click, or the months after the page)
+            if !OPEN || (PAGE == PAGE_PL && REPORT.as_ref().is_some_and(|r| r.history.is_empty())) {
+                ask_again(PAGE, 0);
             }
             OPENED_AT = Some(std::time::Instant::now());
             return Some(true);
@@ -1346,6 +1486,16 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
     if released && over && settled {
         OPEN = false;
         return Some(true);
+    }
+    // a name on a staff page: the page closes, the news screen's input opens the person
+    #[allow(static_mut_refs)]
+    if released && settled && !remote::CLIENT && matches!(PAGE, PAGE_MEDICAL | PAGE_YOUTH | PAGE_SCOUTING) {
+        let hit = NAMES.iter().find(|(r, _)| inside(*r)).map(|(_, n)| n.clone());
+        if let Some(staff) = hit.and_then(|n| club_ptr(PAGE_CLUB).and_then(|c| staff::person_named(c, &n))) {
+            PENDING_PERSON = Some(staff);
+            OPEN = false;
+            return Some(true);
+        }
     }
     let sv = save_rect();
     let on_save = inside(sv);
@@ -1459,14 +1609,18 @@ unsafe fn draw() {
     // (title, table, text, fine print): the table in the small body font so the columns clear the labels
     // (the balance chart made the report a few lines longer than the smallest tier: its signature
     // and fine print hung under the paper, user 2026-11-23. A smaller tier, then a lower chart)
-    let tiers = [(f5, f2, f2, f1, 5), (f3, f2, f1, f1, 5), (f3, f1, f1, f1, 4), (f2, f1, f1, f1, 3)];
+    let money_tiers = [(f5, f2, f2, f1, 5), (f3, f2, f1, f1, 5), (f3, f1, f1, f1, 4), (f2, f1, f1, f1, 3)];
+    // (the staff's pages: their sections (fs) and rows (ft) as large as the panel takes; rows in
+    // the smallest font were hard to read on a short page, user 2026-11-24)
+    let staff_tiers = [(f5, f5, f5, f5, 5), (f5, f5, f5, f3, 5), (f3, f3, f3, f3, 5), (f3, f3, f3, f2, 5), (f2, f2, f2, f2, 5), (f2, f2, f2, f1, 5), (f2, f1, f1, f1, 5)];
+    let tiers: &[(u32, u32, u32, u32, i32)] = if staff_page.is_some() { &staff_tiers } else { &money_tiers };
     let tier = *tiers
         .iter()
         .find(|t| {
             CHART_ROWS = t.4;
             paint(&r, true, x0, top, pw, t.0, t.1, t.2, t.3) <= bottom - 8
         })
-        .unwrap_or(&tiers[3]);
+        .unwrap_or(&tiers[tiers.len() - 1]);
     CHART_ROWS = tier.4;
     if staff_page.is_some() {
         rounded(x0, top, x0 + pw, bottom, AREA, 6);
@@ -1474,6 +1628,7 @@ unsafe fn draw() {
         fill(x0 - 1, top - 1, x0 + pw + 1, bottom + 1, [0xc9, 0xc3, 0xb3]);
         fill(x0, top, x0 + pw, bottom, PAPER);
     }
+    NAMES.clear();
     paint(&r, false, x0, top, pw, tier.0, tier.1, tier.2, tier.3);
     if std::mem::take(&mut SAVE) {
         let (kind, club, date) = match (&plan, &medical, &youth, &scouting) {

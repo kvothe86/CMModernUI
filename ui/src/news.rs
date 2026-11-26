@@ -344,6 +344,8 @@ pub unsafe fn row(x1: i32, y1: i32, _x2: i32, y2: i32, font: u32, colour: u32, t
     x += 14;
     if crate::cheesecorner::is_his(t) {
         crate::cheesecorner::photo(x + h / 2 - h * 30 / 100, cy - h * 30 / 100, h * 60 / 100);
+    } else if crate::staff::photo(t, x + h / 2 - h * 30 / 100, cy - h * 30 / 100, h * 60 / 100) {
+        // (a staff member's monthly report: his portrait, `staff.rs`)
     } else {
         icon(kind(t), x + h / 2, cy, h * 30 / 100);
     }
@@ -1294,9 +1296,12 @@ pub unsafe fn story(head: &[u8], header: (i32, i32, i32, i32), body: (i32, i32, 
     let (mut x, mut y) = (left, lines[0].0 .1 + shift);
     for (k, w) in words.iter().enumerate() {
         let ww = text_width(lf, &w.text);
+        // (a list's "- " item keeps its own line: the staff's monthly reports, user 2026-11-24)
+        // ponytail: a lone "-" opening a game line; a score "2 - 1" wrapped there breaks too
+        let item = w.text == b"-" && k > 0 && words[k - 1].line != w.line;
         if w.para {
             (x, y) = (left, y + 2 * pitch);
-        } else if x > left && x + ww > right {
+        } else if x > left && (x + ww > right || item) {
             (x, y) = (left, y + pitch);
         }
         if y + lh > text_bottom {

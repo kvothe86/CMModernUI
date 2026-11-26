@@ -67,6 +67,15 @@ unsafe fn state() -> (&'static mut HashMap<Vec<u8>, Entry>, &'static mut HashSet
     (CACHE.get_or_insert_with(HashMap::new), WANTED.get_or_insert_with(HashSet::new), ASKED.get_or_insert_with(HashMap::new))
 }
 
+/// Drops a known answer, so the next `get` asks the host again (a page after an order of its
+/// own, which the earlier answer does not show yet). Not while it is being asked.
+pub unsafe fn forget(key: &[u8]) {
+    let (cache, _, asked) = state();
+    if !asked.contains_key(key) {
+        cache.remove(key);
+    }
+}
+
 /// How old an answer may be on the current screen.
 unsafe fn fresh() -> Duration {
     if SCREEN.1.is_some_and(|t| t.elapsed() > SETTLED) {

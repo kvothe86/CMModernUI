@@ -61,13 +61,19 @@ unsafe fn ours(item: usize) -> Option<u32> {
 /// { 0x77bc80 } write_text(item, manager, out, full, flag): ours gets its title or its report.
 unsafe extern "thiscall" fn write_text(item: usize, manager: usize, out: usize, full: i32, flag: i32) -> i32 {
     #[allow(static_mut_refs)]
-    if let (Some(n), true) = (ours(item), out != 0) {
+    // (and the staff's monthly reports, `staff.rs`, the same kind of item)
+    let mine = ours(item).map(|n| {
         load();
-        let text = if full == 0 { TITLE.to_string() } else { REPORTS.iter().find(|r| r.0 == n).map_or_else(|| "The report is lost.".to_string(), |r| r.1.clone()) };
+        if full == 0 { TITLE.to_string() } else { REPORTS.iter().find(|r| r.0 == n).map_or_else(|| "The report is lost.".to_string(), |r| r.1.clone()) }
+    });
+    if let (Some(text), true) = (mine.or_else(|| crate::staff::text(item, full != 0)), out != 0) {
         let mut bytes = to_latin1(&text);
         bytes.push(0);
         game::<extern "thiscall" fn(usize) -> i32>(TEXT_CLEAR)(out);
         game::<extern "thiscall" fn(usize, *const u8) -> i32>(TEXT_SET)(out, bytes.as_ptr());
+        if full != 0 {
+            crate::staff::add_links(item, out); // (a staff report's player names, clickable)
+        }
         return 1;
     }
     game::<extern "thiscall" fn(usize, usize, usize, i32, i32) -> i32>(WRITE_ORIG)(item, manager, out, full, flag)
@@ -75,7 +81,11 @@ unsafe extern "thiscall" fn write_text(item: usize, manager: usize, out: usize, 
 
 /// { 0x782b70 } get_action_button: his report has nobody to reply to.
 unsafe extern "thiscall" fn action(item: usize, manager: usize, label: *mut u8, size: i32, screen: *mut usize) -> u8 {
-    if ours(item).is_some() {
+    // (a staff report: its Full Report button, as the next opposition's scout report)
+    if let Some(view) = crate::staff::button(item, manager, label, size, screen) {
+        return view;
+    }
+    if ours(item).is_some() || crate::staff::ours(item).is_some() {
         if !label.is_null() {
             *label = 0;
         }
@@ -189,7 +199,7 @@ struct Facts {
 }
 
 /// One of `options`, the same for a month and a part (`salt`), another the next month.
-fn pick<'a>(seed: u32, salt: u32, options: &[&'a str]) -> &'a str {
+pub fn pick<'a>(seed: u32, salt: u32, options: &[&'a str]) -> &'a str {
     let mut h = (seed ^ salt.wrapping_mul(0x9e37_79b9)).wrapping_mul(0x85eb_ca6b);
     h ^= h >> 13;
     h = h.wrapping_mul(0xc2b2_ae35);
@@ -218,6 +228,9 @@ fn words(f: &Facts) -> String {
     let n = f.rows.len();
     let rounds = f.rows.iter().map(|x| x.2[0]).max().unwrap_or(0);
     let name = |i: usize| f.rows[i].0.clone();
+    // the clubs the table talk names: the form lines skip them (night 12: NAC led on 10 points,
+    // then "Watch NAC: 10 points"; Helmond had 0 points, then "Helmond have taken 0 points")
+    let told: Vec<String> = if n >= 4 && rounds > 0 { [0, n - 2, n - 1].map(name).to_vec() } else { Vec::new() };
     if n > 0 && rounds == 0 {
         s += "\n\n";
         s += &r(2, &[
@@ -337,7 +350,7 @@ fn words(f: &Facts) -> String {
         s += &fill(line, &pairs);
     }
     // the form
-    if let Some((c, points, wins, games)) = &f.best_form {
+    if let Some((c, points, wins, games)) = f.best_form.as_ref().filter(|b| !told.contains(&b.0)) {
         let of = if *games >= 5 { "their last five".to_string() } else { format!("their first {}", ["", "one", "two", "three", "four"][(*games).min(4)]) };
         let pairs = [("{c}", c.clone()), ("{w}", wins.to_string()), ("{p}", points.to_string()), ("{of}", of)];
         let line = if *wins as usize == *games && *games >= 4 {
@@ -357,7 +370,7 @@ fn words(f: &Facts) -> String {
         s += "\n\n";
         s += &fill(line, &pairs);
     }
-    if let Some((c, points, _, games)) = f.worst_form.as_ref().filter(|w| w.1 <= 1 && w.3 >= 4) {
+    if let Some((c, points, _, games)) = f.worst_form.as_ref().filter(|w| w.1 <= 1 && w.3 >= 4 && !told.contains(&w.0)) {
         let pairs = [("{c}", c.clone()), ("{p}", points.to_string()), ("{g}", games.to_string())];
         s += " ";
         s += &fill(
@@ -545,6 +558,13 @@ mod tests {
             assert!(s.contains(part), "{part} missing in:\n{s}");
         }
         assert!(!s.contains('{'), "a hole left in:\n{s}");
+        // the form lines skip the leader and the bottom club, named already (night 12)
+        for k in 0..24 {
+            let s = words(&league(k));
+            for said in ["hotter than", "won every one", "are flying", "Free fall", "lights back on", "deserve better"] {
+                assert!(!s.contains(said), "{said} in:\n{s}");
+            }
+        }
         // the openings change month by month
         let openings: std::collections::HashSet<String> = (0..24).map(|k| words(&league(k)).lines().next().unwrap().to_string()).collect();
         assert!(openings.len() >= 5, "{openings:?}");

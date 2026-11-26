@@ -164,16 +164,21 @@ unsafe fn front_page(channel: usize, rows: &mut Vec<Vec<u8>>) {
         }
         None => rows.push(row(&[(WHITE, " No match played yet this season.")])),
     }
-    rows.push(Vec::new());
-    rows.push(row(&[(CYAN, " ELSEWHERE")]));
+    // (the other managers' results; no heading when there are none: single player, night 12)
+    let mut elsewhere = Vec::new();
     for h in challenge::human_list() {
         let other = rd::<usize>(h.0 + 0x39);
         if other == club || !readable(other, 0x5b) {
             continue;
         }
         if let Some(r) = last_results(other, 1).first() {
-            rows.push(row(&[(WHITE, &format!(" {}", cut(&line_of(other, r), 38)))]));
+            elsewhere.push(row(&[(WHITE, &format!(" {}", cut(&line_of(other, r), 38)))]));
         }
+    }
+    if !elsewhere.is_empty() {
+        rows.push(Vec::new());
+        rows.push(row(&[(CYAN, " ELSEWHERE")]));
+        rows.extend(elsewhere);
     }
 }
 
@@ -360,6 +365,11 @@ pub unsafe fn flip() {
         SUB = (SUB + 1) % SUBS;
         fetch();
     }
+    // (a client's page comes from the host after the first ask: asked again until it is here;
+    // the set stayed black on a client, night 12)
+    if remote::CLIENT && ROWS.iter().all(|r| r.is_empty()) && TURNED.is_some_and(|t| t.elapsed().as_millis() >= 300) {
+        fetch();
+    }
     // (the clock's seconds and the turning subpages: drawn again every second)
     REDRAW_AT = Some(std::time::Instant::now() + std::time::Duration::from_millis(1000));
     let (sw, sh) = screen();
@@ -376,9 +386,13 @@ pub unsafe fn flip() {
     let mut t = SystemTime { year: 0, month: 0, weekday: 0, day: 0, hour: 0, minute: 0, second: 0, ms: 0 };
     GetLocalTime(&mut t);
     let (day, year) = (rd::<i16>(0xae2c90) as i32, rd::<i16>(0xae2c92) as i32);
-    let date: String = finreport::date_text(day, year).split(' ').take(2).collect::<Vec<_>>().join(" ");
+    // (day and a three-letter month, as Ceefax did: "2 Septemb" was cut and pushed the clock off
+    // the 40 cells on a page of two, night 12)
+    let date: String = finreport::date_text(day, year).split(' ').take(2).map(|w| w.chars().take(3).collect::<String>()).collect::<Vec<_>>().join(" ");
     let more = if SUBS > 1 { format!(" {}/{}", SUB + 1, SUBS) } else { String::new() };
-    let header = row(&[(WHITE, &format!("P{NUMBER}")), (WHITE, &format!(" CEEFAX 1 {NUMBER}{more}")), (WHITE, &format!(" {}", cut(&date, 9))), (YELLOW, &format!(" {:02}:{:02}/{:02}", t.hour, t.minute, t.second))]);
+    // (one white run and the clock: each colour change takes a cell, and four of them pushed the
+    // clock's last digit off the 40, night 12)
+    let header = row(&[(WHITE, &format!("P{NUMBER} CEEFAX 1 {NUMBER}{more} {}", cut(&date, 9))), (YELLOW, &format!("{:02}:{:02}/{:02}", t.hour, t.minute, t.second))]);
     // (five keys of 8 cells; Back in the set itself: as a button under it, it stood on the news
     // screen's own Next and was hard to see, user 2026-11-22)
     let fastext = row(&[(RED, " Index "), (GREEN, "News   "), (YELLOW, "Results"), (CYAN, "Tables "), (WHITE, "Back")]);
@@ -465,9 +479,19 @@ pub unsafe fn input(mx: i32, my: i32, released: bool) -> Option<bool> {
         return None;
     }
     *(LEFT_CLICK as *mut u32) = 0;
+    // (the poll returns here while the set is open, before its REDRAW_AT: the clock and a
+    // client's page asked of the host came only with a click; once a second here, night 12)
+    static mut TICK: Option<std::time::Instant> = None;
+    let tick = TICK.is_none_or(|t| t.elapsed().as_millis() >= 1000);
+    if tick {
+        TICK = Some(std::time::Instant::now());
+        if remote::CLIENT && ROWS.iter().all(|r| r.is_empty()) {
+            fetch();
+        }
+    }
     // (a release counts only a moment after the opening click)
     if !released || OPENED_AT.is_some_and(|t| t.elapsed().as_millis() < 300) {
-        return Some(false);
+        return Some(tick);
     }
     if BACK.is_some_and(inside) {
         OPEN = false;

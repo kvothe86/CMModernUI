@@ -1,40 +1,33 @@
 # Menu music (switch `music`, index 41)
 
-Asked by the user 2026-11-24: "we have sound in cm, but i miss music". cmui plays its own synth
-menu music beside the game's sounds, with a small player at the foot of the menu bar.
+Asked by the user 2026-11-24: "we have sound in cm, but i miss music". cmui plays its own menu
+music beside the game's sounds, with a small player at the foot of the menu bar.
 
-## The music
+## The tracks (since 2026-11-24, late evening)
 
-`ui\music\make_music.py` (numpy only) renders four original tracks into `ui\music\out\`:
+The user wanted music like Europa Universalis 4's (Andreas Waldetoft, Paradox: copyrighted, not
+free to ship; "otherwise swap them"). Eight orchestral tracks by Alexander Nakarada
+(CreatorChords, **CC BY 4.0: credit required**, `music\tracks\CREDITS.txt` goes into every
+`Data\cmui_music`), picked by the site's own descriptions (epic / medieval / orchestral
+cinematic; nothing dark, metal or rock): 01 The Crown, 02 Hymn To The Gods, 03 Adventure,
+04 Medieval Chateau, 05 Glory, 06 Chivalry Fair, 07 Gates Of Glory, 08 Legends.
 
-| File | Tempo, key | Feel | Loop |
-|---|---|---|---|
-| `01 Kick Off.wav` | 124, D major | house piano stabs, square lead, brass-synth second theme, arp break | 62 s |
-| `02 Deadline Day.wav` | 132, E minor | driving 16th arp and octave bass, saw lead, brass long notes, bell break | 58 s |
-| `03 Sunday League.wav` | 98, F major | FM electric piano, flute-like lead with vibrato, bell counter-line, shaker groove | 78 s |
-| `04 Matchday.wav` | 128, G major | synth strings, tom intro, brass-synth anthem, square lead, piano stabs | 75 s |
+Downloaded from free-stock-music.com (`/music/alexander-nakarada/mp3/alexander-nakarada-<slug>.mp3`,
+320 kbps; the file needs the track page as referrer, as its Download button sends), re-encoded
+by ffmpeg to 128 kbps 44.1 kHz stereo, 25 MB for all eight. Bandcamp (bot check) and Scott
+Buckley's site (ModSecurity) refused scripted downloads and were left alone. `install_all.ps1`
+copies `music\tracks` and takes the earlier sets out of `Data\cmui_music` by name (the owner's
+own songs there stay). The test `decodes_its_own_tracks` decodes every shipped MP3.
 
-Each track is written as sections over a chord list (intro 4 bars, theme A 8, theme B 8, break 4,
-theme again), the melodies hand-written per bar (`melody()`: `NOTE:beats`, bars split by `|`, each
-bar checked to be 4 beats; connected notes overlap a little, legato). Parts: `pads`, `bassline`
-(offbeat / anthem / octave16 / drive / chill), `stabs`, `arp`, `beat` (house / drive / chill),
-`roll`, `crash`. Voices are synthesised: polyBLEP saw and square, FFT 2-pole filters, a bright and a
-dark copy crossfaded for a filter sweep, FM for the electric piano and bell, additive partials for
-the piano; drums made once (kick, snare, clap, hats, shaker, crash, tom). Mix: bass and pads duck
-under each kick (sidechain), a dotted-eighth echo on the melody, a small hall, a high-pass at 30 Hz,
-loudness evened out with a tanh.
+Before (same evening): eight Kevin MacLeod tracks (Electronica / Funk, picked by incompetech's
+`pieces.json` tags); the user did not like them. Folder `music\kevin_macleod` deleted.
 
-**Seamless loops:** everything that rings past a track's end (notes, echo, hall) is wrapped round
-to its start, so the file plays back to back without a seam; the script asserts the jump from the
-last sample to the first is no bigger than the track's own sample steps.
+## The first synth tracks (deleted 2026-11-24)
 
-**Format:** mono, 22050 Hz, IMA ADPCM WAV (4 bits a sample, about 11 KB a second): 2.9 MB for all
-four. Windows' own players play these files too. `--pcm` also writes 16-bit previews (two loops each)
-to `music\out\pcm\` for listening outside the game. The ADPCM error is printed per track (~4-6 %
-of the signal's RMS).
-
-Re-render: `python music\make_music.py`, then `install_all.ps1` (it copies `music\out\*.wav` to
-every folder's `Data\cmui_music\`).
+Four synth tracks (Kick Off, Deadline Day, Sunday League, Matchday) rendered by a numpy script,
+`ui\music\make_music.py`, as mono 22050 Hz IMA ADPCM WAVs. Deleted on the user's yes once the
+Kevin MacLeod tracks were in; script and WAVs are in git at 00a8051
+(`git checkout 00a8051 -- ui/music/make_music.py ui/music/out`). The player still plays such WAVs.
 
 ## The player (`src\music.rs`)
 
@@ -93,8 +86,8 @@ Each game plays its own music: a client's DLL starts its own thread. Nothing goe
   energy per band, no clipping, the loop seam), and the control has not been seen in the game.
 - 800x600 and 1280x800: the control is drawn only where there is room under the bar's buttons;
   on a small screen the bar may be full, and then there is no control (the music still plays).
-- The friends' zips: `cmui_package\make_cm25_zip.py` and `make_cm2627_zip.py` put cmui's four
-  tracks in `Data\cmui_music`, taken from `ui\music\out` (never the game folder's own
+- The friends' zips: `cmui_package\make_cm25_zip.py` and `make_cm2627_zip.py` put cmui's tracks
+  and CREDITS.txt in `Data\cmui_music`, taken from `ui\music\tracks` (never the game folder's own
   `Data\cmui_music`, where the owner's own songs may be). An update zip carries them as extras:
-  `make_dll_zip.py <dll> <readme> "...\01 Kick Off.wav=Data/cmui_music/01 Kick Off.wav" ...`.
+  `make_dll_zip.py <dll> <readme> "...\01 The Crown.mp3=Data/cmui_music/01 The Crown.mp3" ...`.
 - The music plays on while the game is in the background or in a match (pause is one click).

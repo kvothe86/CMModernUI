@@ -239,7 +239,7 @@ Rules of thumb:
 | 37 | `saved_lineups` | `SAVED_LINEUPS` | `lineups.rs` |
 | 38 | `flat_buttons` | `FLAT_BUTTONS` | `lib.rs` `panel` (+ `rounded`, `FLAT_CELL`), `news.rs` `flat_tabs` |
 | 39 | `pl_report` | `PL_REPORT` | `finreport.rs` (+ `accountants_notes.tsv`) |
-| 41 | `music` | `MUSIC` | `music.rs` (+ `Data\cmui_music\*.wav` from `music\make_music.py`) |
+| 41 | `music` | `MUSIC` | `music.rs` (+ `Data\cmui_music\*.mp3` from `music\tracks`) |
 
 Club logos from footylogos.com: `footy.py` (`index`, `logos`) matches the site's logo list to a game
 folder's database and downloads only what matches (a polite 0.15 s per file); the pictures never go

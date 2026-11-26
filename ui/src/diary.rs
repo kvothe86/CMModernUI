@@ -228,6 +228,10 @@ pub unsafe fn tick() {
     if changed {
         save();
     }
+    // the staff's monthly reports, after this month's scouting assignment (`staff.rs`)
+    if on(NEWS) {
+        crate::staff::tick(year, month);
+    }
 }
 
 /// The stadium works under way (`stadium.rs`): club seed, kind, amount, the day they are done
