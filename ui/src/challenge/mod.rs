@@ -717,6 +717,18 @@ pub(crate) unsafe fn game_number() -> Option<u32> {
     Some(game_key(name, j.0, j.1, j.2))
 }
 
+/// Every human manager's game number, the first manager's (`game_number`) first. A network game's
+/// human list changes as managers join (a friend's manager counted human only once he was in), so
+/// the first manager, and with him the number, can change mid-game (user 2026-11-26).
+pub(crate) unsafe fn game_numbers() -> Vec<u32> {
+    let base = rd::<usize>(CLUB_TABLE);
+    humans()
+        .iter()
+        .rev()
+        .filter_map(|(s, name)| facts_of(*s).1.first().map(|j| game_key(name, j.year, j.day, j.club - base)))
+        .collect()
+}
+
 /// The human managers: staff record, name.
 pub(crate) unsafe fn human_list() -> Vec<(usize, String)> {
     humans()

@@ -172,9 +172,14 @@ pub unsafe fn tick() {
     if today == DAY || today.1 < 1900 || rd::<i32>(STAFF_COUNT) <= 0 {
         return;
     }
-    let Some(game) = challenge::game_number() else { return };
+    // (the file stays while its number is still one of the game's humans', else one of theirs that
+    // is on disk, else the first manager's: in a network game the human list changes as managers
+    // join, and a switch of file forgot the works ordered, so a club shop was paid twice, user
+    // 2026-11-26)
+    let games = challenge::game_numbers();
+    let name = |g: &u32| format!("cmui_diary_{g:08x}.tsv");
+    let Some(file) = games.iter().map(name).find(|f| *f == FILE).or_else(|| games.iter().map(name).find(|f| std::path::Path::new(f).exists())).or_else(|| games.first().map(name)) else { return };
     DAY = today;
-    let file = format!("cmui_diary_{game:08x}.tsv");
     if file != FILE {
         let text = std::fs::read_to_string(&file).unwrap_or_default();
         BALANCES = parse(&text);

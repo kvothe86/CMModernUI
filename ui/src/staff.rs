@@ -66,6 +66,12 @@ pub unsafe fn button(item: usize, manager: usize, label: *mut u8, size: i32, scr
 
 /// The Full Report button's handler (the game passes the item's keys: not needed).
 unsafe extern "C" fn full_report(_a: usize, _b: usize) {
+    // (the host running a client's click, its screen channel > 0 as in `export::open`: the client
+    // opens its own page, `client_full_report`; here it opened over the host's screen, user
+    // 2026-11-26)
+    if !remote::CLIENT && remote::network_game() && rd::<i16>(SCREEN_MANAGER + 0x382a) > 0 {
+        return;
+    }
     match SHOWN {
         Some((0, club)) => finreport::open_medical(club),
         Some((1, club)) => finreport::open_youth(club),

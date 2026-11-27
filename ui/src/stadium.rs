@@ -71,6 +71,16 @@ fn new_room(old_room: i32, places: i32) -> i32 {
     level.max(places * 5 / 4).min(MOST).max(places)
 }
 
+/// The room to grow the page works with: the database's (+0x44) where it is above the ground's
+/// places, else a quarter over them, rounded up to 100 (night test 2026-11-26: 4,680 of 7,673
+/// grounds in the 26/27 database have 0 and 234 less than they hold, FC United 525 for 4,400,
+/// so most clubs could add nothing and were offered only a new stadium).
+fn room_of(capacity: i32, room: i32) -> i32 {
+    // (equal is full: a ground built up to its room must not get a new one, night test 2026-11-27:
+    // 5,500 of 5,500 read room 6,900)
+    if room >= capacity { room } else { (capacity * 5 / 4 + 99) / 100 * 100 }
+}
+
 /// A work's price in the game's units and how many days it takes (`amount` places for 1..3).
 pub fn price(kind: u8, amount: i32) -> (i64, i32) {
     let blocks = (amount / 1000 + 1) as i64;
@@ -366,12 +376,19 @@ pub unsafe fn remote(club: usize, kind: u8, amount: i32, own: bool, name: &[u8])
 unsafe fn ground(club: usize, seed: usize, s: usize, said: String) -> Option<Ground> {
     let money = finreport::money_now();
     let now = today();
+    // (a room worked out by `room_of` goes into the record at once, so it stays put: worked out
+    // again after each extension it grew with the ground, 5,500 -> 6,800 after 1,000 places,
+    // night test 2026-11-27; the save keeps it)
+    let room = room_of(rd::<i32>(s + 0x3c), rd::<i32>(s + 0x44));
+    if room != rd::<i32>(s + 0x44) && !remote::CLIENT {
+        ((s + 0x44) as *mut i32).write_unaligned(room);
+    }
     Some(Ground {
         club: latin1(&game_text(club + 4, 51)).into_owned(),
         name: latin1(&game_text(s + 4, 51)).into_owned(),
         capacity: rd::<i32>(s + 0x3c),
         seats: rd::<i32>(s + 0x40),
-        room: rd::<i32>(s + 0x44),
+        room,
         roof: rd::<u8>(s + 0x4c) != 0,
         heating: rd::<u8>(s + 0x4d) != 0,
         average: rd::<i32>(club + 0x73),
@@ -1119,7 +1136,11 @@ unsafe fn rendered(r: (i32, i32, i32, i32), g: &Ground, f2: u32) -> bool {
     let labels: Vec<(usize, i32)> = if s.amateur {
         vec![(1, g.seats), (2, g.capacity - g.seats)].into_iter().filter(|l| l.1 > 0).collect()
     } else {
-        [(1, 0.35f32), (2, 0.35), (3, 0.15), (4, 0.15)].map(|(k, share)| (k, (g.capacity as f32 * share / 100.0).round() as i32 * 100)).to_vec()
+        // (the ends rounded to 100, the long sides share the rest: each rounded alone, 5,500
+        // read 1,900 + 1,900 + 800 + 800, night test 2026-11-26)
+        let end = (g.capacity as f32 * 0.15 / 100.0).round() as i32 * 100;
+        let side = ((g.capacity - 2 * end) as f32 / 200.0).round() as i32 * 100;
+        vec![(1, side), (2, g.capacity - 2 * end - side), (3, end), (4, end)]
     };
     for (k, places) in labels {
         // (toward the front rows: on the roof they covered the club's name, night 11)
@@ -2302,6 +2323,7 @@ mod tests {
     fn mowing_patterns_lie_on_the_pitch() {
         // a frame where 9.15 m is 20 px along (x) and 10 px across, tilted: pitch metres come back
         let mut pts = [(0, 0); 8];
+        assert_eq!((room_of(4_400, 525), room_of(4_400, 0), room_of(84_994, 85_000), room_of(32_050, 50_000), room_of(5_500, 5_500)), (5_500, 5_500, 85_000, 50_000, 5_500));
         pts[0] = (500, 400);
         pts[6] = (520, 404);
         pts[7] = (497, 410);
