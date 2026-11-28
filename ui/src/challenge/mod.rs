@@ -34,6 +34,20 @@ pub(crate) unsafe fn league_table(club: usize) -> Option<(i32, Vec<(usize, [i32;
 pub(crate) unsafe fn league_table_of(comp: usize) -> Option<(i32, Vec<(usize, [i32; 7])>)> {
     track::league_table_of(comp)
 }
+/// A running league's League object (+0x1c the division above's id, -1 for a top flight; +0x20
+/// below; +0xbe promoted, +0xbf promotion play-offs, +0xc0 relegation play-offs, +0xc1 relegated,
+/// as signed bytes), 0 for none.
+pub(crate) unsafe fn league_object(comp: usize) -> usize {
+    track::league_object(comp)
+}
+/// A competition's record by its id (the first dword), 0 for none.
+pub(crate) unsafe fn comp_by_id(id: i32) -> usize {
+    let (comps, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));
+    if id < 0 || !readable(comps, 4) {
+        return 0;
+    }
+    (0..count.clamp(0, 4000) as usize).map(|k| comps + k * COMP_SIZE).find(|&c| readable(c, COMP_SIZE) && rd::<i32>(c) == id).unwrap_or(0)
+}
 pub(crate) unsafe fn squad_of(club: usize) -> Vec<usize> {
     track::squad(club)
 }

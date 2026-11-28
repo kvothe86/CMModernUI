@@ -7583,7 +7583,7 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b')' => finreport::medical_remote(arg(0)),
         b'+' => finreport::youth_remote(arg(0)),
         b'-' => finreport::scouting_remote(arg(0)),
-        b'*' => Some(teletext::page_text(channel.max(0) as usize, arg(0) as u16, arg(1))),
+        b'*' => Some(teletext::page_text(channel.max(0) as usize, arg(0) as u16, arg(1), arg(2))),
         // a client's stadium: its page, after an order of its own manager's club only
         b'!' => {
             let manager = rd::<usize>(CHANNEL_MANAGER + 0x300 * channel.max(0) as usize);
