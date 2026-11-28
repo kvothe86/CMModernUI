@@ -37,7 +37,7 @@ FEATURES = [
     ('assistant_pick', 'Assistant Pick', 'An Assistant button on the squad screen: best team, most fit team, squad rotation or clear team, with captain and set piece takers, as the assistant manager judges the players.'),
     ('team_report', 'Team Report', "A Team report item in the squad screen's Assistant menu (needs Assistant Pick): the assistant's best eleven and best backup eleven on their own screen. The selection is not changed."),
     ('honours', 'Honours', "A club's Honours list with a cup in gold, silver or bronze and the number of times after each place (needs Stats Table)."),
-    ('export_button', 'Export Button', 'The Print dropdown of club and competition screens is called Export; on club screens it stands clear of the crest and always writes a file.'),
+    ('export_button', 'Dashboard Button', 'The Print dropdown of club and competition screens becomes Dashboard: an in-game page of club or league stats (charts, form, results, top players) instead of the printout.'),
     ('injury_history', 'Injury History', "A player's last injuries and bans on Injuries & Bans."),
     ('transfer_history', 'Transfer History', "A player's moves since the game began on the Transfer tab."),
     ('compare_report', 'Compare Report', "A line from the assistant and two coaches on who is better under the pitches of Compare Players (needs Compare Screen)."),

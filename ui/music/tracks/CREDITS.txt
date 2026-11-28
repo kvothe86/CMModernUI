@@ -1,0 +1,9 @@
+cmui menu music (2026-11-25)
+
+Eight original orchestral pieces composed for cmui (no existing melodies quoted):
+01 Kick Off, 02 Matchday Anthem, 03 Deadline Day, 04 Cup Run, 05 Under the Floodlights,
+06 Open-Top Bus, 07 Academy Dreams, 08 Final Whistle.
+
+Rendered with the Sonatina Symphonic Orchestra sample library by Mattias Westlund,
+licensed under Creative Commons Sampling Plus 1.0 (sampling into new works is allowed).
+Source: ui\music\src (fm.py composes and renders; python fm.py all).

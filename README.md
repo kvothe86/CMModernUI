@@ -63,6 +63,27 @@ answers). Without a key the button is not there. Each answer is one request bill
 opponent as your scout sees them, the texts of your last match screen and of the screen you came
 from. Single player and network hosts; not yet on a network client.
 
+## Dashboard
+
+Part of cmui (switch `export_button`): the old Print dropdown of club and competition screens is a
+**Dashboard** button that opens a stats page inside the game, in cmui's dark look. What it shows
+depends on where you press it:
+
+- **Club**: league position and its move, points, goal difference, form, bank balance; a form and
+  points chart, the team against the league average, recent results, goals by month, top players.
+- **League**: goals per game, home / draw / away wins, a title race chart (top or bottom five),
+  match trends, a form guide, goals by month, top scorers.
+- **Cups and international competitions** (domestic cups, continental cups, the World Cup, the
+  qualifying sections, the 26/27 Nations League): the stage now, the group tables (the old group
+  stages, or the 26/27 Champions League's league phase as one table), results by round, goals per
+  round, team leaders, the winner once the final is played. Worked out from the fixtures, so it
+  fits both the original database and 26/27.
+- **National team**: its last two years of matches, competitions and friendlies apart, and the
+  squad's caps and international goals.
+
+Hover a chart for each match or round, pick what a card shows with its buttons, click a club or
+the league to open its dashboard (Back returns), click a player for his profile.
+
 ## Patch your game
 
 Nothing here needs building: both add-ons are ready to use from the folders above.

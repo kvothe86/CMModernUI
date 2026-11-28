@@ -55,8 +55,7 @@ mod cheesecorner;
 mod staff;
 mod natpool;
 mod lineups;
-mod export;
-mod dash;
+mod dashboard;
 
 /// Whether `len` bytes at `addr` are committed, readable memory of this process.
 fn mapped(addr: usize, len: usize) -> bool {
@@ -1629,6 +1628,10 @@ impl Drop for Timed {
 extern "C" fn text_box(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, font: u32, colour: u32, text: *const i8, caret: i32) {
     let start = std::time::Instant::now();
     text_box_hooked(x1, y1, x2, y2, flags, font, colour, text, caret);
+    // the Dashboard button's label (its box is the button's): where a click opens the page
+    if on(EXPORT_BUTTON) && !text.is_null() && unsafe { std::ffi::CStr::from_ptr(text).to_bytes().trim_ascii() == EXPORT_LABEL } && y1 < screen().1 / 5 {
+        unsafe { dashboard::note_button(x1, y1, x2, y2) };
+    }
     #[cfg(cmui_local)]
     if !text.is_null() {
         unsafe { local::after_text(x1, y1, x2, y2, font, std::ffi::CStr::from_ptr(text).to_bytes()) };
@@ -2246,7 +2249,7 @@ fn text_box_hooked(x1: i32, y1: i32, x2: i32, y2: i32, flags: u32, mut font: u32
         game::<extern "C" fn(i32, i32, i32, i32, u32, u32, u32, *const i8, i32)>(TEXT_BOX_ORIG)(x1, y1 - lift, x2, y2 - lift, flags, font, colour, text, caret);
         if !in_title && x1 > (t.0 + t.2) / 2 && x2 <= t.2 && y1 >= t.1 && y2 <= (t.1 + t.3) / 2 && (text.is_null() || std::ffi::CStr::from_ptr(text).to_bytes().trim_ascii() != EXPORT_LABEL) {
             // a dropdown in the bar's right half (Print, Action): the right crest stays left of it
-            // (Export stands clear of it; the upper half only: the first rows of an open menu
+            // (Dashboard stands clear of it; the upper half only: the first rows of an open menu
             // are in the bar too, "Squad", "Stats")
             TITLE_RIGHT = TITLE_RIGHT.min(x1);
         }
@@ -3256,6 +3259,16 @@ extern "thiscall" fn poll_input(display: usize) -> i16 {
         // the season review card (over everything while it is open, on 1 July)
         if on(SEASON_REVIEW) {
             if let Some(redraw) = season::input(mx, my, released) {
+                if redraw {
+                    game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
+                }
+                script();
+                return -1;
+            }
+        }
+        // the dashboard (the club and competition screens' Dashboard button, then the page)
+        if on(EXPORT_BUTTON) {
+            if let Some(redraw) = dashboard::input(mx, my, released) {
                 if redraw {
                     game::<extern "thiscall" fn(usize, i16, i16, i16, i16) -> i32>(DRAW_SCREEN)(display, -1, -1, -1, -1);
                 }
@@ -4536,7 +4549,6 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
             assistant::flip(full_frame);
         }
         news::frame_end(FULL_FRAME);
-        export::client_tick();
         if on(STATS_TABLE) {
             comp::flip(FULL_FRAME);
         }
@@ -4629,6 +4641,9 @@ fn flip_hooked(left: i32, top: i32, right: i32, bottom: i32) {
         }
         if on(STADIUM) {
             stadium::flip();
+        }
+        if on(EXPORT_BUTTON) {
+            dashboard::flip(full_frame);
         }
         if on(MUSIC) {
             music::flip(full_frame);
@@ -6749,7 +6764,8 @@ const CLUB_INPUT: usize = 0x4671f0; // the club screen's input handler (cdecl, s
 const SET_SCREEN_PARAM: usize = 0x7ff270; // ScreenManager::set_screen_param(this, index, value, 0)
 const SQUAD_ABILITY_BIT: usize = 0x2000;
 static mut CLUB_INPUT_ORIG: usize = 0;
-static SQUAD_ABILITY_TEXT: &[u8] = b"  Ability\0";
+// (no leading spaces: the squad popup's own items have none, user 2026-11-28)
+static SQUAD_ABILITY_TEXT: &[u8] = b"Ability\0";
 /// The squad list shows the Ability view (read at the club title, kept per screen).
 static mut SQUAD_ABILITY: bool = false;
 
@@ -6924,6 +6940,11 @@ extern "C" fn club_input(widget: i32) -> i32 {
     unsafe {
         if on(ASSISTANT_PICK) && assistant::run_pending(false) {
             return -11; // build the screen again with the assistant's selection
+        }
+        // a player's name clicked on the dashboard: his profile, as the news screen opens one
+        if let Some(staff) = dashboard::take_person() {
+            game::<extern "C" fn(usize, i32, i32, i32, i32)>(OPEN_PROFILE)(staff, 1, 1, 0, 0);
+            return -4;
         }
         let w = widget as i16;
         if w >= 0 && on(SEARCH_ABILITY) {
@@ -7508,7 +7529,8 @@ unsafe fn host_answer(channel: i16, key: &[u8]) -> Option<Vec<u8>> {
         b'h' => valid_staff(staff).then(||scout::hidden_score(staff).map_or(Vec::new(), |v| format!("{v:.1}").into_bytes())),
         b'M' => compare_players(&key[1..]).map(|(a, b)| [le(a), le(b)].concat()),
         b'G' => staff_by_row_name(&key[1..]).map(le),
-        b'e' | b'E' => export::host_key(channel, key),
+        // a client's dashboard (the screen's parameter 0: a club or a competition)
+        b'd' => dashboard::remote(arg(0)),
         // a story's crest from its links (empty: none)
         b'Y' => {
             let text = &key[1..];
@@ -7832,25 +7854,24 @@ fn status_badges() {
     assert!(status_badge(b"DC").is_none() && status_badge(b"SB1").is_none());
 }
 
-/// The Print dropdown of the club screens as Export (switch `export_button`).
-const EXPORT_LABEL: &[u8] = b"Export";
+/// The Print dropdown of the club and competition screens as Dashboard (switch `export_button`).
+const EXPORT_LABEL: &[u8] = b"Dashboard";
 /// (at, what is there, what goes there): the label's pointer in the club and competition screens,
-/// the club screen's button left of the crest's place in 800x600 design coordinates (was
-/// 710..785; the button keeps its height), and the printer choice in club_screen_input never
-/// taken, so the file is all there is.
+/// and the club screen's button left of the crest's place in 800x600 design coordinates (was
+/// 710..785; the button keeps its height). A click on it never reaches the game (no dropdown, no
+/// printout): `dashboard::input` takes it and opens the page.
 unsafe fn export_button() {
-    static LABEL: [u8; 7] = *b"Export\0";
+    static LABEL: [u8; 10] = *b"Dashboard\0";
     let label = (LABEL.as_ptr() as u32).to_le_bytes();
-    let patches: [(usize, &[u8], &[u8]); 5] = [
+    let patches: [(usize, &[u8], &[u8]); 4] = [
         (0x45641c, &[0xf4, 0xe5, 0x98, 0x00], &label),
         (0x490227, &[0xf4, 0xe5, 0x98, 0x00], &label),
         (0x456454, &[0x11, 0x03, 0x00, 0x00], &705u32.to_le_bytes()),
-        (0x45645b, &[0xc6, 0x02, 0x00, 0x00], &633u32.to_le_bytes()),
-        (0x4672db, &[0x74], &[0xeb]),
+        (0x45645b, &[0xc6, 0x02, 0x00, 0x00], &623u32.to_le_bytes()),
     ];
     for (at, old, new) in patches {
         if std::slice::from_raw_parts(at as *const u8, old.len()) != old {
-            log(&format!("{at:#x}: not the 3.9.68 code, Export left alone there"));
+            log(&format!("{at:#x}: not the 3.9.68 code, Dashboard left alone there"));
             continue;
         }
         let mut was = 0;
@@ -7858,11 +7879,8 @@ unsafe fn export_button() {
         std::ptr::copy_nonoverlapping(new.as_ptr(), at as *mut u8, new.len());
         VirtualProtect(at as *mut u8, new.len(), was, &mut was);
     }
-    // the printout to a file, then as an HTML dashboard (`export.rs`): the club screen's call and
-    // the competition screen's (the printer calls 0x4675f5 / 0x46760a / 0x496863 left alone)
-    patch_call(0x4672f0, 8, 0x7d4460, export::club as usize);
-    patch_call(0x496650, 9, 0x7d7c80, export::comp as usize);
 }
+
 
 /// Sends `func` to `hook` when it starts with `moved` (position-independent instructions) or
 /// with another mod's jump (cmfix hooks some of the same functions); returns a stub that runs
@@ -8156,8 +8174,6 @@ extern "system" fn DllMain(module: usize, reason: u32, _reserved: usize) -> i32 
         });
         // (a thread: no message box under the loader lock, and the game starts on behind it)
         std::thread::spawn(|| unsafe { warn_not_portable() });
-        // Save Printout writes into <game folder>\print and fopen does not make the folder
-        let _ = std::fs::create_dir("print");
         unsafe {
             load_features();
             client_rects_as_sent();

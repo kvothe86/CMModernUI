@@ -1302,7 +1302,7 @@ const RED: [u8; 3] = [0xe0, 0x58, 0x50];
 const WORKS: [u8; 3] = [0xe6, 0x86, 0x18];
 
 /// A rounded box from top to bottom colour with a one pixel edge, in one pass.
-unsafe fn gradient(r: (i32, i32, i32, i32), top: [u8; 3], bottom: [u8; 3], edge: [u8; 3], radius: i32) {
+pub(crate) unsafe fn gradient(r: (i32, i32, i32, i32), top: [u8; 3], bottom: [u8; 3], edge: [u8; 3], radius: i32) {
     let (w, h) = (r.2 - r.0, r.3 - r.1);
     if w <= 2 * radius || h <= 2 * radius {
         return;
@@ -1434,7 +1434,7 @@ fn span(days: i32) -> String {
 
 /// The largest of `fonts` (largest first) that fits `s` in `width`; the smallest when none does
 /// (800x600: the tiles' words ran past their edges, night 11).
-unsafe fn fit(fonts: &[u32], s: &[u8], width: i32) -> u32 {
+pub(crate) unsafe fn fit(fonts: &[u32], s: &[u8], width: i32) -> u32 {
     fonts.iter().copied().find(|&f| text_width(f, s) <= width).unwrap_or(fonts[fonts.len() - 1])
 }
 

@@ -175,6 +175,34 @@ pub unsafe fn fixtures(club: i32, (start_day, start_year): (i32, i32), (day, yea
     out
 }
 
+/// Every fixture of a competition (its id) between two dates, the game's 79 bytes each:
+/// find_fixtures with no team (-1) and the competition (0x5acbe0 then looks under the
+/// competition's own kind only). The cup dashboard reads +0x2c the edition's year, +0x42 the
+/// stage (a group, the league phase; 255 the rounds of no group), +0x34 the round or matchday.
+pub unsafe fn comp_fixtures(comp: i32, (start_day, start_year): (i32, i32), (day, year): (i32, i32)) -> Vec<[u8; 0x4f]> {
+    let fm = rd::<usize>(FIXTURE_MANAGER);
+    let mut out = Vec::new();
+    if comp < 0 || remote::CLIENT || !readable(fm, 16) || !(1900..2200).contains(&year) || !(1900..2200).contains(&start_year) {
+        return out;
+    }
+    let mut list = [0u8; 64];
+    let l = list.as_mut_ptr() as usize;
+    game::<extern "thiscall" fn(usize)>(LIST_NEW)(l);
+    game::<extern "thiscall" fn(usize, i32, i32, u32, u32, i32, usize, i32, i32, i32) -> i32>(FIND_FIXTURES)(fm, start_day, start_year, day as u32, year as u32, -1, l, comp, -2, -1);
+    ((l + 10) as *mut u32).write_unaligned(((l + 6) as *const u32).read_unaligned());
+    let prev = game::<extern "thiscall" fn(usize) -> usize>(GET_PREV);
+    while let Some(f) = Some(prev(l)).filter(|&f| f != 0) {
+        if out.len() > 5000 || !readable(f, 0x4f) {
+            break;
+        }
+        if rd::<i32>(f) == comp {
+            out.push(std::ptr::read_unaligned(f as *const [u8; 0x4f]));
+        }
+    }
+    game::<extern "thiscall" fn(usize)>(LIST_CLEAR)(l);
+    out
+}
+
 /// A competition's name by its id (the fixture's +0).
 pub unsafe fn comp_name(comp: i32) -> Vec<u8> {
     let (table, count) = (rd::<usize>(COMPS), rd::<i32>(COMP_COUNT));

@@ -31,6 +31,9 @@ pub(crate) unsafe fn league_table(club: usize) -> Option<(i32, Vec<(usize, [i32;
 
 /// A club's squad (staff), and a season stat of a player (row 6 all senior club games: field 2
 /// goals, 5 assists, 1 appearances, 0x11 average rating).
+pub(crate) unsafe fn league_table_of(comp: usize) -> Option<(i32, Vec<(usize, [i32; 7])>)> {
+    track::league_table_of(comp)
+}
 pub(crate) unsafe fn squad_of(club: usize) -> Vec<usize> {
     track::squad(club)
 }

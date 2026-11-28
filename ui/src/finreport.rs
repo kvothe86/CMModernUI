@@ -495,7 +495,7 @@ pub unsafe fn plan_remote(club: usize) -> Option<Vec<u8>> {
         p.rows.push(PlanRow {
             name: latin1(&staff_name(s)).replace('\t', " "),
             pos: latin1(&positions_text(s)).into_owned(),
-            age: dash::age_of(s, day, year),
+            age: dashboard::age_of(s, day, year),
             wage: rd::<i32>(c + 0xc) as i64,
             wage_text: money_texts(s).0,
             end_month: m as i32,
@@ -656,7 +656,7 @@ pub unsafe fn medical_remote(club: usize) -> Option<Vec<u8>> {
         m.rows.push(MedRow {
             name: latin1(&staff_name(s)).replace('\t', " "),
             pos: latin1(&positions_text(s)).into_owned(),
-            age: dash::age_of(s, day, year),
+            age: dashboard::age_of(s, day, year),
             condition: (rd::<i16>(rec + 8) as i32 / 100).clamp(0, 100),
             load: rd::<i16>(rec + 0xc) as i32,
             jaded: rd::<u8>(rec + 0x1e) as i32,
@@ -857,7 +857,7 @@ pub unsafe fn youth_remote(club: usize) -> Option<Vec<u8>> {
     let mut y = Youth { club: latin1(&game_text(club + 4, 51)).into_owned(), date: date_text(day, year), coach: coach.0, judging: coach.1, youngsters: coach.2, rows: Vec::new() };
     for s in challenge::squad_of(club) {
         let player = rd::<usize>(s + 0x61);
-        let age = dash::age_of(s, day, year);
+        let age = dashboard::age_of(s, day, year);
         let Some((ca, pa)) = ca_pa(player).filter(|_| age <= 19 && plays_for(s, club)) else { continue };
         let off = (eye(coach.3, rd::<i32>(s)) * (20 - y.judging.clamp(1, 20)) as f64 * 4.0) as i32;
         let (_, m, jy) = day_month(s + 0x3e);
@@ -913,7 +913,7 @@ pub unsafe fn scouting_remote(club: usize) -> Option<Vec<u8>> {
                 diary::KEY_ATTRIBUTES[a.2.min(5)].0,
                 latin1(&staff_name(s)).replace('\t', " "),
                 latin1(&positions_text(s)),
-                dash::age_of(s, day, year),
+                dashboard::age_of(s, day, year),
                 club_name.replace('\t', " "),
                 value,
                 halves
@@ -1238,7 +1238,7 @@ unsafe fn button_rect() -> Option<(i32, i32, i32, i32, u32)> {
 /// One of cmui's own pages is over the screen: the Finances tab is still the game's under it, and
 /// the button stood on CM Challenge's page (user 2026-11-22).
 pub(crate) fn covered() -> bool {
-    challenge::page_open() || coach::page_open() || season::page_open() || natpool::page_open() || teletext::page_open() || stadium::page_open()
+    challenge::page_open() || coach::page_open() || season::page_open() || natpool::page_open() || teletext::page_open() || stadium::page_open() || dashboard::page_open()
 }
 
 /// The flip pass: the button while the money views show, the report while it is open.

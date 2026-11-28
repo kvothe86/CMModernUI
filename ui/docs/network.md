@@ -231,7 +231,7 @@ SP = single player. "Seen" = in a shot of a test game. Night 8 pairs: E:\CM0102_
 | Coach (31) | yes | yes | seen night 8 (Milan's pre-match briefing); the answer shows once the mouse moves |
 | Weather icons (32) | yes | seen | seen |
 | Form strip in the club header (33) | yes | on since 2026-11-17 (user; off from 2026-11-07) | host's letters, key 'f' (built, not seen yet) |
-| Export / dashboard (19) | opens | the host's own (channel 0) opens there; a client's is kept for it | fetched (keys 'e' / 'E', 12,000-byte slices) into the client's print\ and opened (built 2026-11-17, not seen yet) |
+| Dashboard (19) | opens | built from memory | the page's lines asked from the host (key 'd', the screen's parameter 0) and drawn by the client (built 2026-11-28, not seen yet) |
 | Match day card (34) | v2, seen night 8 | v2, seen | v2, seen night 8 (key 'm': the host works the card out) |
 | Season review card (35) | seen night 8 | seen (Dortmund) | seen night 8 (Milan; key 's'; the client keeps its own shown season) |
 | National pool (36) | yes | yes | seen night 8 (Ivory Coast; + puts him on the client's own Short List; key 'n') |

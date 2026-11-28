@@ -50,7 +50,7 @@ unsafe fn assign(club: usize, seed: usize, year: i32, month: i32) -> Option<(usi
         if here == club || humans.contains(&here) || before.contains(&rd::<i32>(s)) {
             continue;
         }
-        let age = dash::age_of(s, day, today_year);
+        let age = dashboard::age_of(s, day, today_year);
         let value = ((s + 0x52) as *const i32).read_unaligned() as i64;
         if !(17..=31).contains(&age) || value > limit {
             continue;

@@ -889,7 +889,11 @@ pub(crate) unsafe fn league_place(club: usize) -> Option<(i32, i32)> {
 /// dword) and every row's club with played, won, drawn, lost, for, against, points, in the
 /// table's order (points, goal difference, goals for).
 pub(crate) unsafe fn league_table(club: usize) -> Option<(i32, Vec<(usize, [i32; 7])>)> {
-    let comp = rd::<usize>(club + 0x57);
+    league_table_of(rd::<usize>(club + 0x57))
+}
+
+/// The same by the competition's record (a club's +0x57; the dashboard of a competition screen).
+pub(crate) unsafe fn league_table_of(comp: usize) -> Option<(i32, Vec<(usize, [i32; 7])>)> {
     let league = league_object(comp);
     if league == 0 {
         return None;
