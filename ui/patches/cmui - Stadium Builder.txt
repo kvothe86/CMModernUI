@@ -1,0 +1,2 @@
+A Stadium button beside P&L report: the ground drawn, and works the manager orders himself (seats, standing places, a roof, under-soil heating) at the game's own prices, paid at once and built in weeks. Changes the game. Needs P&L Report.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: stadium=0 switches it off again.

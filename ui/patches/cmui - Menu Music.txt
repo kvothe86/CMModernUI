@@ -1,0 +1,2 @@
+orchestral menu music (needs the MP3s in Data\cmui_music) with a small player at the foot of the menu bar: the track's name, play / pause, next, mute and a volume bar, kept in cmui.ini.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: music=0 switches it off again.

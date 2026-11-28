@@ -7,4 +7,11 @@ fn main() {
     if std::path::Path::new("src/local/mod.rs").exists() && std::env::var_os("CMUI_PUBLIC").is_none() {
         println!("cargo:rustc-cfg=cmui_local");
     }
+    // CMUI_GENERIC_NAMES=1: the local additions keep made-up names for the people in them (a build
+    // that is published)
+    println!("cargo::rustc-check-cfg=cfg(cmui_generic_names)");
+    println!("cargo:rerun-if-env-changed=CMUI_GENERIC_NAMES");
+    if std::env::var_os("CMUI_GENERIC_NAMES").is_some() {
+        println!("cargo:rustc-cfg=cmui_generic_names");
+    }
 }

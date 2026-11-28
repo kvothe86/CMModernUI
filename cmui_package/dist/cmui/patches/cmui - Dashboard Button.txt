@@ -1,0 +1,2 @@
+The Print dropdown of club and competition screens becomes Dashboard: an in-game page of club or league stats (charts, form, results, top players) instead of the printout.
+Needs the "cmui Loader" patch and cmui.dll. cmui.ini: export_button=0 switches it off again.

@@ -1,0 +1,3 @@
+# cmui feature switch stadium (needs the cmui Loader patch)
+EXPANDEXE
+006E5048: 00 01
